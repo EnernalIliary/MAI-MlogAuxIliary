@@ -357,6 +357,11 @@ def main():
     "print('MAIWS2:' + maiWorkspace2Probe());",
     # v0.16.0 B1: 存蓝图在无头环境（Vars.schematics 为 null）必须先守住，不能抛。
     "print('MAIBP:' + maiBlueprintSaveProbe(JSON.stringify({x1:10, y1:10, x2:20, y2:20})));",
+    # v0.16.1 B2/B4: 签名 payload v2 的 meta 要能在游戏里解出来（Java Base64 + zlib）。
+    "print(maiSigMetaProbe('aigenerated:MAI:5f1371d29749:enjaq1YqU7Iy0lFKVrKKjjbUMdRRUlZ4NnXD8_n7n8_frBQbq6OUq2RVrVRerGQFJAyVdJTyEnNTgZwXk-c-nb3v-ZRNQKGCovzcghKgIFzn-z09z3YvfLKr7emGjU8b5wDVZOUnARUASXOl2loA1_0zJw'));",
+    # 原版「详细」页标题形如 "[[schematic] 名"（arc 用 [[ 转义一个 [）。
+    "print(maiBpTitleProbe('[[schematic] 蓝图甲'));",
+    "print(maiBpChatProbe('蓝图甲'));",
     "print('MAILLM:' + maiLlmProbe());",
     # v0.12.5: the retained selection box + corner badge state machine (no sidecar, no ui)
     "print('MAIJOBBOX0:' + maiJobBox());",
@@ -385,6 +390,7 @@ def main():
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
                               'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIBP:',
+                              'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
@@ -574,6 +580,18 @@ def main():
         problems.append('v0.16.0: save-as-blueprint must guard a null Vars.schematics '
                         '(want MAIBP:probeblueprint:蓝图接口不可用): %r'
                         % [l for l in lines if l.startswith('MAIBP:')][:1])
+    if 'MAISIGMETA:ws=ws1 name=蓝图甲 job=job7 prompt=数矿石' not in joined:
+        problems.append('v0.16.1: the signed payload v2 meta does not decode in-game '
+                        '(want MAISIGMETA:ws=ws1 name=蓝图甲 job=job7 prompt=数矿石): %r'
+                        % [l for l in lines if l.startswith('MAISIGMETA:')][:1])
+    if 'MAIBPTITLE:[蓝图甲]' not in joined:
+        problems.append('v0.16.1: the schematic info title is not parsed '
+                        '(want MAIBPTITLE:[蓝图甲]): %r'
+                        % [l for l in lines if l.startswith('MAIBPTITLE:')][:1])
+    if 'MAIBPCHAT:none' not in joined:
+        problems.append('v0.16.1: reading a blueprint context without a schematic library '
+                        'must return none (want MAIBPCHAT:none): %r'
+                        % [l for l in lines if l.startswith('MAIBPCHAT:')][:1])
     if 'MAIJOBPANEL:ok' not in joined:
         problems.append('v0.13.2: the job view does not show assumptions + cost '
                         '(want MAIJOBPANEL:ok assumptions=2 cost=3): %r'
@@ -1255,6 +1273,50 @@ def main():
                          'v0.16.0: the read-back check after add() is gone')):
         if needle not in code_only:
             problems.append(why)
+    # v0.16.1 B2/B4: 蓝图页入口、「详细」页续聊、签名上下文解码 —— 每一环掉了都等于功能没了。
+    for needle, why in (
+            ('function sigMetaOf(code){',
+             'v0.16.1: the signed-payload meta decoder is gone'),
+            ('Packages.java.util.Base64.getUrlDecoder()',
+             'v0.16.1: the Java base64url decoder is gone (Rhino has no atob)'),
+            ('new Packages.java.util.zip.InflaterInputStream(',
+             'v0.16.1: the zlib branch of the payload decoder is gone'),
+            ('function blueprintCtxOf(name){',
+             'v0.16.1: reading a blueprint context out of its tiles is gone'),
+            ('btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);',
+             'v0.16.1: the blueprint page entry button is gone'),
+            ('info.buttons.button("继续对话", function(){ openBlueprintChat(nm); }).width(120);',
+             'v0.16.1: the schematic info page continue button is gone'),
+            ('mode: "improve", desc: text, links: null, ipt: 2, origin: null,',
+             'v0.16.1: blueprint chat must post an improve job'),
+            ('try{ Vars.schematics.saveChanges(sch); }',
+             'v0.16.1: writing the new code back into the blueprint file is gone'),
+            ('if(after === null || String(after.code) !== String(code)){',
+             'v0.16.1: the read-back check after saveChanges is gone')):
+        if needle not in code_only:
+            problems.append(why)
+    # v0.16.1 B2/B4: 蓝图页入口、「详细」页续聊、签名上下文解码 —— 每一环掉了都等于功能没了。
+    for needle, why in (
+            ('function sigMetaOf(code){',
+             'v0.16.1: the signed-payload meta decoder is gone'),
+            ('Packages.java.util.Base64.getUrlDecoder()',
+             'v0.16.1: the Java base64url decoder is gone (Rhino has no atob)'),
+            ('new Packages.java.util.zip.InflaterInputStream(',
+             'v0.16.1: the zlib branch of the payload decoder is gone'),
+            ('function blueprintCtxOf(name){',
+             'v0.16.1: reading a blueprint context out of its tiles is gone'),
+            ('btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);',
+             'v0.16.1: the blueprint page entry button is gone'),
+            ('info.buttons.button("继续对话", function(){ openBlueprintChat(nm); }).width(120);',
+             'v0.16.1: the schematic info page continue button is gone'),
+            ('mode: "improve", desc: text, links: null, ipt: 2, origin: null,',
+             'v0.16.1: blueprint chat must post an improve job'),
+            ('try{ Vars.schematics.saveChanges(sch); }',
+             'v0.16.1: writing the new code back into the blueprint file is gone'),
+            ('if(after === null || String(after.code) !== String(code)){',
+             'v0.16.1: the read-back check after saveChanges is gone')):
+        if needle not in code_only:
+            problems.append(why)
     for needle, why in (('function sidecarIsZip(', 'v0.14.6: the zip-mod check is gone'),
                         ('function sidecarCopyTree(',
                          'v0.14.6: the zip-mod extraction is gone'),
@@ -1651,7 +1713,8 @@ def main():
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                         'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
-                        'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:')):
+                        'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
+                        'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:')):
             print('  ' + l[:300])
     return 0
 

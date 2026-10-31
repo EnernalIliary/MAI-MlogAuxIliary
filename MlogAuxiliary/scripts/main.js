@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.16.0";
+    var MOD_VERSION = "0.16.1";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -3960,6 +3960,380 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return "asked";
         }
 
+        // ---------------------------------------------------------- B2/B4（v0.16.1）
+        // 蓝图页底栏加一个「MAI 对话」，原版「蓝图 → 详细」页里也挂一个「继续对话」。
+        // 上下文从处理器代码的签名 payload v2 里读回来：token 尾部是
+        // <flag><base64url>，flag 为 z（zlib 压过的 JSON）或 j（原文 JSON）。
+        var BP_TITLE = "";
+        var BP_BTN_ADDED = false;
+        var BP_CHAT = {name: "", code: "", meta: null, jobId: null, jobState: "", newCode: "",
+                       lastWhy: "", pollAt: 0, host: null, dialog: null};
+
+        // 原版「详细」页标题形如 "[[schematic] 蓝图名"（arc 用 [[ 转义一个 [），取最后一段。
+        function blueprintTitleName(txt){
+            var s = String(txt === null || txt === undefined ? "" : txt);
+            var i = s.lastIndexOf("] ");
+            if(i >= 0){ s = s.substring(i + 2); }
+            return trimText(s);
+        }
+
+        // zlib 解压（带 flag 字节的 base64url 已经剥掉）。
+        // 单独一个函数：dn 一个函数里塞 try/catch + while 时 Rhino 的 codegen 会报
+        // "invalid bytecode"，拆开就没事（真机 v160.7 上验过）。
+        function sigInflate(raw){
+            var inf = new Packages.java.util.zip.InflaterInputStream(
+                new Packages.java.io.ByteArrayInputStream(raw, 1, raw.length - 1));
+            var bos = new Packages.java.io.ByteArrayOutputStream();
+            var buf = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.Byte.TYPE, 1024);
+            var n = inf.read(buf);
+            var guard = 0;
+            while(n > 0 && guard < 4096){
+                bos.write(buf, 0, n);
+                n = inf.read(buf);
+                guard++;
+            }
+            return String(bos.toString("UTF-8"));
+        }
+
+        // 从签名 token 里解 meta（只有 payload v2 有），解不出来就回 null。
+        // 这里逐字符扫描而不用正则：字符类里带半角引号（jump 后面那个 "）会让真机
+        // Rhino 的 codegen 报 "invalid bytecode"，v160.7 上实测必现。
+        function sigMetaOf(code){
+            var txt = String(code === null || code === undefined ? "" : code);
+            var head = "aigenerated:";
+            var at = txt.indexOf(head);
+            if(at < 0){ return null; }
+            var p = at + head.length;
+            var author = "";
+            while(p < txt.length && txt.charAt(p) !== ":" && txt.charAt(p) !== "\""){
+                author += txt.charAt(p);
+                p++;
+            }
+            if(p >= txt.length || txt.charAt(p) !== ":"){ return null; }
+            p++;
+            var hex = txt.substring(p, p + 12);
+            if(hex.length < 12){ return null; }
+            p += 12;
+            if(p >= txt.length || txt.charAt(p) !== ":"){ return null; }
+            p++;
+            var enc = "";
+            while(p < txt.length){
+                var c = txt.charAt(p);
+                var okChar = (c >= "A" && c <= "Z") || (c >= "a" && c <= "z")
+                    || (c >= "0" && c <= "9") || c === "-" || c === "_";
+                if(!okChar){ break; }
+                enc += c;
+                p++;
+            }
+            if(enc.length < 2){ return null; }
+            var raw = null;
+            try{ raw = Packages.java.util.Base64.getUrlDecoder().decode(enc); }
+            catch(e0){ raw = null; }
+            if(raw === null || raw.length < 2){ return null; }
+            var flag = String.fromCharCode(Number(raw[0]) & 255);
+            var body = "";
+            if(flag === "z"){
+                try{ body = sigInflate(raw); }
+                catch(e1){ log("sig inflate failed: " + e1); return null; }
+            }else{
+                try{ body = String(new Packages.java.lang.String(raw, 1, raw.length - 1, "UTF-8")); }
+                catch(e2){ body = ""; }
+            }
+            if(body.length === 0){ return null; }
+            var doc = null;
+            try{ doc = JSON.parse(body); }
+            catch(e3){ doc = null; }
+            if(doc === null || doc === undefined){ return null; }
+            if(doc instanceof Array){ return null; }
+            if(Number(doc.v) !== 2){ return null; }
+            var mm = doc.m;
+            if(mm === null || mm === undefined){ return null; }
+            var meta = {ws: "", name: "", prompt: "", job: ""};
+            if(mm.ws !== null && mm.ws !== undefined){ meta.ws = String(mm.ws); }
+            if(mm.name !== null && mm.name !== undefined){ meta.name = String(mm.name); }
+            if(mm.prompt !== null && mm.prompt !== undefined){ meta.prompt = String(mm.prompt); }
+            if(mm.job !== null && mm.job !== undefined){ meta.job = String(mm.job); }
+            return meta;
+        }
+
+        // 在蓝图库里按名字找一张图，并把它里面第一个「带签名的处理器代码」连同上下文取出来。
+        function blueprintCtxOf(name){
+            var out = null;
+            try{
+                if(Vars.schematics === null || Vars.schematics === undefined){ return null; }
+                var all = Vars.schematics.all();
+                if(all === null || all === undefined){ return null; }
+                var n = 0;
+                try{ n = seqSize(all); }catch(e0){ n = 0; }
+                for(var i = 0; i < n; i++){
+                    var sc = null;
+                    try{ sc = all.get(i); }catch(e1){ sc = null; }
+                    if(sc === null || sc === undefined){ continue; }
+                    var nm = "";
+                    try{ nm = String(sc.name()); }catch(e2){ nm = String(sc.name); }
+                    if(nm !== String(name)){ continue; }
+                    var code = "", meta = null, tn = 0;
+                    try{ tn = seqSize(sc.tiles); }catch(e3){ tn = 0; }
+                    for(var k = 0; k < tn; k++){
+                        var tl = null;
+                        try{ tl = sc.tiles.get(k); }catch(e4){ tl = null; }
+                        if(tl === null || tl === undefined || tl.config === null || tl.config === undefined){ continue; }
+                        var txt = String(tl.config);
+                        if(txt.indexOf("aigenerated:") < 0){ continue; }
+                        code = txt;
+                        meta = sigMetaOf(txt);
+                        break;
+                    }
+                    out = {name: nm, code: code, meta: meta, schematic: sc,
+                           width: Number(sc.width || 0), height: Number(sc.height || 0)};
+                    break;
+                }
+            }catch(e5){ log("blueprint ctx failed: " + e5); }
+            return out;
+        }
+
+        function bpMetaLine(meta){
+            if(meta === null){ return "这个蓝图里的处理器代码没有工作区上下文（v0.16.0 之前生成的代码没有）。"; }
+            var s = "工作区：" + (String(meta.ws).length > 0 ? String(meta.ws) : "-")
+                  + " · " + (String(meta.name).length > 0 ? String(meta.name) : "-");
+            if(String(meta.prompt).length > 0){ s += "\n当时的描述：" + String(meta.prompt); }
+            if(String(meta.job).length > 0){ s += "\n作业：" + String(meta.job); }
+            return s;
+        }
+
+        function renderBlueprintChat(){
+            var host = BP_CHAT.host;
+            if(host === null || host === undefined){ return; }
+            try{ host.clear(); }catch(e){ return; }
+            host.add("— 上下文 —").row();
+            host.add(bpMetaLine(BP_CHAT.meta)).row();
+            var prev = String(BP_CHAT.code || "");
+            var lines = prev.split("\n");
+            host.add("— 上一版代码（" + String(lines.length) + " 行）—").row();
+            for(var i = 0; i < lines.length && i < 20; i++){ host.add("    " + lines[i]).row(); }
+            if(lines.length > 20){ host.add("    …").row(); }
+            if(BP_CHAT.jobId !== null){
+                host.add("— 最近一次：作业 " + String(BP_CHAT.jobId) + "（" + String(BP_CHAT.jobState) + "）—").row();
+                if(String(BP_CHAT.lastWhy).length > 0){ host.add("为什么：" + String(BP_CHAT.lastWhy)).row(); }
+                var nc = String(BP_CHAT.newCode || "");
+                if(nc.length > 0){
+                    var nl = nc.split("\n");
+                    for(var j = 0; j < nl.length; j++){ host.add("    " + nl[j]).row(); }
+                }
+            }
+        }
+
+        function blueprintChatSubmit(desc){
+            var text = trimText(String(desc === null || desc === undefined ? "" : desc));
+            if(text.length === 0){ hint("先写一句要改什么"); return "empty"; }
+            ensureSidecar(true);
+            if(SIDE.state === "starting"){ hint("sidecar 正在启动（首次需几秒），稍后再投"); return "starting"; }
+            if(llmState.kind !== "llm" && llmState.kind !== "fake"){
+                if(llmUrl().length === 0 || llmModel().length === 0){
+                    hint("未配置模型：先在「设置 → Mlog辅助 → 大模型」填地址、密钥、模型");
+                    return "no model";
+                }
+                llmAutoSync();
+            }
+            var meta = BP_CHAT.meta;
+            var ws = {
+                id: (meta !== null && String(meta.ws).length > 0) ? String(meta.ws) : ("bp-" + String(BP_CHAT.name)),
+                name: (meta !== null && String(meta.name).length > 0) ? String(meta.name) : String(BP_CHAT.name),
+                notes: "蓝图续聊",
+                prevCode: String(BP_CHAT.code),
+                prevJob: (meta !== null) ? String(meta.job) : "",
+                prevFindings: []
+            };
+            var body = {mode: "improve", desc: text, links: null, ipt: 2, origin: null,
+                        snapshot: {}, workspace: ws};
+            httpJson("POST", "/jobs", JSON.stringify(body), function(code, resp){
+                var res = parse(resp);
+                if(code !== 200 || res === null || res.ok !== true){
+                    BP_CHAT.lastWhy = jobWhy(code, resp, res);
+                    hint("投递失败：" + String(BP_CHAT.lastWhy));
+                    renderBlueprintChat();
+                    return;
+                }
+                BP_CHAT.jobId = String(res.job.id);
+                BP_CHAT.jobState = String(res.job.state);
+                BP_CHAT.newCode = "";
+                BP_CHAT.lastWhy = "";
+                BP_CHAT.pollAt = 0;
+                renderBlueprintChat();
+            });
+            return "posted";
+        }
+
+        function blueprintChatAsk(){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            if(String(BP_CHAT.code).length === 0){ hint("这个蓝图里没有可用的处理器代码，没法接着聊"); return "no code"; }
+            Vars.ui.showTextInput("继续对话", "接着上一版要改什么？", 300, "", function(txt){
+                blueprintChatSubmit(String(txt));
+            });
+            return "asked";
+        }
+
+        function blueprintChatPoll(){
+            if(BP_CHAT.jobId === null || BP_CHAT.host === null){ return; }
+            var now = Date.now();
+            if(now < BP_CHAT.pollAt){ return; }
+            BP_CHAT.pollAt = now + 900;
+            jobGet(String(BP_CHAT.jobId), function(job, err){
+                if(job === null){
+                    BP_CHAT.lastWhy = String(err === null || err === undefined ? "" : err);
+                    renderBlueprintChat();
+                    return;
+                }
+                var st = String(job.state), nc = String(job.code === null || job.code === undefined ? "" : job.code);
+                var changed = (st !== String(BP_CHAT.jobState)) || (nc !== String(BP_CHAT.newCode));
+                BP_CHAT.jobState = st;
+                BP_CHAT.newCode = nc;
+                if(st === "failed"){ BP_CHAT.lastWhy = jobWhyLines(job, 2).join(" / "); }
+                if(changed){ renderBlueprintChat(); }
+            });
+        }
+
+        function blueprintWriteBack(){
+            var code = String(BP_CHAT.newCode || "");
+            if(code.length === 0){ hint("还没有可以写回的代码（先继续对话，等作业完成）"); return "no code"; }
+            var ctx = blueprintCtxOf(BP_CHAT.name);
+            if(ctx === null){ hint("找不到蓝图「" + String(BP_CHAT.name) + "」"); return "no blueprint"; }
+            var sch = ctx.schematic;
+            var file = null;
+            try{ file = sch.file; }catch(e0){ file = null; }
+            if(file === null || file === undefined){ hint("这个蓝图还没落盘，写不回去"); return "no file"; }
+            var tn = 0, i, wrote = false;
+            try{ tn = seqSize(sch.tiles); }catch(e1){ tn = 0; }
+            for(i = 0; i < tn; i++){
+                var tl = null;
+                try{ tl = sch.tiles.get(i); }catch(e2){ tl = null; }
+                if(tl === null || tl === undefined || tl.config === null || tl.config === undefined){ continue; }
+                if(String(tl.config).indexOf("aigenerated:") < 0){ continue; }
+                try{ tl.config = String(code); wrote = true; }
+                catch(e3){ log("write back failed: " + e3); }
+                break;
+            }
+            if(!wrote){ hint("蓝图里没找到可写回的处理器"); return "no logic"; }
+            try{ Vars.schematics.saveChanges(sch); }
+            catch(e4){ log("saveChanges failed: " + e4); return "save failed"; }
+            var after = blueprintCtxOf(BP_CHAT.name);
+            if(after === null || String(after.code) !== String(code)){
+                hint("写回后回读对不上（原版可能没写盘）");
+                return "verify failed";
+            }
+            BP_CHAT.code = String(code);
+            BP_CHAT.meta = after.meta;
+            hint("已写回蓝图「" + String(BP_CHAT.name) + "」");
+            renderBlueprintChat();
+            return "ok";
+        }
+
+        function openBlueprintChat(name){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var ctx = blueprintCtxOf(name);
+            if(ctx === null){ hint("找不到蓝图「" + String(name) + "」"); return "no blueprint"; }
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 蓝图对话 · " + String(ctx.name));
+            d.cont.defaults().pad(4).left();
+            var host = new Packages.arc.scene.ui.layout.Table();
+            try{ d.cont.pane(host).height(360).width(640).row(); }
+            catch(e){ d.cont.add(host).row(); }
+            BP_CHAT.name = String(ctx.name);
+            BP_CHAT.code = String(ctx.code === null || ctx.code === undefined ? "" : ctx.code);
+            BP_CHAT.meta = ctx.meta;
+            BP_CHAT.jobId = null;
+            BP_CHAT.jobState = "";
+            BP_CHAT.newCode = "";
+            BP_CHAT.lastWhy = "";
+            BP_CHAT.pollAt = 0;
+            BP_CHAT.host = host;
+            BP_CHAT.dialog = d;
+            renderBlueprintChat();
+            d.buttons.button("继续对话", function(){ blueprintChatAsk(); }).width(130);
+            d.buttons.button("写回蓝图", function(){ blueprintWriteBack(); }).width(130);
+            d.buttons.button("关闭", function(){ d.hide(); BP_CHAT.host = null; BP_CHAT.dialog = null; }).width(110);
+            d.show();
+            return "opened";
+        }
+
+        function openBlueprintPicker(){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 蓝图对话 v" + MOD_VERSION);
+            d.cont.defaults().pad(4).left();
+            var host = new Packages.arc.scene.ui.layout.Table();
+            try{ d.cont.pane(host).height(340).width(620).row(); }
+            catch(e){ d.cont.add(host).row(); }
+            var rows = blueprintList(48), i;
+            host.add("— 蓝图（" + String(rows.length) + " 个）—").row();
+            if(rows.length === 0){ host.add("（这个环境读不到蓝图库）").row(); }
+            for(i = 0; i < rows.length; i++){
+                (function(nm){
+                    var ctx = blueprintCtxOf(nm);
+                    var tail = (ctx !== null && ctx.meta !== null) ? "  · 带上下文" : "";
+                    host.button(String(nm) + tail, function(){
+                        d.hide();
+                        openBlueprintChat(nm);
+                    }).width(560).row();
+                })(rows[i].name);
+            }
+            d.buttons.button("关闭", function(){ d.hide(); }).width(110);
+            d.show();
+            return "opened";
+        }
+
+        // 蓝图页底栏加按钮：Vars.ui.schematics 建好之后挂一次就够（buttons 只建一次）。
+        function blueprintPageHook(){
+            if(BP_BTN_ADDED){ return; }
+            if(Vars.ui === null || Vars.ui === undefined) { return; }
+            if(Vars.ui.schematics === null || Vars.ui.schematics === undefined){ return; }
+            var btns = null;
+            try{ btns = Vars.ui.schematics.buttons; }catch(e){ btns = null; }
+            if(btns === null || btns === undefined){ return; }
+            try{
+                btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);
+                BP_BTN_ADDED = true;
+            }catch(e2){ log("blueprint page button failed: " + e2); }
+        }
+
+        // 原版「详细」页是私有字段 SchematicsDialog.info 里的 SchematicInfoDialog；
+        // 每次 show() 都会 cont.clear() + buttons.clearChildren()，所以按标题变化重挂。
+        function schematicInfoDialog(){
+            try{
+                var cls = Packages.java.lang.Class.forName("mindustry.ui.dialogs.SchematicsDialog");
+                var f = cls.getDeclaredField("info");
+                f.setAccessible(true);
+                return f.get(Vars.ui.schematics);
+            }catch(e){ return null; }
+        }
+
+        function blueprintInfoHook(){
+            if(Vars.ui === null || Vars.ui === undefined){ return; }
+            if(Vars.ui.schematics === null || Vars.ui.schematics === undefined){ return; }
+            var info = schematicInfoDialog();
+            if(info === null || info === undefined){ return; }
+            var shown = false;
+            try{ shown = !!info.isShown(); }catch(e0){ shown = false; }
+            if(!shown){ BP_TITLE = ""; return; }
+            var txt = "";
+            try{ txt = String(info.title.getText()); }catch(e1){ txt = ""; }
+            // 标题没变也要查一次：原版每次 show() 都 buttons.clearChildren()，
+            // 同一张图连开两次时标题一样，但按钮已经被清掉了。
+            var kids = 0;
+            try{ kids = Number(seqSize(info.buttons.getChildren())); }catch(e2){ kids = 0; }
+            if(txt === BP_TITLE && kids > 0){ return; }
+            BP_TITLE = txt;
+            var nm = blueprintTitleName(txt);
+            if(nm.length === 0){ return; }
+            try{
+                info.buttons.button("继续对话", function(){ openBlueprintChat(nm); }).width(120);
+            }catch(e3){ log("info page button failed: " + e3); }
+        }
+
+        function blueprintTick(){
+            try{ blueprintPageHook(); }catch(e){ }
+            try{ blueprintInfoHook(); }catch(e2){ }
+            try{ blueprintChatPoll(); }catch(e3){ }
+        }
+
         // 从蓝图建一个空工作区：范围按玩家脚下的方块摆（无头没玩家就摆在地图中心）。
         function wsFromBlueprintName(name){
             var rows = blueprintList(64), i, sch = null;
@@ -4579,6 +4953,23 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 try{ r = JSON.parse(String(rjson)); }catch(e){ r = null; }
                 var msg = blueprintSaveBox(r, "探针蓝图", null);
                 return "probeblueprint:" + String(msg);
+            },
+
+            // v0.16.1 B2/B4：签名上下文解码、「详细」页标题解析、蓝图上下文读取。
+            maiSigMetaProbe: function(code){
+                var meta = sigMetaOf(String(code === null || code === undefined ? "" : code));
+                if(meta === null){ return "MAISIGMETA:none"; }
+                return "MAISIGMETA:ws=" + String(meta.ws) + " name=" + String(meta.name)
+                     + " job=" + String(meta.job) + " prompt=" + String(meta.prompt).substring(0, 20);
+            },
+            maiBpTitleProbe: function(txt){
+                return "MAIBPTITLE:[" + blueprintTitleName(txt) + "]";
+            },
+            maiBpChatProbe: function(name){
+                var ctx = blueprintCtxOf(String(name));
+                if(ctx === null){ return "MAIBPCHAT:none"; }
+                return "MAIBPCHAT:code=" + String(String(ctx.code).length)
+                     + " meta=" + (ctx.meta === null ? "no" : ("yes/" + String(ctx.meta.ws)));
             },
             maiJobDiagProbe: function(jobJson){
                 var job = (typeof jobJson === "string") ? parse(jobJson) : jobJson;
@@ -5415,6 +5806,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     sidecarTick();  // v0.13.1：自己拉起来的 sidecar 要等它开口
                     sidecarPing();  // v0.15.0：心跳，sidecar 收不到 45 s 就自己退出
                     jobButtonsClick(); // v0.14.2：框右下角的「查看 / 取消」两个按钮
+                    blueprintTick(); // v0.16.1：蓝图页入口、「详细」页续聊、蓝图对话轮询
                     // 「设置 → Mlog辅助」这一栏只在 Vars.ui 建好之后能注册。脚本加载时
                     // UI 往往还没建（真机日志里是在 ClientLoadEvent 前），所以这里补一次
                     // 有界重试：每 60 帧试一次、最多 600 次（≈10 s @60fps），成功即停。
