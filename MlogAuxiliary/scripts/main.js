@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.15.0";
+    var MOD_VERSION = "0.15.1";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -617,6 +617,16 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }
         kv(t, "", "模组自带的离线静态检查：不联网也能标出不可达语句、未定义变量、链接没绑上这类问题，"
            + "规则与 sidecar 的检查器同源，只在本机跑。", mk);
+
+        section(t, "最近提示");
+        var lrow = mk();
+        lrow.margin(6).left();
+        lastHintLbl = lrow.button(hintLineLabel(), function(){ hintCopy(); lastHintLblRefresh(); })
+            .height(38).padRight(6);
+        lrow.button("清空", function(){ hintClear(); lastHintLblRefresh(); }).height(38);
+        t.add(lrow).width(ROW_W).left().padTop(5).row();
+        kv(t, "", "这里留最后一条提示（错误也在这里）。屏幕上的提示只闪一下就没了，"
+           + "点上面那一格复制全文。", mk);
 
         section(t, "说明");
         kv(t, "", "F3：指向处理器，描述意图 → 生成 → 预检 → 写入；原版逻辑编辑器底部会多一条「审查」栏。"
@@ -2353,13 +2363,22 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // 管理窗的列表是异步拉回来的：点进详情之后，迟到的列表回调不能往详情页里塞行。
         var managerSeq = 0;
 
+        // v0.15.1（D2）：hint 只闪一下就没了，错误也跟着没。最后一条留在这里，
+        // 「设置 → 最近提示」能看、能复制。hint() 里写，纯函数好自检。
+        var LAST_HINT = {text: "", at: 0};
+        var lastHintLbl = null;
+
+        // v0.15.1（D3）：作业管理窗的过滤状态（只在模组侧过滤，sidecar 只认 state= 精确值）。
+        var managerFilter = {text: "", onlyBad: false, limit: 100};
+        var managerFilterBtn = null;
+
         function isJobTerminal(state){
             return JOB_TERMINAL[String(state)] === 1;
         }
 
         // job 的 snapshot 只是给 sidecar 存档/将来自由档用的世界事实；
         // 处理器周围 13×13 足够，太大了会把整张图的格子塞进请求里。
-        function jobBody(b, desc, wsInfo){
+        function jobBody(b, desc, wsInfo, batch){
             var snap = null;
             try{
                 if(b !== null && b !== undefined && b.tile){
@@ -2371,6 +2390,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }
             var job = {mode: "new", desc: String(desc), links: linkListOrNull(b), ipt: 2,
                        origin: originOf(b), snapshot: snap};
+            // v0.15.1（A4）：同一句话发给一批处理器时，告诉模型它是第几台 ——
+            // 每台的链接表各不相同，照抄隔壁那台的程序会被预检拒掉。
+            if(batch !== null && batch !== undefined){ job.batch = batch; }
             if(wsInfo !== null && wsInfo !== undefined){
                 job.mode = "improve";                  // v0.14.1：同一块区域的上一版当依据
                 job.workspace = wsInfo;
@@ -2378,7 +2400,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return {job: job};
         }
 
-        function jobSubmit(b, desc, cb, wsInfo){
+        function jobSubmit(b, desc, cb, wsInfo, batch){
             ensureSidecar(true);             // v0.13.1：装包版里后端是模组自己拉起来的
             if(SIDE.state === "starting"){
                 cb(null, "sidecar 正在启动（首次需几秒），稍后再投");
@@ -2395,7 +2417,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 llmAutoSync();               // 配置在、sidecar 忘了（刚重启）：先推一遍再投
             }
             rememberOrig(b);                 // v0.10.1：投递那一刻的代码就是冲突基线
-            httpJson("POST", "/jobs", JSON.stringify(jobBody(b, desc, wsInfo)), function(code, text){
+            httpJson("POST", "/jobs", JSON.stringify(jobBody(b, desc, wsInfo, batch)), function(code, text){
                 var res = parse(text);
                 if(code !== 200 || res === null || res.ok !== true){
                     cb(null, jobWhy(code, text, res));
@@ -2884,7 +2906,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var statusY = statusTop - st.h;                   // 状态行基线（font.draw 的 y 是基线）
             var btnTop = statusY - JOB_BTN_EDGE * unit;       // 按钮行顶端
             var btnY = btnTop - h;
-            var defs = [{id: "cancel", label: "取消"}, {id: "view", label: "查看"}];
+            var defs = [{id: "cancel", label: "取消"}, {id: "view", label: "查看"},
+                        {id: "follow", label: "续聊"}];
             var out = [], i, x = right;
             for(i = 0; i < defs.length; i++){
                 var tm = jobTextMeasure(font, defs[i].label, unit);
@@ -2964,6 +2987,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     hint(closeJobBox(b.id === "cancel" ? "框选框已关掉（取消按钮）" : "框选框已关掉（右键）"));
                     return true;
                 }
+                if(b.id === "follow"){          // v0.15.1（D1）：对框里这一台继续改进
+                    try{ jobFollowAsk(); }
+                    catch(e2){ hint("续聊打不开：" + e2); }
+                    return true;
+                }
                 try{
                     openJobManager();
                 }catch(e){
@@ -3021,6 +3049,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     .size(S.scl(84) * hk, S.scl(40) * hk).padLeft(S.scl(6) * hk);
                 btns.button("取消", Packages.mindustry.ui.Styles.defaultt, function(){ jobWidgetCancel(); })
                     .size(S.scl(84) * hk, S.scl(40) * hk).padLeft(S.scl(6) * hk);
+                btns.button("续聊", Packages.mindustry.ui.Styles.defaultt, function(){ jobWidgetFollow(); })
+                    .size(S.scl(84) * hk, S.scl(40) * hk).padLeft(S.scl(6) * hk);
                 t.add(btns).right().row();
                 t.pack();
                 jobWidget = {table: t, label: lbl, group: group, attached: false};
@@ -3040,6 +3070,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
         function jobWidgetCancel(){
             hint(closeJobBox("框选框已关掉（取消按钮）"));
+        }
+
+        function jobWidgetFollow(){
+            try{ jobFollowAsk(); }
+            catch(e){ hint("续聊打不开：" + e); }
         }
 
         function jobWidgetHide(){
@@ -3285,6 +3320,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         function startJobBatch(targets, desc, rect, improve){
             var ws = wsAttach(rect, targets, desc);        // v0.14.0：这块框选 = 一个工作区快照
             var box = {r: rect, ws: (ws === null ? null : String(ws.id)),
+                       desc: desc, targets: targets,      // v0.15.1：续聊要认得出框里哪几台
                        ids: [], jobs: {}, pend: targets.length,
                        started: Packages.java.lang.System.currentTimeMillis(),
                        termAt: 0, lastPoll: 0};
@@ -3316,7 +3352,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                             }
                         }
                         jobBoxFinishIfDone();
-                    }, payload);
+                    }, payload, {i: i + 1, n: targets.length});
                 })(targets[i]);
             }
             return "batch:" + targets.length;
@@ -3370,6 +3406,80 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             d.closeOnBack();
             d.show();
             return "quick job: " + targets.length + " processor(s)";
+        }
+
+        // v0.15.1（D1）：框还在的时候，对框里某一台「再说一句」。
+        // 以前只有工作区窗里的「继续改进」能带上一版代码，框还在时反而没入口。
+        // 目标怎么认：光标下那台在框里就用它；否则框里只有一台就用那一台。
+        function jobFollowPick(){
+            if(jobBox === null || jobBox.r === null){ return null; }
+            var pl = jobBox.targets || [], i;
+            var mx = -1, my = -1;
+            try{ mx = Core.input.mouseWorldX(); my = Core.input.mouseWorldY(); }catch(e){ }
+            if(mx >= 0 && my >= 0){
+                var b = processorAt(mx, my);
+                if(b !== null){
+                    for(i = 0; i < pl.length; i++){ if(pl[i].b === b){ return pl[i]; } }
+                }
+            }
+            return pl.length === 1 ? pl[0] : null;
+        }
+
+        function jobFollowAsk(){
+            if(jobBox === null || jobBox.r === null){
+                hint("还没有框选框：先 F3 框一台处理器");
+                return "no box";
+            }
+            var t = jobFollowPick();
+            if(t === null){
+                hint("框里有 " + String((jobBox.targets || []).length)
+                     + " 台处理器：把光标移到要续聊的那台上再点「续聊」（或只框一台）");
+                return "ambiguous";
+            }
+            var ws = (jobBox.ws === null || jobBox.ws === undefined) ? null : wsLoad(jobBox.ws);
+            var desc = "";
+            if(ws !== null && String(ws.notes || "").length > 0){ desc = String(ws.notes); }
+            else if(String(jobBox.desc || "").length > 0){ desc = String(jobBox.desc); }
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 续聊 @" + t.x + "," + t.y
+                + " v" + MOD_VERSION);
+            d.cont.defaults().pad(6).left();
+            d.cont.add("目标：@" + t.x + "," + t.y
+                       + (ws === null ? "" : ("　工作区「" + String(ws.name) + "」"))
+                       + "　在这台上接着上一版改，别的处理器不受影响").row();
+            d.cont.field(desc, function(v){ desc = String(v); }).width(520).row();
+            d.buttons.button("生成", function(){
+                var text = trimText(desc);
+                if(text.length === 0){ hint("先写一句：这台处理器接下来要改什么"); return; }
+                d.hide();
+                jobFollowSubmit(t, text);
+            }).width(120);
+            d.buttons.button("取消", function(){ d.hide(); }).width(120);
+            d.closeOnBack();
+            d.show();
+            return "follow ask: @" + t.x + "," + t.y;
+        }
+
+        // 投出去之后不再新建框：作业挂到当前这个框上（徽标计数、进度、写入都归这一批）。
+        function jobFollowSubmit(t, desc){
+            if(jobBox === null || jobBox.r === null){ return "no box"; }
+            var r = jobBox.r;
+            var ws = wsAttach(r, [{b: t.b, x: t.x, y: t.y}], desc);
+            var payload = wsImprovePayload(ws, t.b);
+            jobSubmit(t.b, desc, function(res, why){
+                if(res === null || res.id === undefined || res.id === null){
+                    hint("续聊投递失败（@" + t.x + "," + t.y + "）：" + String(why));
+                    return;
+                }
+                var jid = String(res.id);
+                jobBox.ids.push(jid);
+                jobBox.jobs[jid] = res.job ? res.job : {id: jid, state: "queued", desc: desc};
+                jobBox.termAt = 0;
+                jobBox.lastPoll = 0;
+                jobChatStart(t.b, jid, desc);
+                wsRecordJob(ws, jid, desc);
+                hint("已续聊 @" + t.x + "," + t.y + "：点框角「查看」看进度");
+            }, payload);
+            return "follow: @" + t.x + "," + t.y;
         }
 
         function lookupBuild(job){
@@ -3433,30 +3543,37 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var s = jobBoxState();
             host.add("— 本次框选 —").row();
             if(s !== null && jobBox !== null && s.total > 0){
-                var ids = jobBox.ids || [];
+                var ids = jobBox.ids || [], shown = 0;
                 for(var i = 0; i < ids.length; i++){
                     (function(jid){
                         var job = jobBox.jobs[jid] || {id: jid, state: "queued", desc: ""};
+                        if(!jobHit(job)){ return; }
+                        shown++;
                         host.button(jobRowLabel(job), function(){
                             renderManagerDetail(host, d, job, lookupBuild(job));
                         }).width(560).row();
                     })(ids[i]);
                 }
+                if(shown === 0){ host.add("（本次框选里没有符合过滤条件的作业）").row(); }
             }else{
                 host.add("（框选一块区域，写一句描述，作业就出现在这里）").row();
             }
-            host.add("— 全部作业（最近 24 个）—").row();
-            httpJson("GET", "/jobs?all=1&limit=24", null, function(code, text){
+            host.add("— 全部作业（最近 " + String(managerFilter.limit) + " 个）—").row();
+            httpJson("GET", "/jobs?all=1&limit=" + String(managerFilter.limit), null, function(code, text){
                 if(seq !== managerSeq){ return; }
                 var res = parse(text);
                 if(code !== 200 || res === null || res.ok !== true){
                     host.add("读不到作业列表：" + httpWhy(code, text)).row();
                     return;
                 }
-                var rows = res.jobs || [];
+                var rows = res.jobs || [], k, hit = 0;
+                for(k = 0; k < rows.length; k++){ if(jobHit(rows[k])){ hit++; } }
                 if(rows.length === 0){ host.add("（sidecar 还没有作业）").row(); return; }
-                for(var k = 0; k < rows.length; k++){
+                host.add("符合条件 " + String(hit) + " / " + String(rows.length) + " 个").row();
+                if(hit === 0){ host.add("（换个关键字，或关掉「只看失败」）").row(); return; }
+                for(k = 0; k < rows.length; k++){
                     (function(job){
+                        if(!jobHit(job)){ return; }
                         host.button(jobRowLabel(job), function(){
                             renderManagerDetail(host, d, job, lookupBuild(job));
                         }).width(560).row();
@@ -3471,6 +3588,23 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             d.cont.defaults().pad(4).left();
             var host = new Packages.arc.scene.ui.layout.Table();
             try{ d.cont.pane(host).height(320).width(600).row(); }catch(e){ d.cont.add(host).row(); }
+            var frow = new Packages.arc.scene.ui.layout.Table();
+            frow.margin(4).left();
+            frow.add("过滤：");
+            frow.field(String(managerFilter.text || ""), function(v){
+                managerFilter.text = String(v);
+                renderManager(host, d);
+            }).width(220).padRight(6);
+            managerFilterBtn = frow.button(managerFilterBtnText(), function(){
+                managerFilter.onlyBad = !(managerFilter.onlyBad === true);
+                try{ managerFilterBtn.get().setText(managerFilterBtnText()); }catch(e0){ }
+                renderManager(host, d);
+            }).width(150).padRight(6);
+            frow.button("显示更多", function(){
+                managerFilter.limit = Math.min(200, managerFilter.limit + 100);
+                renderManager(host, d);
+            }).width(120);
+            d.cont.add(frow).left().row();
             d.buttons.button("刷新", function(){ renderManager(host, d); }).width(110);
             d.buttons.button("工作区快照", function(){ openWorkspaceDialog(); }).width(140);   // v0.14.1
             d.buttons.button("关闭框选框", function(){ hint(closeJobBox("框选框已关掉")); d.hide(); }).width(140);
@@ -4369,6 +4503,24 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     + " line=" + (ev.length > 0 ? ev[ev.length - 1] : "");
             },
 
+            // v0.15.1（D2/D3）：最后一条提示 + 列表过滤，纯函数，无头环境可自检。
+            maiHintProbe: function(txt){
+                hint(String(txt === undefined || txt === null ? "" : txt));
+                return "ok last=" + (String(LAST_HINT.text).length > 0 ? "yes" : "no")
+                     + " label=" + hintLineLabel();
+            },
+            maiFilterProbe: function(listJson, text, onlyBad){
+                var list = (typeof listJson === "string") ? parse(listJson) : (listJson || []);
+                managerFilter.text = String(text === undefined || text === null ? "" : text);
+                managerFilter.onlyBad = (onlyBad === true);
+                var hit = 0, i;
+                for(i = 0; i < (list || []).length; i++){ if(jobHit(list[i])){ hit++; } }
+                var out = "ok hit=" + hit + " of " + (list || []).length
+                        + " btn=" + managerFilterBtnText();
+                managerFilter.text = "";
+                managerFilter.onlyBad = false;
+                return out;
+            },
             maiVersion: function(){ return "mlog-auxiliary " + MOD_VERSION + "  sidecar=" + base; },
         // 调试/测试用：同步原生请求，返回 "<code>" + 换行 + 正文。会占住调用线程到超时，
         // 只对 localhost 用；正式路径仍然是 httpJson + Core.app.post。
@@ -4650,7 +4802,63 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // 非阻塞提示。**框选绝不能用 showText**：Dialog 会把鼠标吃掉（Core.scene.hasDialog() 为真，
         // 世界收不到点击），于是「按 F3 弹出提示」= 拖不动 —— 用户 2026-10-30 报的就是这个。
         // showInfoFade 是 Touchable.disabled 的淡出标签（Mindustry-Source/core/src/mindustry/core/UI.java:373），不挡输入。
+        // ---------- D2（v0.15.1）：最后一条提示 -------------------------------
+        function hintLineLabel(){
+            var t = String(LAST_HINT.text || "");
+            if(t.length === 0){ return "（还没有提示）"; }
+            if(t.length > 46){ t = t.substring(0, 46) + "…"; }
+            return t;
+        }
+
+        function lastHintLblRefresh(){
+            // arc 的 Table.button() 回的是 Cell，Cell.get() 才是那个 TextButton；无头模拟器里
+            // 这个桩没有 get()，所以每一层都先问类型再调，缺一层就安静跳过（真机不受影响）。
+            try{
+                if(lastHintLbl === null || lastHintLbl === undefined){ return; }
+                if(typeof lastHintLbl.get !== "function"){ return; }
+                var box = lastHintLbl.get();
+                if(box === null || box === undefined || typeof box.setText !== "function"){ return; }
+                box.setText(hintLineLabel());
+            }catch(e){ log("hint label refresh skipped: " + e); }
+        }
+
+        function hintLineRefresh(){ lastHintLblRefresh(); }
+
+        function hintCopy(){
+            var t = String(LAST_HINT.text || "");
+            if(t.length === 0){ hint("还没有提示可复制"); return "no hint"; }
+            try{ Core.app.setClipboardText(t); }catch(e){ return "clipboard failed: " + e; }
+            hint("已复制最近一条提示");
+            return "copied:" + t.length;
+        }
+
+        function hintClear(){
+            LAST_HINT.text = "";
+            LAST_HINT.at = 0;
+            return "hint cleared";
+        }
+
+        // ---------- D3（v0.15.1）：作业列表过滤 -------------------------------
+        function managerFilterBtnText(){
+            return managerFilter.onlyBad === true ? "只看失败：开" : "只看失败：关";
+        }
+
+        function jobHit(job){
+            if(managerFilter.onlyBad === true){
+                var st = String((job && job.state) || "");
+                if(st !== "failed" && st !== "rejected" && st !== "cancelled"){ return false; }
+            }
+            var q = String(managerFilter.text || "").toLowerCase();
+            if(q.length === 0){ return true; }
+            var s = (String((job && job.id) || "") + " " + String((job && job.desc) || "") + " "
+                     + String((job && job.state) || "") + " " + String((job && job.model) || "")).toLowerCase();
+            return s.indexOf(q) >= 0;
+        }
+
         function hint(text){
+            LAST_HINT.text = String(text);        // v0.15.1：留最后一条，设置页能看能复制
+            LAST_HINT.at = Packages.java.lang.System.currentTimeMillis();
+            lastHintLblRefresh();
             if(Vars.ui === null || Vars.ui === undefined){ return; }
             try{ Vars.ui.showInfoFade(String(text)); }catch(e){ }
         }

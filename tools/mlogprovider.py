@@ -177,6 +177,12 @@ def build_prompt(job, hint=None):
             origin.get("x"), origin.get("y")))
     out.append("instruction set: v160 (ipt=%s)" % ipt)
     out.extend(snapshot_facts(job.get("snapshot")))
+    batch = job.get("batch")
+    if isinstance(batch, dict) and int(batch.get("n") or 1) > 1:
+        out.append("batch: the same sentence was sent to %s processors; this is #%s" % (
+            batch.get("n"), batch.get("i")))
+        out.append("  each processor has its OWN link table -- a program copied from")
+        out.append("  another processor in the batch is rejected here if the names differ.")
     if job.get("links") is None:
         out.append("link whitelist: UNKNOWN (the game could not read the link table).")
         out.append("  Do not invent link names; prefer code that needs no links at all.")
@@ -204,6 +210,9 @@ def build_prompt(job, hint=None):
     out.append("- control/radar/ucontrol need the documented argument count for v160.")
     out.append("- End the program with an explicit `end` unless it loops forever.")
     out.append("- The whole program must pass the analyzer: any ERR rejects the job.")
+    out.append("- Use ONLY the link names in the whitelist above. If the task needs a")
+    out.append("  block this processor is not wired to, say so in needs_links and write")
+    out.append("  the best program that works with what it really has.")
     out.append("")
     prev = previous_version(job)
     if prev:

@@ -1615,6 +1615,31 @@ def test_diag():
              'three 0.4 s jobs took %.2f s with three workers (serial is 1.2 s)'
              % elapsed)
         checks += 1
+
+        # ---- v0.15.1（A4）：一批里的第几台要进作业，也要进提示词。
+        # 批量投递时每台拿到同一句话，模型不知道自己是第几台 —— 它照抄隔壁那台的
+        # 链接名，预检就报 link-name-not-bound。
+        one = jobqueue.normalize({'desc': 'batch one', 'snapshot': {'map': 'm'},
+                                   'batch': {'i': 2, 'n': 3}})
+        need(one.get('batch') == {'i': 2, 'n': 3},
+             'the batch marker did not survive normalize: %r' % (one.get('batch'),))
+        odd = jobqueue.normalize({'desc': 'batch odd', 'snapshot': {'map': 'm'},
+                                  'batch': {'i': 9, 'n': 2}})
+        need(odd.get('batch') == {'i': 2, 'n': 2},
+             'batch.i must be clamped into 1..n, got %r' % (odd.get('batch'),))
+        try:
+            jobqueue.normalize({'desc': 'x', 'snapshot': {'map': 'm'}, 'batch': 3})
+            need(False, 'a scalar batch was accepted')
+        except ValueError:
+            pass
+        prompt = MP.build_prompt({'desc': 'batch one', 'mode': 'new', 'links': None,
+                                   'ipt': 2, 'origin': {'x': 1, 'y': 2},
+                                   'batch': {'i': 2, 'n': 3}})
+        need('the same sentence was sent to 3 processors; this is #2' in prompt,
+             'the prompt does not tell the model which processor of the batch it is')
+        need('each processor has its OWN link table' in prompt,
+             'the prompt does not warn that link tables differ inside a batch')
+        checks += 1
     finally:
         stub.close()
     return checks

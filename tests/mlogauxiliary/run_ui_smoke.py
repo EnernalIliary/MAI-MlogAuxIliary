@@ -344,6 +344,12 @@ def main():
     " attempt_log:[{n:1, ms:1200, provider:'http', model:'m-a', budget:4096,"
     " prompt_tokens:11, completion_tokens:1600, finish_reason:'length', kind:'empty',"
     " error:'empty reply'}]})));",
+    # v0.15.1 (D2+D3): the last hint is kept, and the manager list filters.
+    "print('MAIHINT:' + maiHintProbe('框里有 3 台处理器：把光标移到要续聊的那台上再点「续聊」'));",
+    "print('MAIFILTER:' + maiFilterProbe(JSON.stringify([{id:'a1', state:'done', desc:'打印矿石'},"
+    " {id:'a2', state:'failed', desc:'打印玩家'}, {id:'a3', state:'rejected', desc:'打印矿石'}]), '矿石', false));",
+    "print('MAIFILTER2:' + maiFilterProbe(JSON.stringify([{id:'a1', state:'done', desc:'打印矿石'},"
+    " {id:'a2', state:'failed', desc:'打印玩家'}, {id:'a3', state:'rejected', desc:'打印矿石'}]), '', true));",
     # v0.14.0: the workspace data layer (W1) -- reuse by selection centre, archive, release.
     # The probe swaps the three storage primitives for an in-memory table, so it also works
     # where Vars.dataDirectory is null (headless sim does not call Vars.loadSettings).
@@ -376,7 +382,7 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIWORKSPACE:', 'MAIWS2:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
@@ -547,6 +553,18 @@ def main():
     if 'finish_reason=length' not in joined:
         problems.append('v0.15.0: the diagnostics no longer show the finish_reason: %r'
                         % [l for l in lines if l.startswith('MAIJOBPANELDIAG:')][:1])
+    if 'MAIHINT:ok last=yes' not in joined:
+        problems.append('v0.15.1: hint() no longer keeps the last message '
+                        '(want MAIHINT:ok last=yes): %r'
+                        % [l for l in lines if l.startswith('MAIHINT:')][:1])
+    if 'MAIFILTER:ok hit=2 of 3 btn=只看失败：关' not in joined:
+        problems.append('v0.15.1: the manager filter does not narrow the list '
+                        '(want MAIFILTER:ok hit=2 of 3): %r'
+                        % [l for l in lines if l.startswith('MAIFILTER:')][:1])
+    if 'MAIFILTER2:ok hit=2 of 3 btn=只看失败：开' not in joined:
+        problems.append('v0.15.1: the only-failed toggle is broken '
+                        '(want MAIFILTER2:ok hit=2 of 3 btn=只看失败：开): %r'
+                        % [l for l in lines if l.startswith('MAIFILTER2:')][:1])
     if 'MAIJOBPANEL:ok' not in joined:
         problems.append('v0.13.2: the job view does not show assumptions + cost '
                         '(want MAIJOBPANEL:ok assumptions=2 cost=3): %r'
@@ -622,7 +640,9 @@ def main():
             problems.append('v0.12.6: the badge measured the wrong text: %r' % (badge.get('text'),))
         # v0.14.2: 文案换成两个固定像素尺寸的按钮（取消在最右、查看在左），都在框外、互不重叠。
         btns = badge.get('buttons')
-        if not isinstance(btns, list) or [str(b.get('id')) for b in btns] != ['cancel', 'view']:
+        # v0.15.1: 第三个按钮「续聊」加在左边，这里只要求 cancel/view 还在且顺序对。
+        ids = [str(b.get('id')) for b in btns] if isinstance(btns, list) else []
+        if ids[:2] != ['cancel', 'view']:
             problems.append('v0.14.2: the box has no 查看/取消 buttons: %r' % (btns,))
         else:
             cancel, view = btns[0], btns[1]
@@ -1044,6 +1064,25 @@ def main():
                          'the chat format probe is gone')):
         if needle not in code_only:
             problems.append('v0.13.0: ' + why)
+    for needle, why in (
+        ('var managerFilter = {text: "", onlyBad: false, limit: 100};',
+         'v0.15.1: the job manager lost its filter state'),
+        ('function jobHit(job){',
+         'v0.15.1: the manager list no longer filters'),
+        ('function jobFollowAsk(){',
+         'v0.15.1: the box lost its follow-up entry'),
+        ('{id: "follow", label: "续聊"}',
+         'v0.15.1: the follow button is missing from the box corner'),
+        ('var LAST_HINT = {text: "", at: 0};',
+         'v0.15.1: the last hint is not kept any more'),
+        ('LAST_HINT.text = String(text);',
+         'v0.15.1: hint() no longer records the last hint'),
+        ('function hintCopy(){',
+         'v0.15.1: the last-hint copy button is gone'),
+    ):
+        if needle not in code_only:
+            problems.append(why + ' (missing: ' + needle + ')')
+
     for needle, why in (('var JOB_WHY = {',
                          'the failure-class wording table is gone'),
                         ('function jobWhyLines(',
@@ -1567,7 +1606,7 @@ def main():
         print('  batch write: ' + wm[:170])
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
-                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIWORKSPACE:', 'MAIWS2:',
+                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:')):
             print('  ' + l[:300])
     return 0

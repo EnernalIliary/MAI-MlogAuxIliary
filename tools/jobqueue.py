@@ -278,12 +278,25 @@ def normalize(body):
     ipt = _int(body.get('ipt'), 'job.ipt', 2)
     if not 1 <= ipt <= 40:
         raise ValueError('job.ipt must be 1..40 (LogicBlock.maxInstructionsPerTick)')
+    # v0.15.1: which processor of a batch this is.  It is NOT part of the id --
+    # two processors in one box hash the same on purpose, and the queue already
+    # keeps them apart with the -2/-3 suffixes.  Here it only tells the model that
+    # the same sentence went to N processors with N different link tables.
+    batch = body.get('batch')
+    if batch is not None:
+        if not isinstance(batch, dict):
+            raise ValueError('job.batch must be an object with i and n')
+        bi = _int(batch.get('i'), 'batch.i', 1)
+        bn = _int(batch.get('n'), 'batch.n', 1)
+        bn = max(1, bn)
+        batch = {'i': min(max(1, bi), bn), 'n': bn}
     # v0.14.0: parsed before the id, because an 'improve' id hashes prevCode
     ws = workspace_of(body)
     jid = job_id(snap, desc, mode, ws.get('prevCode') if ws else None)
     return {'id': jid, 'created': int(body.get('created') or time.time() * 1000),
             'state': 'queued', 'mode': mode, 'desc': desc, 'snapshot': snap,
             'links': links, 'origin': origin, 'ipt': ipt, 'workspace': ws,
+            'batch': batch,
             'attempts': 0, 'findings': [], 'code': '', 'explanation': '',
             'assumptions': [], 'template': None, 'params': {}, 'bytes_b64': ''}
 
