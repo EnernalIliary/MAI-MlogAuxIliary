@@ -1,6 +1,6 @@
 """Hidden @aigenerated signature for AI-written mlog.
 
-    python tools/aigenerated.py sign   Logic/foo.mlog [--author 猪猪鱼] [--force]
+    python tools/aigenerated.py sign   Logic/foo.mlog [--author MAI] [--force]
     python tools/aigenerated.py verify Logic/foo.mlog
     python tools/aigenerated.py strip  Logic/foo.mlog   # always refused
 
@@ -10,12 +10,12 @@ Preferred: if the program's last real statement is an unconditional
 `jump <n> always <x>`, the token replaces its unused `compare` slot (the
 fourth and last operand; `always` never reads it):
 
-    jump 27 always 0 "aigenerated:猪猪鱼:1f02465d9e75"
+    jump 27 always 0 "aigenerated:MAI:1f02465d9e75"
 
 A bare `jump <n> always` (no value operand) gets one spelled out as `0` first,
 because `always` never reads it either:
 
-    jump 27 always 0 "aigenerated:猪猪鱼:1f02465d9e75"
+    jump 27 always 0 "aigenerated:MAI:1f02465d9e75"
 
 Either way the `end` that used to follow such a jump is dropped: an
 unconditional jump never falls through, so that `end` could not run and
@@ -25,7 +25,7 @@ leaves a dead one behind.
 
 Otherwise the closing `end` becomes
 
-    jump 0 always 0 "aigenerated:猪猪鱼:1f02465d9e75"
+    jump 0 always 0 "aigenerated:MAI:1f02465d9e75"
 
 `end` means "next instruction reads 0"; `jump 0 always` does the same thing, so
 the program behaves identically.  The token sits in a declared `JumpStatement`
@@ -63,7 +63,7 @@ import sys
 import zlib
 from pathlib import Path
 
-DEFAULT_AUTHOR = "猪猪鱼"
+DEFAULT_AUTHOR = "MAI"
 # the sidecar (tools/logicd.py, tools/jobqueue.py) signs with this one; the
 # environment override exists so a build can attribute a different author
 SIGN_AUTHOR = os.environ.get("MAI_SIGN_AUTHOR") or DEFAULT_AUTHOR

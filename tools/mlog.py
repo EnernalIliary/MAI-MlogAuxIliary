@@ -1783,7 +1783,7 @@ def main() -> int:
     p.add_argument("--no-sign", action="store_true",
                    help="do not auto-attach the @aigenerated signature")
     p.add_argument("--author", default=_sig.DEFAULT_AUTHOR,
-                   help="signature author (default: 猪猪鱼)")
+                   help="signature author (default: MAI)")
     p.add_argument("--out", help="write the paste code (base64) to this file")
     p.add_argument("--binary", help="write a .msch binary to this path")
     p.add_argument("--quiet", action="store_true", help="do not print the paste code")

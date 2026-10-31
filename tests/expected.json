@@ -521,10 +521,10 @@
       "verify_forced": 0,
       "strip": 2,
       "slot_sign": 0,
-      "slot_line": "jump 27 always 0 \"aigenerated:猪猪鱼:9e47003b6c89\"",
+      "slot_line": "jump 27 always 0 \"aigenerated:MAI:3e02ceeac5d7\"",
       "slot_end_kept": false,
       "terminal_sign": 0,
-      "terminal_line": "jump 0 always 0 \"aigenerated:猪猪鱼:27d494c6ee39\"",
+      "terminal_line": "jump 0 always 0 \"aigenerated:MAI:5c8a0ba4f813\"",
       "comments_sign": 0,
       "comments_body_has_none": true,
       "comments_extract": [
