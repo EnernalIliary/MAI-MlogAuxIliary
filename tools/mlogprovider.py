@@ -236,18 +236,132 @@ def build_prompt(job, hint=None):
     out.append("Free tier (write the program yourself):")
     out.append('  {"code": "set n 0\\nop add n n 1\\nend", "explanation": "...",')
     out.append('   "assumptions": ["..."], "needs_links": ["container1"]}')
-    out.append("Program shape for the free tier -- a label loop, no numeric jumps:")
-    out.append("  loop:")
-    out.append("    sensor n container1 @copper")
-    out.append("    jump done greaterThanEq n 100")
-    out.append("    op add n n 1")
-    out.append("    jump loop always")
-    out.append("  done:")
-    out.append("    end")
+    out.append("Program shapes -- each one below passes the analyzer; adapt one:")
+    for ex in _examples_for(job.get("desc")):
+        out.append("  # %s" % ex["title"])
+        for ln in ex["code"].split("\n"):
+            out.append("    " + ln)
+    out.append("  The block names above are placeholders: use ONLY whitelist names,")
+    out.append("  and leave out a statement whose block you cannot wire.")
     out.append("(the `code` string uses \\n between statements; label lines are statements'")
     out.append(" landmarks, not statements, and are kept verbatim.)")
     out.append("needs_links must be a subset of the whitelist above (or empty).")
     return "\n".join(out)
+
+
+#: v0.15.2: the few-shot library. Every entry passes tools/mlogcheck.py with no
+#: ERR and no WARN (tests/logicd asserts that), so a model that copies a shape
+#: copies something the gate would accept. `keys` is matched against the
+#: sentence the player typed (lower-cased, Chinese included) -- see _examples_for.
+EXAMPLES = [
+    {
+        "title": "threshold counter -- count an item, stop at a limit",
+        "keys": ["计数", "数量", "达到", "阈值", "几条", "多少个", "count", "threshold", "amount"],
+        "code": """set n 0
+loop:
+sensor n container1 @copper
+jump done greaterThanEq n 100
+print n
+printflush message1
+jump loop always
+done:
+end""",
+    },
+    {
+        "title": "periodic tick -- act once every N ticks (@time is ticks, 60 = 1 s)",
+        "keys": ["定时", "每隔", "周期", "秒", "时间", "timer", "interval", "every", "period"],
+        "code": """loop:
+op mod t @time 300
+jump loop notEqual t 0
+print "tick"
+printflush message1
+jump loop always""",
+    },
+    {
+        "title": "switch a block -- read a condition, enable or disable one block",
+        "keys": ["关闭", "开启", "停止", "开关", "停机", "enable", "disable", "switch", "power"],
+        "code": """loop:
+sensor n container1 @copper
+jump low lessThan n 100
+control enabled conveyor1 false
+jump loop always
+low:
+control enabled conveyor1 true
+jump loop always""",
+    },
+    {
+        "title": "turret -- radar for the nearest enemy, shoot it, idle otherwise",
+        "keys": ["射击", "攻击", "炮塔", "敌人", "雷达", "radar", "turret", "shoot", "enemy"],
+        "code": """loop:
+radar enemy any any distance turret1 1 target
+jump loop equal target null
+control shoot turret1 target 0
+jump loop always""",
+    },
+    {
+        "title": "memory cell -- read, bump, write back a counter",
+        "keys": ["内存", "存储", "记录", "次数", "memory", "cell", "write", "store"],
+        "code": """read v cell1 0
+op add v v 1
+write v cell1 0
+print v
+printflush message1""",
+    },
+    {
+        "title": "message board -- sensor then print, one value per line",
+        "keys": ["显示", "信息板", "面板", "打印", "message", "print", "board", "display"],
+        "code": """sensor n core1 @copper
+print "copper "
+print n
+printflush message1""",
+    },
+    {
+        "title": "two-way branch -- one label per outcome, each branch ends itself",
+        "keys": ["不够", "不足", "报警", "分支", "否则", "branch", "alarm", "else", "low"],
+        "code": """sensor n core1 @copper
+jump low lessThan n 100
+print "enough"
+printflush message1
+end
+low:
+print "low"
+printflush message1
+end""",
+    },
+    {
+        "title": "wave counter -- add 1 every N ticks, keep a running total",
+        "keys": ["累计", "总数", "累加", "每轮", "total", "sum", "accumulate"],
+        "code": """set total 0
+loop:
+op mod t @time 60
+jump loop notEqual t 0
+op add total total 1
+print total
+printflush message1
+jump loop always""",
+    },
+]
+
+
+def _examples_for(desc, limit=3):
+    """The samples that share the most keywords with the sentence, best first."""
+    text = str(desc or "").lower()
+    scored = []
+    for i, ex in enumerate(EXAMPLES):
+        score = 0
+        for k in ex["keys"]:
+            if k.lower() in text:
+                score += 1
+        scored.append((score, i, ex))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    picked = [t[2] for t in scored if t[0] > 0][:limit]
+    if len(picked) < 2:
+        for t in scored:
+            if t[2] not in picked:
+                picked.append(t[2])
+            if len(picked) >= 2:
+                break
+    return picked
 
 
 def _first_object(text):

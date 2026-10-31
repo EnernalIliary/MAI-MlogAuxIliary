@@ -1640,6 +1640,25 @@ def test_diag():
         need('each processor has its OWN link table' in prompt,
              'the prompt does not warn that link tables differ inside a batch')
         checks += 1
+
+        # ---- v0.15.2（bug 2）：样板库。原来 prompt 里只有一个 label-loop 骨架，
+        # 模型没有别的形状可抄。现在给 8 个都过静态检查的样板，按需求关键词挑 3 个。
+        import mlogcheck
+        need(len(MP.EXAMPLES) >= 8, 'the sample library shrank to %d' % len(MP.EXAMPLES))
+        for ex in MP.EXAMPLES:
+            found = mlogcheck.analyse(ex['code'].split(chr(10)), None, 2)
+            need(not found, 'sample %r does not pass the analyzer: %s'
+                 % (ex['title'], [(f.sev, f.rid, f.line) for f in found]))
+            need(len(ex['keys']) >= 4, 'sample %r has no keyword list' % (ex['title'],))
+        picked = MP._examples_for('给炮塔加上自动射击敌人', 3)
+        need(1 <= len(picked) <= 3, 'the picker returned %d samples' % len(picked))
+        need('turret' in picked[0]['title'],
+             'a turret task picked %r first' % (picked[0]['title'],))
+        top = MP.build_prompt({'desc': '给炮塔加上自动射击敌人', 'links': None, 'ipt': 2})
+        need('turret -- radar for the nearest enemy' in top,
+             'the chosen sample never reached the prompt')
+        need(top.count('  # ') <= 3, 'the prompt carries %d samples' % top.count('  # '))
+        checks += 1
     finally:
         stub.close()
     return checks

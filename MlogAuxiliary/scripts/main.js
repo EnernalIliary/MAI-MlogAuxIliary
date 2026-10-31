@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.15.1";
+    var MOD_VERSION = "0.15.2";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -2985,6 +2985,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 if(my < b.y || my > b.y + b.h){ continue; }
                 if(b.id === "cancel" || right){
                     hint(closeJobBox(b.id === "cancel" ? "框选框已关掉（取消按钮）" : "框选框已关掉（右键）"));
+            jobWidgetHide();
                     return true;
                 }
                 if(b.id === "follow"){          // v0.15.1（D1）：对框里这一台继续改进
@@ -3069,7 +3070,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }
 
         function jobWidgetCancel(){
+            // v0.15.2：框没了就得把控件一起摘掉，不然「查看 / 续聊」留在屏幕上。
             hint(closeJobBox("框选框已关掉（取消按钮）"));
+            jobWidgetHide();
         }
 
         function jobWidgetFollow(){
@@ -3164,27 +3167,33 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return CHAT_ICON;
         }
 
-        // 格式固定成 MAI<图标> <状态> (x,y): <其它信息>；信息为空就不留冒号。
+        // v0.15.2（用户 2026-11-01）：尖括号不能省，:logic: 用原文 —— 原版聊天在发送前会过
+        // UI.formatIcons（ChatFragment.java:230），:logic: 那一刻才变成逻辑图标。
+        // 所以原始行就是 <MAI:logic:><状态>(x,y):详情，转换只发生在发送 / 显示那一刻。
         function chatLine(status, x, y, info){
-            var tail = (info === null || info === undefined || String(info) === "") ? "" : (": " + String(info));
-            return "MAI" + chatIcon() + " " + String(status) + " (" + String(x) + "," + String(y) + ")" + tail;
+            var tail = (info === null || info === undefined || String(info) === "") ? "" : (":" + String(info));
+            return "<MAI:logic:><" + String(status) + ">(" + String(x) + "," + String(y) + ")" + tail;
         }
 
-        // 联机会话发聊天框；单机（没有聊天框）或无头（Vars.ui 为 null）退回既有的淡出提示，
-        // 状态不因为「没有聊天框」就消失。返回走了哪条通道，自检用得上。
-        function chatSay(text){
+        // 发送 / 显示前的唯一一次转换：:logic: -> 图标（拿不到图标就原样保留）。
+        function chatPretty(text){
             var s = String(text);
+            try{ return String(Packages.mindustry.core.UI.formatIcons(s)); }
+            catch(e){ log("formatIcons failed: " + e); return s; }
+        }
+
+        // v0.15.2（用户 2026-11-01）：「发送到聊天框」要真发一条聊天消息，不是本地提示。
+        // 走原版同一条路 —— Call.sendChatMessage(String)（ChatFragment.java:236），
+        // 客机也能发（服务端广播），房主和客机看到的一样。
+        // 单机 / 无头（没有聊天通道）仍退回淡出提示，状态不会因为没网络就消失。
+        function chatSay(text){
+            var s = chatPretty(text);
             try{ log("[chat] " + s); }catch(e){ }
-            if(netActive() && chatSendOn()){
-                var ui = Vars.ui;
-                if(ui !== null && ui !== undefined){
-                    try{
-                        if(ui.chatfrag !== null && ui.chatfrag !== undefined){
-                            ui.chatfrag.addMessage(s);
-                            return "chat";
-                        }
-                    }catch(e){ log("chatSay failed: " + e); }
-                }
+            if(chatSendOn() && netActive()){
+                try{
+                    Packages.mindustry.gen.Call.sendChatMessage(s);
+                    return "chat";
+                }catch(e){ log("chatSay failed, falling back to hint: " + e); }
             }
             hint(s);
             return "hint";
@@ -4735,7 +4744,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var live = selDragging, r = null;
             if(live){ r = selBox(); }
             else if(jobBox !== null && jobBox.r){ r = jobBox.r; }
-            if(r === null){ jobBadge = null; return; }
+            // v0.15.2：框没了（取消 / 右键关）也要摘控件 —— 以前这里直接 return，
+            // HUD 上那张表就永远留在屏幕上，另外两个按钮看着像没关掉。
+            if(r === null){ jobBadge = null; jobWidgetHide(); return; }
             var a = selDrawArgs(r);
             try{
                 var D = Packages.arc.graphics.g2d.Draw;
@@ -5043,19 +5054,20 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }
             return (n0 === 1 && WRITE_CHECK.length === 0) ? "ok" : ("bad queued=" + n0);
         };
-        // v0.13.0：聊天播报的无头探针。只验行格式（不碰 Vars.ui / 聊天框）：
-        // 三条状态 + 空信息不留冒号 + 前缀必须是 MAI。
+        // v0.13.0 / v0.15.2：聊天播报的无头探针。只验行格式（不碰 Vars.ui / 聊天框）：
+        // 尖括号必须在、:logic: 必须是原文、空信息不留冒号、状态在第二个尖括号里。
         api.maiChatProbe = function(){
             var a = chatLine("Generating", 12, 34, "给核心补铜（job 3f2a1b9c）");
             var b2 = chatLine("Done", 12, 34, "code · 12 条语句 · 240 字节 · 0 ERR");
             var c = chatLine("Failed", 12, 34, "模型没写出可用代码");
             var d = chatLine("Cancelled", 1, 2, "");
-            var ok = a.indexOf(" Generating (12,34): 给核心补铜（job 3f2a1b9c）") >= 0
-                  && b2.indexOf(" Done (12,34): code · 12 条语句 · 240 字节 · 0 ERR") >= 0
-                  && c.indexOf(" Failed (12,34): 模型没写出可用代码") >= 0
-                  && d === ("MAI" + chatIcon() + " Cancelled (1,2)")
-                  && a.indexOf("MAI") === 0;
-            return (ok ? "ok" : "bad") + " icon=" + (chatIcon() === "" ? "none" : "yes")
+            var ok = a === "<MAI:logic:><Generating>(12,34):给核心补铜（job 3f2a1b9c）"
+                  && b2 === "<MAI:logic:><Done>(12,34):code · 12 条语句 · 240 字节 · 0 ERR"
+                  && c === "<MAI:logic:><Failed>(12,34):模型没写出可用代码"
+                  && d === "<MAI:logic:><Cancelled>(1,2)";
+            var pretty = chatPretty(a);
+            return (ok ? "ok" : "bad")
+                 + " pretty=" + (pretty.indexOf("<MAI") === 0 ? "yes" : "no")
                  + " start=" + a + " cancel=" + d;
         };
 
