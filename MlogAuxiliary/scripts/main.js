@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.15.2";
+    var MOD_VERSION = "0.15.3";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -123,7 +123,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // sidecar.log 的 ready 行上）；spawned 只对「我拉起来的」为真 —— 心跳与 /shutdown
     // 都只发给自己的进程，别人手动起的 python tools/logicd.py 不碰。
     var SIDE = {state: "idle", tries: 0, at: 0, why: "", exe: "", url: "",
-                pingAt: 0, spawned: false};
+                pingAt: 0, spawned: false, pingFail: 0};
     // sidecar 每 45 s 收不到 /ping 就自己退出（逻辑后端不该活过游戏）。
     var SIDE_IDLE_EXIT = 45;
 
@@ -234,19 +234,24 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
     // v0.15.0（C2）：心跳。sidecar 侧 --idle-exit 45 秒收不到就退出，游戏关掉后
     // 不会再留一个 logicd 进程占内存和端口。
+    // v0.15.3 真机根因：这里原来传的是 {} 对象，httpRaw 用 String(body) 拼请求体，
+    // 发出去的是 "[object Object]" ⇒ sidecar 回 400 bad json ⇒ 心跳被当成失败,
+    // 之后不再发心跳，45 秒后进程自退，玩家看到「已就绪，但投不出去」。body 必须是 "{}"。
     function sidecarPing(){
         if(SIDE.state !== "up" || SIDE.spawned !== true){ return; }
+        if(SIDE.url === "" || SIDE.url === null){ return; }
         var now = Date.now();
         if(SIDE.pingAt > 0 && (now - SIDE.pingAt) < 4000){ return; }
         SIDE.pingAt = now;
-        httpJson("POST", "/ping", {}, function(code, text){
-            if(code !== 200){
-                log("sidecar ping failed: " + code);
+        httpJson("POST", "/ping", "{}", function(code, text){
+            if(code === 200){ SIDE.pingFail = 0; return; }
+            SIDE.pingFail = (SIDE.pingFail || 0) + 1;
+            log("sidecar ping failed: " + code + " (" + SIDE.pingFail + ")");
+            // -1 是连不上：进程真的没了，立刻退役重拉；
+            // 4xx/5xx 可能只是一次抖动，连续 3 次才算死，免得一次误判就丢后端。
+            if(code === -1 || SIDE.pingFail >= 3){
                 sidecarOk = false;
-                SIDE.state = "failed";
-                SIDE.why = "心跳失败（" + code + "），逻辑后端可能已经退出";
-                SIDE.spawned = false;
-                SIDE.url = "";
+                sidecarRetire(sidecarUrl(), "心跳失败（" + code + "）");
             }
         });
     }
@@ -275,7 +280,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         SIDE.url = "";
         sidecarOk = false;
         try{
-            httpJson("POST", "/shutdown", {}, function(code, text){
+            httpJson("POST", "/shutdown", "{}", function(code, text){
                 log("sidecar shutdown -> " + code);
                 Threads.daemon(function(){
                     try{ Packages.java.lang.Thread.sleep(700); }catch(e){ /* ignore */ }
@@ -308,6 +313,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             SIDE.exe = String(exe.absolutePath());
             SIDE.spawned = true;
             SIDE.url = "";
+            SIDE.pingFail = 0;
+            SIDE.pingAt = 0;
             log("sidecar spawned: " + SIDE.exe);
             return p;
         }catch(e){
@@ -346,6 +353,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 }
                 sidecarOk = true;
                 SIDE.state = "up";
+                SIDE.pingFail = 0;
+                SIDE.pingAt = 0;
                 log("sidecar is up after " + tries + " probe(s) at " + sidecarUrl());
                 hint("sidecar 已就绪：" + sidecarUrl());
                 llmAutoSync();          // v0.14.4：模型档随 sidecar 就绪自动挂载

@@ -1229,9 +1229,19 @@ def test_improve():
         need(not any(f.get('rid') == 'sign-error' for f in echoed['findings']),
              're-signing the echoed version reported a sign-error: %r'
              % (echoed['findings'],))
-        need(echoed['code'] == prev_signed and echoed.get('sig') == prev_sig,
+        # v0.16.0（B3）：签名 payload 里现在带作业上下文（meta v2），所以「同一个程序」
+        # 的比较要把签名行里的 payload 摘掉再看：id 与语句必须一模一样。
+        def _no_payload(text):
+            return re.sub(r'(aigenerated:[^:\"]+:[0-9a-f]{12}):[^\"]*', r'\1', text)
+
+        need(echoed.get('sig') == prev_sig and _no_payload(echoed['code']) == _no_payload(prev_signed),
              're-signing the echoed version did not reproduce the same program: '
              'sig %r -> %r' % (prev_sig, echoed.get('sig')))
+        _m = re.search(r'aigenerated:[^:\"]+:[0-9a-f]{12}:([^\"]*)', echoed['code'])
+        need(_m is not None, 'the echoed program lost its signature payload')
+        _meta = aigenerated.decode_meta(_m.group(1))
+        need(isinstance(_meta, dict) and _meta.get('ws') == ws['id'],
+             'the signed program does not carry its workspace context: %r' % (_meta,))
         checks += 1
     finally:
         shutil.rmtree(echo_tmp, ignore_errors=True)
@@ -1702,6 +1712,15 @@ def test_life():
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read().decode('utf-8'))
 
+    def raw_post(url, path, raw):
+        req = urllib.request.Request(url + path, data=raw, method='POST')
+        req.add_header('Content-Type', 'application/json')
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.status, r.read().decode('utf-8', 'replace')
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode('utf-8', 'replace')
+
     def wait_exit(p, timeout=20):
         try:
             p.communicate(timeout=timeout)
@@ -1724,6 +1743,15 @@ def test_life():
         need(int(h.get('port') or 0) == int(u1.rsplit(':', 1)[1]),
              '/health port %r does not match %r' % (h.get('port'), u1))
         need(post(u1, '/ping').get('ok') is True, 'POST /ping did not answer')
+        # v0.15.3 真机根因：模块把 JS 对象 {} 直接当请求体发，socket 拼出来是
+        # "[object Object]" —— /ping 必须先解析 JSON，所以回 400，模块把这一次 400
+        # 当成「后端没了」，于是停发心跳、45 秒后 sidecar 自退（表现为「已就绪却投不出去」）。
+        code_bad, _ = raw_post(u1, '/ping', b'[object Object]')
+        need(code_bad == 400,
+             'a non-JSON heartbeat body answered %r, want 400 (the module must send "{}")'
+             % (code_bad,))
+        code_ok, _ = raw_post(u1, '/ping', b'{}')
+        need(code_ok == 200, 'a JSON "{}" heartbeat answered %r, want 200' % (code_ok,))
         need(post(u1, '/shutdown').get('ok') is True, 'POST /shutdown did not answer')
         need(wait_exit(p1) == 0, 'a shutdown sidecar did not exit cleanly')
         checks += 1

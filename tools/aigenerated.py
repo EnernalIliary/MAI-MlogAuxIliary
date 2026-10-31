@@ -169,28 +169,93 @@ def collect_comments(text: str) -> list[dict]:
     return out
 
 
-def encode_comments(comments: list[dict]) -> str:
-    if not comments:
+PAYLOAD_V = 2
+
+#: meta 里这四把键是有意义的：ws（工作区 id）、name（工作区/蓝图名）、
+#: prompt（用户那句话）、job（作业 id）。mod 侧只认这四个，别的一律忽略。
+META_KEYS = ("ws", "name", "prompt", "job")
+
+
+def _meta_text(value, limit: int) -> str:
+    """meta 是塞进 mlog 字符串字面量里的：引号、反斜杠、换行都会毁掉那一行。"""
+    out = []
+    for ch in str(value or ""):
+        if ch == '"' or ch == "\\":
+            out.append("'")
+        elif ch in "\r\n\t":
+            out.append(" ")
+        elif ord(ch) < 32:
+            continue
+        else:
+            out.append(ch)
+    return " ".join("".join(out).split())[:limit]
+
+
+def meta_of_job(job: dict) -> dict | None:
+    """作业 -> 跟着代码走的上下文（蓝图「详细」页续聊靠它认人）。"""
+    ws = job.get("workspace") if isinstance(job.get("workspace"), dict) else {}
+    out = {}
+    ws_id = _meta_text(ws.get("id"), 64)
+    if ws_id:
+        out["ws"] = ws_id
+    name = _meta_text(ws.get("name"), 40)
+    if name:
+        out["name"] = name
+    prompt = _meta_text(job.get("desc"), 160)
+    if prompt:
+        out["prompt"] = prompt
+    jid = _meta_text(job.get("id"), 24)
+    if jid:
+        out["job"] = jid
+    return out or None
+
+
+def encode_comments(comments: list[dict], meta: dict | None = None) -> str:
+    """注释块 -> payload。没有 meta 时保持 v1（裸数组），老代码照样能读。
+
+    v2 是对象 {"v":2,"c":[[line,stmt,text],…],"m":{…}}：注释与上下文一起走，
+    因为 .msch 编译会把 `#` 注释剥掉，能跟着代码跑的只有字符串里的 base64。
+    """
+    if not comments and not meta:
         return ""
-    raw = json.dumps(
-        [[c["line"], c["stmt"], c["text"]] for c in comments],
-        ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    rows = [[c["line"], c["stmt"], c["text"]] for c in comments]
+    obj = {"v": PAYLOAD_V, "c": rows, "m": meta} if meta else rows
+    raw = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     comp = zlib.compress(raw, 9)
     blob = (b"z" + comp) if len(comp) < len(raw) else (b"j" + raw)
     return base64.urlsafe_b64encode(blob).decode("ascii").rstrip("=")
 
 
-def decode_comments(payload: str | None) -> list[dict]:
+def decode_payload(payload: str | None) -> tuple[list[dict], dict | None]:
+    """-> (comments, meta)。v1（数组）与 v2（对象）都吃。"""
     if not payload:
-        return []
+        return [], None
     pad = "=" * (-len(payload) % 4)
     try:
         blob = base64.urlsafe_b64decode(payload + pad)
         raw = zlib.decompress(blob[1:]) if blob[:1] == b"z" else blob[1:]
-        rows = json.loads(raw.decode("utf-8"))
+        doc = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError, zlib.error, json.JSONDecodeError):
         raise SignError("bad comment payload in the signature")
-    return [{"line": int(r[0]), "stmt": int(r[1]), "text": str(r[2])} for r in rows]
+    meta = None
+    rows = doc
+    if isinstance(doc, dict):
+        rows = doc.get("c") or []
+        m = doc.get("m")
+        if isinstance(m, dict):
+            meta = {k: str(m[k])[:200] for k in META_KEYS if str(m.get(k) or "")}
+            meta = meta or None
+    if not isinstance(rows, list):
+        raise SignError("bad comment payload in the signature")
+    return [{"line": int(r[0]), "stmt": int(r[1]), "text": str(r[2])} for r in rows], meta
+
+
+def decode_comments(payload: str | None) -> list[dict]:
+    return decode_payload(payload)[0]
+
+
+def decode_meta(payload: str | None) -> dict | None:
+    return decode_payload(payload)[1]
 
 
 def _hash(author: str, body: str) -> str:
@@ -203,7 +268,7 @@ def _find(text: str):
 
 
 def sign_text(text: str, author: str = DEFAULT_AUTHOR, force: bool = False,
-              comments: list[dict] | None = None):
+              comments: list[dict] | None = None, meta: dict | None = None):
     """Return (signed_text, id).  Raises SignError if it would change an id.
 
     Comments are moved into the signature string (base64 payload), so the
@@ -261,8 +326,11 @@ def sign_text(text: str, author: str = DEFAULT_AUTHOR, force: bool = False,
                 f"body changed since signing (id {old_id} -> {pid}); "
                 f"pass --force to re-sign")
     cs = collect_comments(text) if comments is None else comments
-    old = (decode_comments(hits[0].group(3))
-           if hits and hits[0].group(3) else [])
+    old, old_meta = (decode_payload(hits[0].group(3))
+                     if hits and hits[0].group(3) else ([], None))
+    # 重签没显式给 meta 就把旧的带过来：上下文跟着代码走，不该因为一次重签丢掉
+    if meta is None:
+        meta = old_meta
     if comments is None and old:
         if len(cs) == len(old):
             # keep the original line numbers, refresh the text/anchors
@@ -270,7 +338,7 @@ def sign_text(text: str, author: str = DEFAULT_AUTHOR, force: bool = False,
                 c["line"] = o["line"]
         else:
             cs = old
-    enc = encode_comments(cs)
+    enc = encode_comments(cs, meta)
     payload = f":{enc}" if enc else ""
     sig = f'"aigenerated:{author}:{pid}{payload}"'
     if slot is not None:
@@ -408,7 +476,7 @@ def restore_text(text: str) -> tuple[str, str, list[dict]]:
     if not hits:
         raise SignError("missing hidden @aigenerated argument")
     author = hits[0].group(1)
-    cs = decode_comments(hits[0].group(3))
+    cs, meta = decode_payload(hits[0].group(3))
     body = _body(text)
     lines = body.rstrip("\n").split("\n")
     total = len(lines)
@@ -424,7 +492,7 @@ def restore_text(text: str) -> tuple[str, str, list[dict]]:
         out.append(line)
     out.extend(c["text"] for k in sorted(buckets) for c in buckets[k])
     # keep the comments in the delivered text; only the hash ignores them
-    enc = encode_comments(cs)
+    enc = encode_comments(cs, meta)
     payload = f":{enc}" if enc else ""
     sig = SIG_LINE.format(author=author, pid=hits[0].group(2), payload=payload)
     while out and not out[-1].strip():

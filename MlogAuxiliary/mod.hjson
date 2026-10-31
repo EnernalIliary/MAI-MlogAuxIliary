@@ -1,8 +1,8 @@
 name: "mlog-auxiliary"
 displayName: "Mlog辅助"
 author: "lliary"
-description: "游戏内写逻辑的入口：按住 F3 框选处理器，写一句要什么，sidecar 生成 mlog 并做静态检查，预览后经原版 config 通道写入。框选即工作区：写完不消失，可继续改进，也可归档、恢复、释放。原版逻辑编辑器底部带审查栏（ERR/WARN 计数、语句数、ipt、链接数、详情），问题行左侧贴彩色箭头。本地快检离线可用（未知指令、拼错子命令、版本门、断链名、超 1000 条）。sidecar 与模型档随游戏自动挂载；未配置模型时不生成任何代码，只提示要配什么。框角的「查看 / 取消 / 续聊」是原版控件，大小可在设置里按倍率调（0.5×–2.0×）；续聊能对框里单台接着上一版改。作业状态默认只在本机提示，可在设置里改为按「<MAI:logic:><状态>(x,y):详情」直接发进服务器聊天框（逻辑图标由游戏渲染，客机也能发）。生成时按描述从 8 条已验证样例里挑 3 条给模型参考。控制台：maiVersion / maiPing / maiAi / maiReview / maiDiag / maiSelfTest / maiSettings / maiUndo 等。可在游戏内直接导入（首次自动解出后端）。"
-version: "0.15.2"
+description: "游戏内写逻辑的入口：按住 F3 框选处理器，写一句要什么，sidecar 生成 mlog 并做静态检查，预览后经原版 config 通道写入。框选即工作区：写完不消失，可继续改进，也可归档、恢复、释放。原版逻辑编辑器底部带审查栏（ERR/WARN 计数、语句数、ipt、链接数、详情），问题行左侧贴彩色箭头。本地快检离线可用（未知指令、拼错子命令、版本门、断链名、超 1000 条）。sidecar 与模型档随游戏自动挂载；未配置模型时不生成任何代码，只提示要配什么。框角的「查看 / 取消 / 续聊」是原版控件，大小可在设置里按倍率调（0.5×–2.0×）；续聊能对框里单台接着上一版改。作业状态默认只在本机提示，可在设置里改为按「<MAI:logic:><状态>(x,y):详情」直接发进服务器聊天框（逻辑图标由游戏渲染，客机也能发）。生成时按描述从 8 条已验证样例里挑 3 条给模型参考。控制台：maiVersion / maiPing / maiAi / maiReview / maiDiag / maiSelfTest / maiSettings / maiUndo 等。可在游戏内直接导入（首次自动解出后端）。心跳每 4 秒一次，后端 45 秒收不到就自行退出，游戏关掉后不留进程；安装时旧副本移到 saves\\mod-backups，不再与新版抢同一个模组名。"
+version: "0.15.3"
 minGameVersion: "146"
 # hidden: true —— 自用模组：不上报给服务器（Mods.getModStrings 只收 !meta.hidden），
 # 联机不会被 "Incompatible mods" 踢；hidden 只跳过 loadContent()（不能注册新方块/单位），

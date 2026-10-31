@@ -1220,10 +1220,19 @@ def main():
                         ('httpRaw(method, sidecarUrl() + path, body)',
                          'requests still go to the hand-filled address'),
                         ('sidecarPing();',
-                         'the per-frame hook no longer pings')
+                         'the per-frame hook no longer pings'),
+                        ('httpJson("POST", "/ping", "{}"',
+                         'v0.15.3: the heartbeat body must be JSON text, not an object')
                        ):
         if needle not in code_only:
             problems.append('v0.15.0: ' + why)
+    # v0.15.3 真机回归：{} 会被 httpRaw 拼成 "[object Object]"，sidecar 回 400，
+    # 心跳被判失败、45 秒后进程自退（「已就绪但投不出去」）。这一行必须不再出现。
+    pinned_red = (('"/ping", {}', 'v0.15.3: the heartbeat is back to a non-JSON body'),
+                  ('"/shutdown", {}', 'v0.15.3: the retire request is back to a non-JSON body'))
+    for needle, why in pinned_red:
+        if needle in code_only:
+            problems.append(why)
     for needle, why in (('function sidecarIsZip(', 'v0.14.6: the zip-mod check is gone'),
                         ('function sidecarCopyTree(',
                          'v0.14.6: the zip-mod extraction is gone'),

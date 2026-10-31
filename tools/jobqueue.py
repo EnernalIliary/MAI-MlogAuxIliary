@@ -703,7 +703,7 @@ class Queue:
                                                           job['attempts']))
                     return
                 continue
-            res = self._materialize(job, out)
+            res = self._materialize(job, out, jid)
             self._set(jid, findings=res['findings'], explanation=res.get('explanation') or '',
                       assumptions=res.get('assumptions') or [],
                       cost=res.get('cost') or '',
@@ -717,8 +717,10 @@ class Queue:
                 return
             hint = res['findings']
 
-    def _materialize(self, job, out):
+    def _materialize(self, job, out, job_id=''):
         """Provider output -> {ok, code, findings, ...}; the anchored tier goes through compose."""
+        # 签名里的 meta 要带作业 id，_run 里那个 jid 才是权威值
+        job = dict(job, id=job_id or job.get('id') or '')
         L = _logicd()
         # keep None ("the mod could not read the table") apart from [] ("no links"):
         # the gate treats the empty list as authoritative and skips None entirely.
@@ -732,7 +734,9 @@ class Queue:
             # force=True: an 'improve' reply often still carries the previous
             # version's token, which must be replaced, not rejected.
             try:
-                code, sig = aigenerated.sign_text(code, SIGN_AUTHOR, force=True)
+                code, sig = aigenerated.sign_text(
+                    code, SIGN_AUTHOR, force=True,
+                    meta=aigenerated.meta_of_job(job))
             except aigenerated.SignError as exc:
                 res = gate(code, links, ipt=ipt)
                 res['findings'] = [{'sev': 'ERR', 'rid': 'sign-error', 'line': 0,

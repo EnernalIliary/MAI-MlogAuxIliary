@@ -5,7 +5,7 @@
 
 # Install the MAI mod into a Mindustry saves\mods folder, then check every copied
 # file against the SHA256 list in VERSION.txt.  Nothing is written outside that
-# folder (the old copy is moved aside as MlogAuxiliary.bak-<stamp>, not deleted).
+# folder (the old copy is moved to saves\mod-backups, never deleted, and never left in mods).
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -84,9 +84,20 @@ if ($Target -ne '') {
 if (-not (Test-Path -LiteralPath $mods)) { New-Item -ItemType Directory -Force -Path $mods | Out-Null }
 
 $dest = Join-Path $mods $modName
+# v0.15.3：旧副本必须挪出 mods。mods 下任何带 mod.hjson 的目录都是一个模组，而旧副本的
+# 内部名与新版相同（mlog-auxiliary）—— Mods.loadMods() 按内部名去重，扫描顺序靠后的赢，
+# 于是「装的是新版，游戏里跑的却是上一版」（真机踩到：装着 0.15.2，实跑的 .bak 里 0.15.1）。
+$bakRoot = Join-Path (Split-Path -Parent $mods) 'mod-backups'
+if (-not (Test-Path -LiteralPath $bakRoot)) { New-Item -ItemType Directory -Force -Path $bakRoot | Out-Null }
+Get-ChildItem -LiteralPath $mods -Directory -Filter ($modName + '.bak-*') -ErrorAction SilentlyContinue | ForEach-Object {
+    $old = Join-Path $bakRoot $_.Name
+    if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+    Move-Item -LiteralPath $_.FullName -Destination $old
+    Write-Host ('[info] moved a stale copy out of mods: ' + $_.Name) -ForegroundColor DarkGray
+}
 $bak = ''
 if (Test-Path -LiteralPath $dest) {
-    $bak = $dest + '.bak-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+    $bak = Join-Path $bakRoot ($modName + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
     Move-Item -LiteralPath $dest -Destination $bak
 }
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -106,7 +117,7 @@ if ($bad.Count -gt 0) {
 }
 
 Write-Host ('[ok] MAI ' + $modVer + ' installed to ' + $dest) -ForegroundColor Green
-if ($bak -ne '') { Write-Host ('     previous copy moved to ' + $bak) }
+if ($bak -ne '') { Write-Host ('     previous copy moved to ' + $bak + ' (outside mods)') }
 Write-Host ('     sidecar ' + $sideVer + ' is bundled in sidecar\bin\logicd.exe -- the mod starts it by itself')
 Write-Host ''
 Write-Host 'next:'
