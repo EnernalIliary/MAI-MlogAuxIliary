@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # Windows runner 的默认编码是 cp1252：工具打印中文（如签名作者）会 UnicodeEncodeError，
+  # 强制 UTF-8 后与本地一致。
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
 jobs:
   tests:
     name: 测试（windows）

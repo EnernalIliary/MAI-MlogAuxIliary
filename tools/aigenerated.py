@@ -434,6 +434,13 @@ def restore_text(text: str) -> tuple[str, str, list[dict]]:
 
 
 def main(argv) -> int:
+    # 控制台编码可能是 cp1252 之类（Windows 非中文区、CI 默认），签名里带作者中文就会炸；
+    # 输出只是给人看的，切到 UTF-8 并容错替换即可，文件读写本来都是显式 UTF-8。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description="hidden @aigenerated signature for AI-written mlog")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
