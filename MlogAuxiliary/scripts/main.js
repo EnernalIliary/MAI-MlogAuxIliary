@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.15.3";
+    var MOD_VERSION = "0.16.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -3624,6 +3624,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }).width(120);
             d.cont.add(frow).left().row();
             d.buttons.button("刷新", function(){ renderManager(host, d); }).width(110);
+            d.buttons.button("存成蓝图", function(){ blueprintSaveBoxAsk(null); }).width(130);   // v0.16.0 B1
             d.buttons.button("工作区快照", function(){ openWorkspaceDialog(); }).width(140);   // v0.14.1
             d.buttons.button("关闭框选框", function(){ hint(closeJobBox("框选框已关掉")); d.hide(); }).width(140);
             d.buttons.button("关闭", function(){ d.hide(); }).width(110);
@@ -3831,7 +3832,10 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             host.button("继续改进", function(){
                 hint(wsImproveBatch(ws.id, "在上一版的基础上继续改进"));
                 d.hide();
-            }).width(160).row();
+            }).width(160);
+            host.button("存成蓝图", function(){
+                blueprintSaveBoxAsk(ws);
+            }).width(160).row();   // v0.16.0 B1
             host.button(String(ws.state) === "archived" ? "取消归档" : "归档", function(){
                 hint(String(ws.state) === "archived" ? wsRestore(ws.id) : wsArchive(ws.id));
                 renderWorkspaces(host, d);
@@ -3897,6 +3901,63 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 }
             }catch(e){ log("blueprint list failed: " + e); }
             return out;
+        }
+
+        // B1（v0.16.0）：把一块矩形存成原版蓝图，全部走原版接口。
+        // create(x,y,x2,y2) 复制方块（LogicBlock 的 config 一并带上，所以处理器代码随蓝图走）
+        // -> 往 tags 里填 name（不填会存成 unknown.msch）-> add()（按名字找文件、写盘、进列表）。
+        // add() 内部出异常只 ui.showException 不抛，所以写完必须回读 all() 校验，不能信返回值。
+        function blueprintHasName(name){
+            var list = blueprintList(400), i;
+            for(i = 0; i < list.length; i++){
+                if(String(list[i].name) === String(name)){ return true; }
+            }
+            return false;
+        }
+
+        function blueprintSaveBox(r, name, cb){
+            var done = function(msg){
+                if(cb !== null && cb !== undefined){ cb(msg); } else { hint(msg); }
+                return msg;
+            };
+            if(Vars.schematics === null || Vars.schematics === undefined){ return done("蓝图接口不可用"); }
+            if(r === null || r === undefined){ return done("没有可保存的框选"); }
+            var nm = trimText(String(name === null || name === undefined ? "" : name));
+            if(nm.length === 0){ nm = "MAI " + String(Number(r.x1)) + "," + String(Number(r.y1)); }
+            var s = null;
+            try{ s = Vars.schematics.create(Number(r.x1), Number(r.y1), Number(r.x2), Number(r.y2)); }
+            catch(e){ log("blueprint create failed: " + e); return done("存蓝图失败：原版接口报错（" + e + "）"); }
+            if(s === null || s === undefined){ return done("存蓝图失败：原版没有返回蓝图"); }
+            var tiles = 0;
+            try{ tiles = seqSize(s.tiles); }catch(e0){ tiles = 0; }
+            if(tiles <= 0){ return done("这块区域是空的，没有可保存的方块"); }
+            try{ s.tags.put("name", nm); }catch(e1){ log("blueprint name failed: " + e1); }
+            try{ s.tags.put("description", "Mlog辅助 工作区 · " + nm + " · v" + MOD_VERSION); }catch(e2){ }
+            var before = blueprintList(400).length;
+            try{ Vars.schematics.add(s); }
+            catch(e3){ log("blueprint add failed: " + e3); return done("存蓝图失败：写入时报错（" + e3 + "）"); }
+            var after = blueprintList(400).length;
+            if(after <= before && !blueprintHasName(nm)){
+                return done("存蓝图失败：蓝图列表里没出现（原版把错误显示在控制台了）");
+            }
+            return done("已存成蓝图「" + nm + "」：方块 " + String(tiles) + " 个，原版蓝图页可见");
+        }
+
+        // 入口：有工作区就用它的 bounds，否则用当前框选框。
+        function blueprintSaveBoxAsk(ws){
+            var r = null;
+            if(ws !== null && ws !== undefined && ws.bounds !== null && ws.bounds !== undefined){ r = ws.bounds; }
+            else if(jobBox !== null && jobBox.r !== null && jobBox.r !== undefined){ r = jobBox.r; }
+            if(r === null){ hint("没有可保存的框选"); return "no rect"; }
+            if(Vars.schematics === null || Vars.schematics === undefined){ hint("蓝图接口不可用"); return "no schematics"; }
+            var def = (ws !== null && ws !== undefined)
+                ? String(ws.name)
+                : ("MAI " + String(Number(r.x1)) + "," + String(Number(r.y1)));
+            if(Vars.ui === null || Vars.ui === undefined){ return blueprintSaveBox(r, def, null); }
+            Vars.ui.showTextInput("存成蓝图", "蓝图名（写进原版蓝图列表）", 64, def, function(name){
+                blueprintSaveBox(r, name, null);
+            });
+            return "asked";
         }
 
         // 从蓝图建一个空工作区：范围按玩家脚下的方块摆（无头没玩家就摆在地图中心）。
@@ -4512,6 +4573,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // ---------------------------------------------------------- 控制台接口
         var api = {
             // v0.15.0：面板上的失败说明与诊断（无头环境没有侧车也能自检文案）。
+            // v0.16.0 B1：蓝图保存的守卫（无头环境 Vars.schematics 为 null）。
+            maiBlueprintSaveProbe: function(rjson){
+                var r = null;
+                try{ r = JSON.parse(String(rjson)); }catch(e){ r = null; }
+                var msg = blueprintSaveBox(r, "探针蓝图", null);
+                return "probeblueprint:" + String(msg);
+            },
             maiJobDiagProbe: function(jobJson){
                 var job = (typeof jobJson === "string") ? parse(jobJson) : jobJson;
                 if(job === null || job === undefined){ return "MAIJOBPANELDIAG:no job"; }

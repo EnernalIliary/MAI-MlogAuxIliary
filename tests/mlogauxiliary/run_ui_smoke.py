@@ -355,6 +355,8 @@ def main():
     # where Vars.dataDirectory is null (headless sim does not call Vars.loadSettings).
     "print('MAIWORKSPACE:' + maiWorkspaceProbe());",
     "print('MAIWS2:' + maiWorkspace2Probe());",
+    # v0.16.0 B1: 存蓝图在无头环境（Vars.schematics 为 null）必须先守住，不能抛。
+    "print('MAIBP:' + maiBlueprintSaveProbe(JSON.stringify({x1:10, y1:10, x2:20, y2:20})));",
     "print('MAILLM:' + maiLlmProbe());",
     # v0.12.5: the retained selection box + corner badge state machine (no sidecar, no ui)
     "print('MAIJOBBOX0:' + maiJobBox());",
@@ -382,7 +384,7 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIBP:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
@@ -568,6 +570,10 @@ def main():
         problems.append('v0.15.1: the only-failed toggle is broken '
                         '(want MAIFILTER2:ok hit=2 of 3 btn=只看失败：开): %r'
                         % [l for l in lines if l.startswith('MAIFILTER2:')][:1])
+    if 'MAIBP:probeblueprint:蓝图接口不可用' not in joined:
+        problems.append('v0.16.0: save-as-blueprint must guard a null Vars.schematics '
+                        '(want MAIBP:probeblueprint:蓝图接口不可用): %r'
+                        % [l for l in lines if l.startswith('MAIBP:')][:1])
     if 'MAIJOBPANEL:ok' not in joined:
         problems.append('v0.13.2: the job view does not show assumptions + cost '
                         '(want MAIJOBPANEL:ok assumptions=2 cost=3): %r'
@@ -1233,6 +1239,22 @@ def main():
     for needle, why in pinned_red:
         if needle in code_only:
             problems.append(why)
+    # v0.16.0 B1：框选存蓝图必须走原版接口（用户口径：尽量调用原版保存蓝图的接口）：
+    # create() 复制方块 -> tags 里写 name（否则存成 unknown.msch）-> add() -> 回读 all() 校验。
+    # add() 出异常只 ui.showException 不抛，所以少了回读就等于没验过。
+    for needle, why in (('function blueprintSaveBox(r, name, cb){',
+                         'v0.16.0: the save-as-blueprint path is gone'),
+                        ('s = Vars.schematics.create(Number(r.x1), Number(r.y1), '
+                         'Number(r.x2), Number(r.y2));',
+                         'v0.16.0: the vanilla Schematics.create() call is gone'),
+                        ('s.tags.put("name", nm);',
+                         'v0.16.0: the blueprint name tag is not written (saves as unknown.msch)'),
+                        ('Vars.schematics.add(s);',
+                         'v0.16.0: the vanilla Schematics.add() call is gone'),
+                        ('if(after <= before && !blueprintHasName(nm)){',
+                         'v0.16.0: the read-back check after add() is gone')):
+        if needle not in code_only:
+            problems.append(why)
     for needle, why in (('function sidecarIsZip(', 'v0.14.6: the zip-mod check is gone'),
                         ('function sidecarCopyTree(',
                          'v0.14.6: the zip-mod extraction is gone'),
@@ -1629,7 +1651,7 @@ def main():
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                         'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
-                        'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:')):
+                        'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:')):
             print('  ' + l[:300])
     return 0
 
