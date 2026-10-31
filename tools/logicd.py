@@ -50,6 +50,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 import urllib.error
@@ -83,7 +84,7 @@ import aigenerated             # noqa: E402  (the hidden @aigenerated signature)
 PROTOCOL = 1
 # The sidecar is what gets restarted when a fix ships, and a stale process answers
 # /health with 200 all day, so let the answer say which build it is (v0.12.3).
-SIDECAR_VERSION = '0.14.7'
+SIDECAR_VERSION = '0.15.0'
 GAME = 'mindustry v160.7 (executor jar out/_server160.jar)'
 
 #: v0.14.2: every program this sidecar hands out is signed before it is analyzed
@@ -1189,6 +1190,22 @@ def job_brief(job):
     return {k: v for k, v in job.items() if k not in BRIEF_DROP}
 
 
+#: v0.15.0: the module pings while the game is alive; --idle-exit turns a silence
+#: into an exit, so a sidecar cannot outlive the session that spawned it.
+LAST_PING = time.time()
+STOP = threading.Event()
+
+
+def _exe_path():
+    """Where this process came from -- the module uses it to recognise its own build."""
+    try:
+        if getattr(sys, 'frozen', False):
+            return os.path.abspath(sys.executable)
+        return os.path.abspath(sys.argv[0] or '')
+    except Exception:
+        return ''
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'logicd/%s' % SIDECAR_VERSION
 
@@ -1210,8 +1227,12 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split('?')[0]
         try:
             if path == '/health':
+                global LAST_PING
+                LAST_PING = time.time()
                 self._send(200, {'ok': True, 'protocol': PROTOCOL,
-                                 'version': SIDECAR_VERSION})
+                                 'version': SIDECAR_VERSION,
+                                 'pid': os.getpid(), 'port': self.server.server_address[1],
+                                 'exe': _exe_path()})
             elif path == '/capabilities':
                 self._send(200, capabilities())
             elif path == '/jobs':
@@ -1269,6 +1290,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not isinstance(req, dict):
                 self._send(400, {'ok': False, 'error': 'body must be a JSON object'})
+                return
+            if path == '/ping':
+                # A live game says 'still here'; --idle-exit turns a silence into an exit.
+                global LAST_PING
+                LAST_PING = time.time()
+                self._send(200, {'ok': True, 'pid': os.getpid(),
+                                 'version': SIDECAR_VERSION})
+                return
+            if path == '/shutdown':
+                # The module retires a build it spawned itself (C1) instead of leaving a
+                # stale sidecar holding the port for the next session.
+                self._send(200, {'ok': True, 'bye': True, 'pid': os.getpid()})
+                STOP.set()
                 return
             if path == '/analyze':
                 code = req.get('code')
@@ -1354,24 +1388,49 @@ class Handler(BaseHTTPRequestHandler):
 
 #: one queue per process; main() may replace it (--jobs-provider / --jobs-dir)
 JOBS = None
+#: v0.15.0: how many jobs may talk to the model at the same time.  A batch from one
+#: F3 selection used to run strictly one after another; three keeps a selection of
+#: a few processors moving without hammering the endpoint, and --jobs-workers can
+#: raise or lower it.
+JOB_WORKERS = 3
 
 
 def jobs_queue():
     global JOBS
     if JOBS is None:
-        JOBS = jobqueue.Queue().start()
+        JOBS = jobqueue.Queue(workers=JOB_WORKERS).start()
     return JOBS
 
 
-def serve(host, port):
+def serve(host, port, idle_exit=0):
     srv = ThreadingHTTPServer((host, port), Handler)
     real = srv.server_address
     print('logicd listening on http://%s:%d' % (real[0], real[1]), flush=True)
+    th = threading.Thread(target=srv.serve_forever, kwargs={'poll_interval': 0.5})
+    th.daemon = True
+    th.start()
     try:
-        srv.serve_forever()
+        while not STOP.wait(0.5):
+            if idle_exit > 0 and time.time() - LAST_PING > idle_exit:
+                # Never kill a job that is still working: a long model call can outlast
+                # the idle window on a slow endpoint, and losing it would waste the call.
+                busy = True
+                try:
+                    busy = any(j.get('state') in ('queued', 'claimed', 'running')
+                               for j in jobs_queue().list(None))
+                except Exception:
+                    busy = True
+                if not busy:
+                    print('logicd idle for %d s with no ping, exiting' % idle_exit,
+                          flush=True)
+                    break
     except KeyboardInterrupt:
         pass
     finally:
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
         srv.server_close()
 
 
@@ -1392,6 +1451,10 @@ def main(argv=None):
                     help='none = 未配置模型, the product default since v0.14.4; '
                          'template = the offline intent router (kept for tests); '
                          'fake = test table; llm = a real model endpoint (or a recorded replay)')
+    ap.add_argument('--jobs-workers', type=int, default=3, metavar='N',
+                    help='how many jobs may wait on the model at once (v0.15.0; '
+                         'default 3). One F3 selection used to run its jobs one by '
+                         'one, so eight processors meant eight round trips in a row')
     ap.add_argument('--fake-provider', metavar='FILE',
                     help='JSON table for --jobs-provider fake: {"<desc substring>": output}')
     ap.add_argument('--llm-url', metavar='URL',
@@ -1408,6 +1471,10 @@ def main(argv=None):
                     help='replay recorded replies instead of calling a model (offline tests)')
     ap.add_argument('--llm-record', metavar='FILE',
                     help='append every {prompt, reply} to this JSONL file (real transcripts)')
+    ap.add_argument('--idle-exit', type=int, default=0, metavar='SEC',
+                    help='exit after SEC seconds without a ping and with no job in '
+                         'flight (v0.15.0; the module passes 45 so a sidecar cannot '
+                         'outlive the game). 0 = never')
     ap.add_argument('--jobs-drain', action='store_true',
                     help='run the queued jobs to completion, print them, exit')
     a = ap.parse_args(argv)
@@ -1430,7 +1497,10 @@ def main(argv=None):
                       'timeout': int(a.llm_timeout or 60),
                       'max_tokens': int(a.llm_max_tokens or mlogprovider.DEFAULT_MAX_TOKENS)})
     global JOBS
-    JOBS = jobqueue.Queue(jobqueue.Store(a.jobs_dir), provider=provider)
+    global JOB_WORKERS
+    JOB_WORKERS = max(1, int(getattr(a, 'jobs_workers', None) or JOB_WORKERS))
+    JOBS = jobqueue.Queue(jobqueue.Store(a.jobs_dir), provider=provider,
+                          workers=JOB_WORKERS)
     if a.jobs_drain:
         JOBS.drain()
         JOBS.stop()
@@ -1445,7 +1515,7 @@ def main(argv=None):
         return 0
     JOBS.start()
     try:
-        serve(a.host, a.port)
+        serve(a.host, a.port, idle_exit=max(0, int(getattr(a, 'idle_exit', 0) or 0)))
     finally:
         JOBS.stop()
     return 0

@@ -335,6 +335,15 @@ def main():
     "print('MAIJOBPANEL:' + maiJobPanelProbe(JSON.stringify({state:'done',"
     " assumptions:['假定一','假定二'],"
     " cost:'UNREACHABLE : 1 statement(s) can never run:\\nL11: control shootp salvo1 null 0\\nloop heads: L5(?)'})));",
+    # v0.15.0 (A2+A3): a failed job carries a class, a per-attempt log and the call
+    # that produced it; the panel has to turn that into a sentence.
+    "print('MAIJOBPANELDIAG:' + maiJobDiagProbe(JSON.stringify({state:'failed',"
+    " attempts:2, provider:'http', model:'m-a',"
+    " findings:[{sev:'ERR', line:0, msg:'model endpoint answered with an empty message',"
+    " kind:'empty'}],"
+    " attempt_log:[{n:1, ms:1200, provider:'http', model:'m-a', budget:4096,"
+    " prompt_tokens:11, completion_tokens:1600, finish_reason:'length', kind:'empty',"
+    " error:'empty reply'}]})));",
     # v0.14.0: the workspace data layer (W1) -- reuse by selection centre, archive, release.
     # The probe swaps the three storage primitives for an in-memory table, so it also works
     # where Vars.dataDirectory is null (headless sim does not call Vars.loadSettings).
@@ -367,7 +376,7 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIWORKSPACE:', 'MAIWS2:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIWORKSPACE:', 'MAIWS2:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
@@ -528,6 +537,16 @@ def main():
         problems.append('v0.14.1: the workspace dialog helpers are broken '
                         '(want MAIWS2:ok): %r'
                         % [l for l in lines if l.startswith('MAIWS2:')][:1])
+    if 'MAIJOBPANELDIAG:ok why=1 ev=2' not in joined:
+        problems.append('v0.15.0: the job panel does not explain a failed call '
+                        '(want MAIJOBPANELDIAG:ok why=1 ev=2): %r'
+                        % [l for l in lines if l.startswith('MAIJOBPANELDIAG:')][:1])
+    if '为什么：端点回了空内容' not in joined:
+        problems.append('v0.15.0: the failure explanation lost its wording: %r'
+                        % [l for l in lines if l.startswith('MAIJOBPANELDIAG:')][:1])
+    if 'finish_reason=length' not in joined:
+        problems.append('v0.15.0: the diagnostics no longer show the finish_reason: %r'
+                        % [l for l in lines if l.startswith('MAIJOBPANELDIAG:')][:1])
     if 'MAIJOBPANEL:ok' not in joined:
         problems.append('v0.13.2: the job view does not show assumptions + cost '
                         '(want MAIJOBPANEL:ok assumptions=2 cost=3): %r'
@@ -1025,7 +1044,15 @@ def main():
                          'the chat format probe is gone')):
         if needle not in code_only:
             problems.append('v0.13.0: ' + why)
-    for needle, why in (('function jobAssumptionLines(',
+    for needle, why in (('var JOB_WHY = {',
+                         'the failure-class wording table is gone'),
+                        ('function jobWhyLines(',
+                         'the human explanation of a failure is gone'),
+                        ('function jobEvidenceLines(',
+                         'the call evidence block is gone'),
+                        ('function jobLastAttempt(',
+                         'the attempts log is not read any more'),
+                        ('function jobAssumptionLines(',
                          'the job view stopped showing what the model assumed'),
                         ('function jobCostLines(',
                          'the job view stopped showing the cost report'),
@@ -1119,6 +1146,32 @@ def main():
             problems.append(why)
     # v0.14.6（用户 m06631）：游戏内导入的模组是 zip，`m.root` 是 ZipFi，随包的
     # logicd.exe 只是一个 zip 条目 —— 必须解到数据目录再从磁盘起进程。
+    for needle, why in (
+                        ('var SIDE_IDLE_EXIT = 45;',
+                         'the idle-exit constant is gone'),
+                        ('function sidecarLogPort(',
+                         "the module no longer reads the sidecar's chosen port"),
+                        ('function sidecarUrl(',
+                         'the module no longer routes to the chosen port'),
+                        ('function sidecarPing(',
+                         'the heartbeat is gone'),
+                        ('function sidecarVersionMismatch(',
+                         'the build check is gone'),
+                        ('function sidecarOurs(',
+                         'the own-build check is gone'),
+                        ('function sidecarRetire(',
+                         'the retire path is gone'),
+                        ('arr[2] = "0";',
+                         'the sidecar is spawned on a fixed port again'),
+                        ('arr[4] = String(SIDE_IDLE_EXIT);',
+                         'the sidecar is spawned without --idle-exit'),
+                        ('httpRaw(method, sidecarUrl() + path, body)',
+                         'requests still go to the hand-filled address'),
+                        ('sidecarPing();',
+                         'the per-frame hook no longer pings')
+                       ):
+        if needle not in code_only:
+            problems.append('v0.15.0: ' + why)
     for needle, why in (('function sidecarIsZip(', 'v0.14.6: the zip-mod check is gone'),
                         ('function sidecarCopyTree(',
                          'v0.14.6: the zip-mod extraction is gone'),
@@ -1514,7 +1567,7 @@ def main():
         print('  batch write: ' + wm[:170])
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
-                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIWORKSPACE:', 'MAIWS2:',
+                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIWORKSPACE:', 'MAIWS2:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:')):
             print('  ' + l[:300])
     return 0

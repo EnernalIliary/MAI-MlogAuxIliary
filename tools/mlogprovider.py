@@ -21,6 +21,7 @@ pieces of that seam so the queue itself stays offline and testable:
 import io
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
@@ -376,6 +377,32 @@ TOKENS_CEILING = 16000
 #: a screenful of it; the point is to explain a refusal, not to archive a transcript)
 REASONING_MAX = 12000
 
+# -- failure classes (v0.15.0) -------------------------------------------------
+# One string ('model endpoint answered with an empty message') was all the queue
+# ever saw, and it retried that exactly the way it retried a 401: same prompt, same
+# budget, no pause.  A job then ended as 'refused after 3 attempt(s)' and the player
+# could not tell a wrong key from a flaky proxy.  Every failure now carries a kind,
+# the kind decides whether another try can possibly help, and the pause before a
+# retry grows.
+ERR_TRANSPORT = "transport"      # the endpoint could not be reached at all
+ERR_HTTP = "http-status"         # the endpoint answered with an error status
+ERR_BAD_JSON = "bad-json"        # it answered, but not with JSON
+ERR_EMPTY = "empty"              # a message that carried no content
+ERR_TRUNCATED = "truncated"      # the token ceiling ended the reply
+ERR_PARSE = "unparsable"         # text came back, but not the JSON contract
+ERR_CONFIG = "config"            # nothing to call: retrying cannot change that
+
+#: kinds where repeating the request can plausibly work (transient by nature)
+RETRYABLE = (ERR_TRANSPORT, ERR_EMPTY)
+#: kinds where another request gives the same answer (a wrong key, no url)
+FATAL = (ERR_CONFIG,)
+#: seconds to wait before try 2, try 3; the last value repeats
+BACKOFF = (0.8, 2.0, 4.0)
+#: one attempt plus the retries the provider itself is willing to spend
+RETRY_TOTAL = 3
+#: how many times the budget may quadruple before a truncated reply is hopeless
+TRUNC_TOTAL = 4
+
 
 class HttpProvider:
     """OpenAI-compatible chat completion, stdlib only, no network at import."""
@@ -393,27 +420,63 @@ class HttpProvider:
         self.ceiling = max(self.max_tokens, int(ceiling or TOKENS_CEILING))
 
     def __call__(self, job, hint=None):
+        """Ask the endpoint; retry only what a retry can fix (v0.15.0).
+
+        Three very different outcomes used to be retried identically: an unreachable
+        endpoint, a proxy that answers with an empty message, and a reply cut off by
+        the token ceiling -- same prompt, same budget, no pause between them.  The
+        kind of the failure now picks the plan: truncated grows the budget once (the
+        v0.12.3 behaviour), transport/empty wait and try again, http 4xx and a
+        missing configuration stop immediately with the reason still attached.
+        """
         prompt = build_prompt(job, hint)
-        out = self._once(prompt, self.max_tokens, self.timeout)
-        # A reasoning model spends the budget on reasoning_content *before* it writes
-        # anything, so a tight max_tokens shows up as 'empty message, finish_reason=length'
-        # rather than as a short answer (v0.12.3, measured: 502 prompt tokens, 1600
-        # completion tokens, content empty, reasoning_content full).  max_tokens is only a
-        # ceiling, so retrying once with a much larger one costs nothing when the first
-        # attempt was stopped by the ceiling and not by the model finishing.
-        err = out.get("error") or ""
-        if "finish_reason=length" in err and self.max_tokens < self.ceiling:
-            bigger = min(self.ceiling, self.max_tokens * 4)
-            wider = min(600, max(self.timeout, 30) * 3)
-            again = self._once(prompt, bigger, wider)
-            if not again.get("error"):
-                return again
-            if "finish_reason=length" in (again.get("error") or ""):
-                return _keep_reason({"error": _budget_hint(again["error"], bigger)}, again)
-            return again
-        if "finish_reason=length" in err:
-            return _keep_reason({"error": _budget_hint(err, self.max_tokens)}, out)
-        return out
+        budget, timeout = self.max_tokens, self.timeout
+        attempt = 0
+        while True:
+            attempt += 1
+            out = self._once(prompt, budget, timeout)
+            diag = out.get("diag")
+            if not isinstance(diag, dict):
+                diag = {}
+            diag["attempt"] = attempt
+            diag["budget"] = budget
+            out["diag"] = diag
+            kind = str(out.get("kind") or "")
+            if kind == ERR_TRUNCATED:
+                if budget < self.ceiling and attempt < TRUNC_TOTAL:
+                    budget = min(self.ceiling, budget * 4)
+                    timeout = min(600, max(timeout, 30) * 3)
+                    continue
+                return _keep_reason(
+                    {"error": _budget_hint(out.get("error") or "", budget),
+                     "kind": ERR_TRUNCATED, "diag": diag}, out)
+            if kind in RETRYABLE and attempt < RETRY_TOTAL:
+                time.sleep(BACKOFF[min(attempt - 1, len(BACKOFF) - 1)])
+                continue
+            return out
+
+    def _diag(self, budget, **extra):
+        """What was asked, with what, and what came back -- kept on the job."""
+        d = {"provider": "http", "url": self.url, "model": self.model or "",
+             "budget": int(budget)}
+        d.update(extra)
+        return d
+
+    def _fail(self, kind, msg, budget, doc=None, **extra):
+        res = {"error": msg, "kind": kind, "diag": self._diag(budget, **extra)}
+        if isinstance(doc, dict):
+            res["diag"].update(_usage(doc))
+            res = _with_reason(res, doc)
+            # A reasoning model that spent the whole budget thinking comes back as an
+            # empty message with finish_reason=length.  That is the token ceiling, not
+            # a proxy hiccup: the fix is a bigger budget (the v0.12.3 behaviour), so the
+            # kind has to say 'truncated' even though the text looked 'empty'.
+            if res["diag"].get("finish_reason") == "length":
+                res["kind"] = ERR_TRUNCATED
+                kind = ERR_TRUNCATED
+        if kind in FATAL:
+            res["fatal"] = True
+        return res
 
     def _once(self, prompt, budget, timeout):
         body = {"messages": [{"role": "user", "content": prompt}],
@@ -434,46 +497,89 @@ class HttpProvider:
             if exc.code == 404:
                 hint = (" (a 404 usually means the url is the API base, not the full "
                         "chat endpoint -- %s/chat/completions)" % self.url.rstrip("/"))
-            body = ""
+            body_text = ""
             try:
-                body = exc.read().decode("utf-8", "replace")[:300]
+                body_text = exc.read().decode("utf-8", "replace")[:300]
             except Exception:
-                body = ""
-            return {"error": "model endpoint refused: HTTP %s %s%s%s"
-                             % (exc.code, exc.reason, hint,
-                                (" | " + body) if body.strip() else "")}
+                body_text = ""
+            res = self._fail(
+                ERR_HTTP,
+                "model endpoint refused: HTTP %s %s%s%s"
+                % (exc.code, exc.reason, hint,
+                   (" | " + body_text) if body_text.strip() else ""),
+                budget, http_status=exc.code)
+            # A wrong key, a forbidden model or a missing route cannot start working
+            # because we asked again: fail now and keep the reason in front of the
+            # player instead of burying it under two more identical refusals.
+            if exc.code in (401, 403, 404):
+                res["fatal"] = True
+            return res
         except urllib.error.URLError as exc:
-            return {"error": "model endpoint unreachable: %s" % exc}
+            return self._fail(ERR_TRANSPORT, "model endpoint unreachable: %s" % exc, budget)
         except OSError as exc:
-            return {"error": "model call failed: %s" % exc}
+            return self._fail(ERR_TRANSPORT, "model call failed: %s" % exc, budget)
         try:
             doc = json.loads(raw)
         except ValueError:
-            return {"error": "model endpoint did not answer JSON"}
+            return self._fail(ERR_BAD_JSON, "model endpoint did not answer JSON", budget,
+                              raw_head=raw[:200])
         text = _reply_text(doc)
         if text is None:
-            return _with_reason(
-                {"error": "model endpoint answered without a message"
-                          + _why_blank(doc, budget)}, doc)
+            return self._fail(
+                ERR_EMPTY,
+                "model endpoint answered without a message" + _why_blank(doc, budget),
+                budget, doc=doc)
         if not text.strip():
             # An empty content is what a proxy or a token-starved model looks like; the
             # bare 'empty reply' left players guessing, so say what came back instead.
             alt = _alt_text(doc)
             if alt:
                 try:
-                    return _with_reason(parse_reply(alt), doc)
+                    parsed = parse_reply(alt)
                 except ProviderError:
-                    pass
-            return _with_reason(
-                {"error": "model endpoint answered with an empty message"
-                          + _why_blank(doc, budget)}, doc)
+                    parsed = None
+                if parsed is not None:
+                    parsed["diag"] = self._diag(budget, reply_chars=len(alt), **_usage(doc))
+                    return _with_reason(parsed, doc)
+            return self._fail(
+                ERR_EMPTY,
+                "model endpoint answered with an empty message" + _why_blank(doc, budget),
+                budget, doc=doc)
         try:
-            return _with_reason(parse_reply(text), doc)
+            parsed = parse_reply(text)
         except ProviderError as exc:
             hint = _why_blank(doc, budget)
-            return _with_reason(
-                {"error": str(exc) + hint if hint else str(exc)}, doc)
+            return self._fail(ERR_PARSE, (str(exc) + hint) if hint else str(exc),
+                              budget, doc=doc)
+        parsed["diag"] = self._diag(budget, reply_chars=len(text), **_usage(doc))
+        return _with_reason(parsed, doc)
 
+
+def _usage(doc):
+    """The parts of an OpenAI reply worth keeping as evidence (v0.15.0).
+
+    A job used to record nothing about the call behind it -- no model, no token
+    counts, no finish_reason -- so a refusal could not be explained afterwards.
+    """
+    out = {}
+    if not isinstance(doc, dict):
+        return out
+    choices = doc.get("choices")
+    c0 = choices[0] if isinstance(choices, list) and choices else None
+    if isinstance(c0, dict):
+        fr = c0.get("finish_reason")
+        if fr:
+            out["finish_reason"] = str(fr)
+    usage = doc.get("usage")
+    if isinstance(usage, dict):
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            v = usage.get(key)
+            if isinstance(v, int):
+                out[key] = v
+    model = doc.get("model")
+    if isinstance(model, str) and model.strip():
+        out["model"] = model.strip()
+    return out
 
 def _budget_hint(err, budget):
     """Say what to change when the ceiling -- not the model -- ended the reply."""

@@ -368,22 +368,48 @@ class Store:
         return out
 
 
+
+#: v0.15.0: the provider already retried what a retry can fix (a transport hiccup,
+#: an empty completion).  Re-running the whole job for the same class only
+#: multiplies the wait -- the previous build sent the identical prompt three times
+#: and reported 'refused after 3 attempt(s)' without naming the wall.
+PROVIDER_EXHAUSTED = ('empty', 'transport')
+#: a job is a small file the mod reads over HTTP; keep the evidence bounded
+ATTEMPT_LOG_MAX = 8
+
+
+def _exhausted_text(kind, err, attempts):
+    """Say which wall it was, not just that the job gave up (v0.15.0)."""
+    if kind == 'empty':
+        return ('the endpoint returned an empty message %d times in a row -- the '
+                'proxy or the model produced no content. Check the key and the '
+                'proxy, or raise --llm-max-tokens.' % attempts)
+    if kind == 'transport':
+        return ('the endpoint could not be reached %d times in a row (%s). Check the '
+                'address, the proxy, and that this machine can reach it.'
+                % (attempts, str(err)[:160]))
+    return str(err)
+
+
 class Queue:
     """The state machine.  provider(job, hint) -> output dict is the only seam to a model."""
 
-    def __init__(self, store=None, provider=None, poll=0.05):
+    def __init__(self, store=None, provider=None, poll=0.05, workers=1):
         self.store = store or Store()
         # v0.14.4：默认不再是模板档 —— 没配模型就明确说没配。
         self.provider = provider or unconfigured_provider
         self.poll = poll
         self.lock = threading.RLock()
         self.jobs = {}
-        self.thread = None
+        # v0.15.0: a selection of N processors is N model calls; one worker made
+        # that N calls in a row while the player watched the same badge.
+        self.workers = max(1, int(workers or 1))
+        self.threads = []
         self.running = False
         self.resumed = 0
         for job in self.store.all():
-            if job.get('state') == 'running':     # crashed mid-flight: put it back
-                job['state'] = 'queued'
+            if job.get('state') in ('running', 'claimed'):
+                job['state'] = 'queued'           # crashed mid-flight: put it back
                 job['resumed'] = True
                 self.store.save(job)
                 self.resumed += 1
@@ -480,18 +506,21 @@ class Queue:
             return dict(job)
 
     def start(self):
-        if self.thread is not None:
+        if self.threads:
             return self
         self.running = True
-        self.thread = threading.Thread(target=self._loop, name='jobqueue', daemon=True)
-        self.thread.start()
+        for i in range(self.workers):
+            t = threading.Thread(target=self._loop, name='jobqueue-%d' % (i + 1),
+                                 daemon=True)
+            t.start()
+            self.threads.append(t)
         return self
 
     def stop(self):
         self.running = False
-        t = self.thread
-        self.thread = None
-        if t is not None:
+        threads = self.threads
+        self.threads = []
+        for t in threads:
             t.join(timeout=5)
         return self
 
@@ -499,23 +528,32 @@ class Queue:
         """Run the worker inline until nothing is queued (tests, one-shot CLI)."""
         deadline = time.time() + timeout
         while time.time() < deadline:
-            jid = self._next()
+            jid = self._claim()
             if jid is None:
                 return True
             self._run(jid)
         return False
 
     # -- worker ----------------------------------------------------------
-    def _next(self):
+    def _claim(self):
+        """Atomically take the oldest queued job (v0.15.0).
+
+        _next() only *looked* at the queue; with more than one worker two threads
+        could look, see the same job and run it twice.  Claiming marks the job in the
+        same critical section that found it.
+        """
         with self.lock:
             for jid in sorted(self.jobs, key=lambda i: (self.jobs[i].get('created') or 0, i)):
-                if self.jobs[jid]['state'] == 'queued':
+                job = self.jobs[jid]
+                if job['state'] == 'queued':
+                    job['state'] = 'claimed'
+                    self.store.save(job)
                     return jid
         return None
 
     def _loop(self):
         while self.running:
-            jid = self._next()
+            jid = self._claim()
             if jid is None:
                 time.sleep(self.poll)
                 continue
@@ -546,6 +584,40 @@ class Queue:
         except Exception:
             traceback.print_exc()
 
+    def _record_attempt(self, jid, diag, kind, err, started):
+        """Keep what each ask of the model produced and how it ended (v0.15.0).
+
+        The job used to carry the verdict only, so a refusal could not be explained
+        afterwards: no model name, no token counts, no finish_reason, no duration.
+        """
+        rec = {'n': int(self.jobs.get(jid, {}).get('attempts') or 0),
+               'ms': int((time.time() - started) * 1000)}
+        for key in ('provider', 'url', 'model', 'budget', 'finish_reason',
+                    'prompt_tokens', 'completion_tokens', 'total_tokens',
+                    'reply_chars', 'attempt', 'http_status'):
+            if diag.get(key) not in (None, ''):
+                rec[key] = diag.get(key)
+        if kind:
+            rec['kind'] = kind
+        if err:
+            rec['error'] = str(err)[:300]
+        with self.lock:
+            job = self.jobs.get(jid)
+            if job is None:
+                return
+            log = job.get('attempt_log')
+            if not isinstance(log, list):
+                log = []
+            log.append(rec)
+            job['attempt_log'] = log[-ATTEMPT_LOG_MAX:]
+            if diag:
+                job['diag'] = dict(diag)
+                if diag.get('model'):
+                    job['model'] = diag['model']
+                if diag.get('provider'):
+                    job['provider'] = diag['provider']
+            self.store.save(job)
+
     def _set(self, jid, **fields):
         with self.lock:
             job = self.jobs[jid]
@@ -562,7 +634,7 @@ class Queue:
     def _run(self, jid):
         with self.lock:
             job = self.jobs.get(jid)
-            if job is None or job['state'] != 'queued':
+            if job is None or job['state'] not in ('queued', 'claimed'):
                 return
             job['state'] = 'running'
             job['started'] = int(time.time() * 1000)
@@ -581,6 +653,7 @@ class Queue:
             job['attempts'] += 1
             with self.lock:
                 self.store.save(job)
+            started = time.time()
             try:
                 out = self.provider(dict(job), hint)
             except Exception as exc:
@@ -596,14 +669,25 @@ class Queue:
             think = out.get('reasoning')
             if isinstance(think, str) and think.strip():
                 self._set(jid, reasoning=think[:REASONING_MAX])
+            diag = out.get('diag') if isinstance(out.get('diag'), dict) else {}
+            kind = str(out.get('kind') or '')
+            self._record_attempt(jid, diag, kind, out.get('error'), started)
             if out.get('error'):
-                hint = [{'sev': 'ERR', 'rid': 'provider-error', 'line': 0,
-                         'msg': str(out['error'])}]
+                finding = {'sev': 'ERR', 'rid': 'provider-error', 'line': 0,
+                           'msg': str(out['error'])}
+                if kind:
+                    finding['kind'] = kind
+                hint = [finding]
                 self._set(jid, findings=hint)
                 if out.get('fatal'):
                     # 重试只会得到同一句话（例如「未配置模型」），直接失败收场。
                     self._set(jid, state='failed', finished=int(time.time() * 1000),
                               explanation=str(out['error']))
+                    return
+                if kind in PROVIDER_EXHAUSTED and job['attempts'] >= 2:
+                    self._set(jid, state='failed', finished=int(time.time() * 1000),
+                              explanation=_exhausted_text(kind, out['error'],
+                                                          job['attempts']))
                     return
                 continue
             res = self._materialize(job, out)
@@ -706,6 +790,7 @@ def unconfigured_provider(job, hint=None):
     """
     return {'error': '未配置模型：请在 设置 -> Mlog辅助 -> 大模型 里填地址、密钥、模型，'
                      '再点「启用模型档」',
+            'kind': 'config',
             'fatal': True}
 
 

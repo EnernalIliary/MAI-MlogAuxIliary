@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.14.7";
+    var MOD_VERSION = "0.15.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -119,7 +119,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // 找不到 exe 时（在源码树里跑、或者玩家删了 bin）退回原样：只提示「先开 sidecar」。
     // 为什么要轮询而不是等进程输出：ProcessBuilder 的输出被重定向到 sidecar.log 了，
     // 模组读不到管道；而 sidecar 的 ready 行写在它自己的 stdout 上。
-    var SIDE = {state: "idle", tries: 0, at: 0, why: "", exe: ""};
+    // v0.15.0（C1+C2）：url 是自己的 sidecar 真正在的地址（--port 0 由它挑，端口写在
+    // sidecar.log 的 ready 行上）；spawned 只对「我拉起来的」为真 —— 心跳与 /shutdown
+    // 都只发给自己的进程，别人手动起的 python tools/logicd.py 不碰。
+    var SIDE = {state: "idle", tries: 0, at: 0, why: "", exe: "", url: "",
+                pingAt: 0, spawned: false};
+    // sidecar 每 45 s 收不到 /ping 就自己退出（逻辑后端不该活过游戏）。
+    var SIDE_IDLE_EXIT = 45;
 
     // v0.14.6（用户 m06631：游戏内导入的模组是 zip）：`m.root` 是 ZipFi，随包的
     // logicd.exe 只是 zip 里的一个条目 —— ProcessBuilder 执行不了它，`pb.directory()`
@@ -196,21 +202,112 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         catch(e){ return 8765; }
     }
 
+    // v0.15.0（C1）：sidecar 用 --port 0 自己挑端口，真实端口只出现在它 stdout 的
+    // ready 行上（重定向到了 sidecar.log）。固定 8765 被上一局遗留的旧 sidecar 占着时，
+    // 模组会以为「自己拉起来的进程没起来」—— 真实踩过一次（8765 上跑着 0.12.4 的 python）。
+    function sidecarLogPort(dir){
+        try{
+            if(dir === null || dir === undefined){ return 0; }
+            var f = dir.child("sidecar.log");
+            if(f === null || !f.exists()){ return 0; }
+            var s = String(f.readString());
+            var key = "listening on http://";
+            var i = s.lastIndexOf(key);
+            if(i < 0){ return 0; }
+            var rest = s.substring(i + key.length);
+            var j = rest.indexOf(":");
+            if(j < 0){ return 0; }
+            var tail = rest.substring(j + 1);
+            var k = 0;
+            while(k < tail.length && tail.charAt(k) >= "0" && tail.charAt(k) <= "9"){ k++; }
+            if(k === 0){ return 0; }
+            var n = parseInt(tail.substring(0, k), 10);
+            return (n > 0 && n < 65536) ? n : 0;
+        }catch(e){ log("sidecarLogPort: " + e); return 0; }
+    }
+
+    // 这次会话真正要用的地址：自己的 sidecar 用日志里的端口，否则用设置里手填的地址。
+    function sidecarUrl(){
+        if(SIDE.url !== "" && SIDE.url !== null){ return SIDE.url; }
+        return base;
+    }
+
+    // v0.15.0（C2）：心跳。sidecar 侧 --idle-exit 45 秒收不到就退出，游戏关掉后
+    // 不会再留一个 logicd 进程占内存和端口。
+    function sidecarPing(){
+        if(SIDE.state !== "up" || SIDE.spawned !== true){ return; }
+        var now = Date.now();
+        if(SIDE.pingAt > 0 && (now - SIDE.pingAt) < 4000){ return; }
+        SIDE.pingAt = now;
+        httpJson("POST", "/ping", {}, function(code, text){
+            if(code !== 200){
+                log("sidecar ping failed: " + code);
+                sidecarOk = false;
+                SIDE.state = "failed";
+                SIDE.why = "心跳失败（" + code + "），逻辑后端可能已经退出";
+                SIDE.spawned = false;
+                SIDE.url = "";
+            }
+        });
+    }
+
+    // 版本对不上就不该悄悄用：0.12.4 的 sidecar 少一半接口，表现出来是「生成失败」。
+    function sidecarVersionMismatch(h){
+        var v = "";
+        try{ v = String((h === null || h === undefined) ? "" : (h.version || "")); }
+        catch(e){ v = ""; }
+        return (v !== "" && v !== String(MOD_VERSION));
+    }
+
+    // 这个 sidecar 是不是模组自己装出来的（数据目录/装机目录里的 exe），还是别人手起的。
+    function sidecarOurs(h){
+        var e = "";
+        try{ e = String((h === null || h === undefined) ? "" : (h.exe || "")); }
+        catch(e2){ e = ""; }
+        return e.toLowerCase().indexOf("mlogauxiliary") >= 0;
+    }
+
+    // 退役我们自己拉起来的那一个：请它退出，等它真的走了再重新拉一个。
+    function sidecarRetire(url, why){
+        log("sidecar retire (" + why + "): " + url);
+        SIDE.spawned = false;
+        SIDE.state = "idle";
+        SIDE.url = "";
+        sidecarOk = false;
+        try{
+            httpJson("POST", "/shutdown", {}, function(code, text){
+                log("sidecar shutdown -> " + code);
+                Threads.daemon(function(){
+                    try{ Packages.java.lang.Thread.sleep(700); }catch(e){ /* ignore */ }
+                    Core.app.post(function(){
+                        try{ if(SIDE.state === "idle"){ ensureSidecar(true); } }
+                        catch(e2){ log("sidecar respawn failed: " + e2); }
+                    });
+                });
+            });
+        }catch(e){ log("sidecar shutdown failed: " + e); }
+    }
+
     // 用 ProcessBuilder 而不是 Runtime.exec：exec 只能给一个命令行字符串，路径里的空格
     // （saves/mods 常常在 "Program Files (x86)" 下面）会被它按空格切开；数组形式没这个问题。
     // 输出必须重定向到文件 —— 子进程的 stdout 管道没人读，攒满 64 KB 后它会卡死。
     function sidecarSpawn(exe, dir){
         try{
-            var arr = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.String, 3);
+            // v0.15.0：--port 0（自己挑，避开被占住的 8765）+ --idle-exit（心跳断了就退出）
+            var arr = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.String, 5);
             arr[0] = String(exe.absolutePath());
             arr[1] = "--port";
-            arr[2] = String(sidecarPort());
+            arr[2] = "0";
+            arr[3] = "--idle-exit";
+            arr[4] = String(SIDE_IDLE_EXIT);
             var pb = new Packages.java.lang.ProcessBuilder(arr);
             pb.directory(new Packages.java.io.File(String(dir.absolutePath())));
             pb.redirectErrorStream(true);
             pb.redirectOutput(new Packages.java.io.File(String(dir.absolutePath()), "sidecar.log"));
             var p = pb.start();
             SIDE.exe = String(exe.absolutePath());
+            SIDE.spawned = true;
+            SIDE.url = "";
             log("sidecar spawned: " + SIDE.exe);
             return p;
         }catch(e){
@@ -228,12 +325,29 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         SIDE.at = now;
         SIDE.tries++;
         var tries = SIDE.tries;
+        // 自己拉起来的那一个：端口写在 sidecar.log 里，先读出来再探测
+        if(SIDE.url === "" && SIDE.spawned === true){
+            var lp = sidecarLogPort(sidecarDir());
+            if(lp > 0){ SIDE.url = "http://127.0.0.1:" + lp; SIDE.pingAt = 0; }
+        }
         httpJson("GET", "/health", null, function(code, text){
             if(code === 200){
+                var h = parse(text) || {};
+                if(sidecarVersionMismatch(h)){
+                    if(sidecarOurs(h)){
+                        sidecarRetire(sidecarUrl(), "版本 " + String(h.version || "?")
+                                      + " 不是 " + MOD_VERSION);
+                    }else{
+                        SIDE.state = "stale";
+                        hint("8765 上是另一份 sidecar（版本 " + String(h.version || "?")
+                             + "，本模组是 " + MOD_VERSION + "）：先把它停掉，否则会缺接口");
+                    }
+                    return;
+                }
                 sidecarOk = true;
                 SIDE.state = "up";
-                log("sidecar is up after " + tries + " probe(s)");
-                hint("sidecar 已就绪：" + base);
+                log("sidecar is up after " + tries + " probe(s) at " + sidecarUrl());
+                hint("sidecar 已就绪：" + sidecarUrl());
                 llmAutoSync();          // v0.14.4：模型档随 sidecar 就绪自动挂载
             }else if(tries >= 25){
                 SIDE.state = "failed";
@@ -259,9 +373,23 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         if(SIDE.state === "starting"){ return; }
         if(SIDE.state === "up" && sidecarOk === true){ return; }
         httpJson("GET", "/health", null, function(code, text){
-            if(code === 200){
-                sidecarOk = true; SIDE.state = "up";
-                llmAutoSync();      // v0.14.4：已经在跑的 sidecar 也补一次模型档
+            if(code == 200){
+                var h = parse(text) || {};
+                if(!sidecarVersionMismatch(h)){
+                    sidecarOk = true; SIDE.state = "up";
+                    llmAutoSync();  // v0.14.4：已经在跑的 sidecar 也补一次模型档
+                    return;
+                }
+                // v0.15.0（C1）：地址上有人应，但版本不是这一份。
+                if(sidecarOurs(h)){
+                    sidecarRetire(sidecarUrl(), "旧版 " + String(h.version || "?"));
+                    return;
+                }
+                SIDE.state = "stale";
+                if(quiet !== true){
+                    hint("8765 上是另一份 sidecar（版本 " + String(h.version || "?")
+                         + "，本模组是 " + MOD_VERSION + "）：先把它停掉再试");
+                }
                 return;
             }
             var exe = sidecarExe();
@@ -286,7 +414,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     }
 
     function sidecarStateText(){
-        if(SIDE.state === "up"){ return "已就绪"; }
+        if(SIDE.state === "up"){ return "已就绪" + (SIDE.spawned === true ? "（本模组启动）" : ""); }
+        if(SIDE.state === "stale"){ return "地址上是旧版 sidecar"; }
         if(SIDE.state === "starting"){ return "启动中（探测 " + SIDE.tries + " 次）"; }
         if(SIDE.state === "noexe"){ return "缺少 logicd.exe"; }
         if(SIDE.state === "failed"){ return "启动失败"; }
@@ -973,7 +1102,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             Threads.daemon(function(){
                 var code = -1, text = "";
                 try{
-                    var r = httpRaw(method, base + path, body);
+                    var r = httpRaw(method, sidecarUrl() + path, body);
                     code = r.code; text = r.text;
                 }catch(e){
                     text = String(e);
@@ -2344,6 +2473,74 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // v0.12.6：作业还在跑的时候，findings 里躺着的是「上一次尝试」的问题，不是结论。
         // 真机上截断那一下（模型把预算花在思考上）就被人当成「生成失败」——所以非终态的
         // findings 必须挂一个「正在重试」的抬头，再补一句人话说明截断。
+        // v0.15.0（A2+A3）：作业现在自己带着诊断（provider/model/budget/usage/attempt_log），
+        // 失败也带类别（kind）。面板以前只照抄一行「ERR L0 empty reply」——玩家看不出
+        // 下一步该动什么，也看不出这次调用到底花了多少。这里按类别说人话。
+        var JOB_WHY = {
+            "empty": "端点回了空内容：多半是代理吞了回复，或者模型的预算全花在思考上",
+            "transport": "连不上端点：地址、网络、代理任一处断了",
+            "http-status": "端点拒绝了这次调用：密钥、额度或模型名要核对",
+            "bad-json": "端点回的不是 JSON：地址多半填错了一层（/v1 与 /chat/completions）",
+            "truncated": "模型把预算花在思考上就没了：sidecar 会自动加大预算重试",
+            "unparsable": "模型回的不是可用的 mlog：看它的说明改一句再试",
+            "config": "还没配模型：设置 → Mlog辅助 → 大模型"
+        };
+
+        function jobKindOf(f){
+            var k = "";
+            try{ k = String((f === null || f === undefined) ? "" : (f.kind || "")); }
+            catch(e){ k = ""; }
+            return k;
+        }
+
+        function jobWhyLines(job, maxLines){
+            var fs = job.findings || [], out = [], seen = {}, cap = maxLines || 3;
+            for(var i = 0; i < fs.length && out.length < cap; i++){
+                var k = jobKindOf(fs[i]);
+                if(k === "" || seen[k] === true){ continue; }
+                var w = JOB_WHY[k];
+                if(w === undefined){ continue; }
+                seen[k] = true;
+                out.push("为什么：" + w);
+            }
+            return out;
+        }
+
+        function jobLastAttempt(job){
+            var a = job.attempt_log;
+            if(a === null || a === undefined || a.length === undefined || a.length === 0){ return null; }
+            return a[a.length - 1];
+        }
+
+        function jobAttemptLine(job){
+            var a = jobLastAttempt(job);
+            var d = (a === null) ? (job.diag || null) : a;
+            if(d === null || d === undefined){ return ""; }
+            var bits = [];
+            if(d.provider){ bits.push(String(d.provider)); }
+            if(d.model){ bits.push(String(d.model)); }
+            if(d.budget){ bits.push("预算 " + d.budget); }
+            if(d.ms){ bits.push((d.ms / 1000).toFixed(1) + " s"); }
+            if((d.prompt_tokens || 0) > 0 || (d.completion_tokens || 0) > 0){
+                bits.push("token " + (d.prompt_tokens || 0) + "→" + (d.completion_tokens || 0));
+            }
+            if(d.finish_reason){ bits.push("finish_reason=" + d.finish_reason); }
+            if(d.http_status){ bits.push("HTTP " + d.http_status); }
+            return bits.join(" · ");
+        }
+
+        function jobEvidenceLines(job){
+            var out = [], head = [];
+            if(job.provider){ head.push(String(job.provider)); }
+            if(job.model){ head.push(String(job.model)); }
+            if(head.length > 0){ out.push("模型：" + head.join(" · ")); }
+            var a = jobLastAttempt(job);
+            var n = (a === null) ? (job.attempts || 1) : (a.n || job.attempts || 1);
+            var line = jobAttemptLine(job);
+            if(line !== ""){ out.push("第 " + n + " 次调用：" + line); }
+            return out;
+        }
+
         function jobFindingLines(job, maxLines){
             var fs = job.findings || [], out = [], i, m, n = 0;
             for(i = 0; i < fs.length && n < maxLines; i++){
@@ -2423,6 +2620,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 host.add(c.err === 0 ? "预检：通过（0 条 ERR）" + (c.total ? "，另有 " + c.warn + " 条 WARN" : "")
                                      : ("预检：ERR " + c.err + " / WARN " + c.warn)).row();
                 if(job.explanation){ host.add(String(job.explanation)).row(); }
+                var dev = jobEvidenceLines(job);
+                for(var di = 0; di < dev.length; di++){ host.add("  " + dev[di]).row(); }
                 var ls = job.findings || [];
                 for(var i = 0; i < ls.length && i < 6; i++){
                     host.add("  " + ls[i].sev + " L" + ls[i].line + " " + ls[i].msg).row();
@@ -2455,6 +2654,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     host.add("  " + fs[i2].sev + " L" + fs[i2].line + " " + fs[i2].msg).row();
                 }
                 if(job.explanation){ host.add(String(job.explanation)).row(); }
+                var why = jobWhyLines(job, 3);
+                for(var wi = 0; wi < why.length; wi++){ host.add(why[wi]).row(); }
+                var ev = jobEvidenceLines(job);
+                if(ev.length > 0){
+                    host.add("--- 诊断 ---").row();
+                    for(var ei = 0; ei < ev.length; ei++){ host.add("  " + ev[ei]).row(); }
+                }
                 return;
             }
             var rh = jobRetryHead(job);
@@ -2462,6 +2668,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 host.add(rh).row();
                 var rl = jobFindingLines(job, 4);
                 for(var ri = 0; ri < rl.length; ri++){ host.add("  " + rl[ri]).row(); }
+                var rw = jobWhyLines(job, 2);
+                for(var rwi = 0; rwi < rw.length; rwi++){ host.add("  " + rw[rwi]).row(); }
             }
             host.add("（每 " + (JOB_POLL_MS / 1000) + " 秒查一次，可先做别的）").row();
         }
@@ -4151,6 +4359,16 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }
         // ---------------------------------------------------------- 控制台接口
         var api = {
+            // v0.15.0：面板上的失败说明与诊断（无头环境没有侧车也能自检文案）。
+            maiJobDiagProbe: function(jobJson){
+                var job = (typeof jobJson === "string") ? parse(jobJson) : jobJson;
+                if(job === null || job === undefined){ return "MAIJOBPANELDIAG:no job"; }
+                var why = jobWhyLines(job, 3), ev = jobEvidenceLines(job);
+                return "MAIJOBPANELDIAG:ok why=" + why.length + " ev=" + ev.length
+                    + " first=" + (why.length > 0 ? why[0] : "")
+                    + " line=" + (ev.length > 0 ? ev[ev.length - 1] : "");
+            },
+
             maiVersion: function(){ return "mlog-auxiliary " + MOD_VERSION + "  sidecar=" + base; },
         // 调试/测试用：同步原生请求，返回 "<code>" + 换行 + 正文。会占住调用线程到超时，
         // 只对 localhost 用；正式路径仍然是 httpJson + Core.app.post。
@@ -4898,6 +5116,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     jobBoxTick();   // v0.12.5：框选框里那一批作业的状态
                     writeCheckTick(); // v0.12.8：联机里回读写过的处理器，确认服务端真收下了
                     sidecarTick();  // v0.13.1：自己拉起来的 sidecar 要等它开口
+                    sidecarPing();  // v0.15.0：心跳，sidecar 收不到 45 s 就自己退出
                     jobButtonsClick(); // v0.14.2：框右下角的「查看 / 取消」两个按钮
                     // 「设置 → Mlog辅助」这一栏只在 Vars.ui 建好之后能注册。脚本加载时
                     // UI 往往还没建（真机日志里是在 ClientLoadEvent 前），所以这里补一次

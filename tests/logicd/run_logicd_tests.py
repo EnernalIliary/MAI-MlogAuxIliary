@@ -1256,6 +1256,8 @@ class _StubEndpoint:
         self.truncate = 0          # answer this many replies with finish_reason=length
         self.blank = False
         self.strict = False
+        self.status = 0            # answer every POST with this HTTP status (v0.15.0)
+        self.empty = False         # answer with an empty message, finish_reason=stop
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -1291,19 +1293,35 @@ class _StubEndpoint:
                     outer.posts.append(json.loads(raw.decode('utf-8')))
                 except ValueError:
                     outer.posts.append({})
+                if outer.status:
+                    body = json.dumps({'error': 'stub refused'}).encode()
+                    self.send_response(outer.status)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 content = json.dumps({'code': 'set n 0' + chr(10) + 'end'})
                 cut = False
                 if outer.truncate > 0:
                     outer.truncate -= 1
                     cut = True
-                if outer.blank or cut:
+                if outer.empty and not cut:
+                    payload = {'choices': [{'message': {'content': ''},
+                                            'finish_reason': 'stop'}],
+                               'usage': {'prompt_tokens': 11, 'completion_tokens': 0}}
+                elif outer.blank or cut:
                     content = ''
                     payload = {'choices': [{'message': {'content': content},
                                             'finish_reason': 'length'}],
                                'usage': {'prompt_tokens': 11, 'completion_tokens': 1600}}
                 else:
-                    payload = {'choices': [{'message': {'content': content,
-                                                        'reasoning_content': STUB_THINK}}]}
+                    payload = {'model': 'm-a',
+                               'choices': [{'message': {'content': content,
+                                                        'reasoning_content': STUB_THINK},
+                                            'finish_reason': 'stop'}],
+                               'usage': {'prompt_tokens': 11, 'completion_tokens': 40,
+                                         'total_tokens': 51}}
                 body = json.dumps(payload).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -1478,6 +1496,221 @@ def test_llm():
     return checks
 
 
+def test_diag():
+    """v0.15.0: every refusal carries a class, every job keeps the evidence.
+
+    The old queue saw one string for every failure and retried all of them the same
+    way, so a 401 burned three model calls and 'refused after 3 attempt(s)' could not
+    be explained afterwards.  These checks pin the class, the retry policy that goes
+    with it, the attempt log on the job, and the worker pool.
+    """
+    import jobqueue
+    import mlogprovider as MP
+    checks = 0
+    stub = _StubEndpoint()
+    tmp = tempfile.mkdtemp(prefix='logicd-diag-')
+    try:
+        # 1. a 401 is answered once: the class is http-status and it is fatal
+        stub.posts.clear()
+        stub.status = 401
+        bad = MP.HttpProvider(stub.chat_url, model='m-a', timeout=20)
+        out = bad({'desc': 'auth wall %d' % stub.port, 'links': [], 'ipt': 2})
+        stub.status = 0
+        need(out.get('kind') == 'http-status',
+             'a 401 was not classified as http-status: %r' % (out,))
+        need(out.get('fatal') is True, 'a 401 was not marked fatal: %r' % (out,))
+        need(len(stub.posts) == 1,
+             'a 401 was retried %d time(s) instead of failing once' % len(stub.posts))
+        need('HTTP 401' in str(out.get('error') or ''),
+             'a 401 lost its status line: %r' % (out.get('error'),))
+        checks += 1
+
+        # 2. an empty message is transient: it is retried, and each try is counted
+        stub.posts.clear()
+        stub.empty = True
+        emp = MP.HttpProvider(stub.chat_url, model='m-a', timeout=20)
+        out = emp({'desc': 'empty wall %d' % stub.port, 'links': [], 'ipt': 2})
+        stub.empty = False
+        need(out.get('kind') == 'empty',
+             'an empty reply was not classified as empty: %r' % (out,))
+        need(len(stub.posts) == MP.RETRY_TOTAL,
+             'an empty reply was retried %d time(s), want %d'
+             % (len(stub.posts), MP.RETRY_TOTAL))
+        need((out.get('diag') or {}).get('attempt') == MP.RETRY_TOTAL,
+             'the diagnostics did not count the attempts: %r' % (out.get('diag'),))
+        checks += 1
+
+        # 3. a good reply comes back with what the call cost
+        ok = MP.HttpProvider(stub.chat_url, model='m-a', timeout=20)
+        out = ok({'desc': 'evidence probe %d' % stub.port, 'links': [], 'ipt': 2})
+        need(not out.get('error'), 'the evidence reply failed: %r' % (out,))
+        diag = out.get('diag') or {}
+        need(diag.get('prompt_tokens') == 11 and diag.get('completion_tokens') == 40,
+             'the reply lost its token counts: %r' % (diag,))
+        need(diag.get('finish_reason') == 'stop',
+             'the reply lost its finish_reason: %r' % (diag,))
+        need(diag.get('provider') == 'http' and diag.get('budget'),
+             'the diagnostics did not identify the call: %r' % (diag,))
+        checks += 1
+
+        # 4. the queue keeps the log and stops asking an exhausted wall
+        calls = []
+
+        def empties(job, hint=None):
+            calls.append(1)
+            return {'error': 'model endpoint answered with an empty message',
+                    'kind': 'empty',
+                    'diag': {'provider': 'stub', 'model': 'm-a', 'attempt': len(calls)}}
+
+        q = jobqueue.Queue(jobqueue.Store(os.path.join(tmp, 'q')), provider=empties,
+                           workers=1)
+        probe, _ = q.enqueue({'desc': 'queue empty probe %d' % stub.port, 'links': [],
+                              'ipt': 2})
+        jid = probe['id']
+        q.drain(timeout=20)
+        job = q.get(jid)
+        need(job.get('state') == 'failed',
+             'a job whose endpoint kept answering empty did not fail: %r' % (job,))
+        need(len(calls) == 2,
+             'the queue re-asked an exhausted wall %d time(s), want 2' % len(calls))
+        need('empty message' in str(job.get('explanation') or ''),
+             'the failure did not name the wall: %r' % (job.get('explanation'),))
+        log = job.get('attempt_log') or []
+        need(len(log) == 2 and log[-1].get('kind') == 'empty'
+             and isinstance(log[-1].get('ms'), int),
+             'the job did not keep a per-attempt log: %r' % (log,))
+        need(job.get('model') == 'm-a' and job.get('provider') == 'stub',
+             'the job did not keep which model/provider answered: %r' % (job,))
+        checks += 1
+
+        # 5. three jobs on three workers overlap instead of queueing up
+        def slow(job, hint=None):
+            time.sleep(0.4)
+            return {'code': 'set n 0' + chr(10) + 'end'}
+
+        q3 = jobqueue.Queue(jobqueue.Store(os.path.join(tmp, 'q3')), provider=slow,
+                            workers=3)
+        ids = []
+        for i in range(3):
+            j3, _ = q3.enqueue({'desc': 'parallel probe %d %d' % (stub.port, i),
+                                'links': [], 'ipt': 2})
+            ids.append(j3['id'])
+        need(q3.workers == 3, 'the queue did not take the worker count: %r' % (q3.workers,))
+        started = time.time()
+        q3.start()
+        try:
+            deadline = started + 10
+            while time.time() < deadline:
+                states = [q3.get(i).get('state') for i in ids]
+                if all(st in JTERMINAL for st in states):
+                    break
+                time.sleep(0.02)
+        finally:
+            q3.stop()
+        elapsed = time.time() - started
+        need(all(q3.get(i).get('state') == 'done' for i in ids),
+             'the parallel jobs did not all finish: %r'
+             % ([q3.get(i).get('state') for i in ids],))
+        need(elapsed < 1.0,
+             'three 0.4 s jobs took %.2f s with three workers (serial is 1.2 s)'
+             % elapsed)
+        checks += 1
+    finally:
+        stub.close()
+    return checks
+
+
+def test_life():
+    """v0.15.0: the sidecar can say who it is, take a heartbeat, and end itself.
+
+    C1 was a real session: 8765 still held a 0.12.4 python from the previous run, so the
+    module saw 200 from /health and believed its own spawn had failed.  C2 was that same
+    process surviving the game.  These checks pin the answers /health now carries, the
+    two new routes, and --idle-exit.
+    """
+    import re
+    import shutil
+    checks = 0
+    tmp = tempfile.mkdtemp(prefix='logicd-life-')
+    procs = []
+
+    def spawn(*extra):
+        p = subprocess.Popen([sys.executable, str(HERE.parent.parent / 'tools' / 'logicd.py'),
+                              '--port', '0', '--jobs-provider', 'none',
+                              '--jobs-dir', os.path.join(tmp, 'jobs')] + list(extra),
+                             cwd=str(HERE.parent.parent),
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, encoding='utf-8', errors='replace')
+        procs.append(p)
+        line = p.stdout.readline()
+        m = re.search(r'listening on http://[^:]+:(\d+)', line or '')
+        need(m is not None, 'no ready line from the sidecar: %r' % (line,))
+        return p, 'http://127.0.0.1:%s' % m.group(1)
+
+    def get(url, path):
+        with urllib.request.urlopen(url + path, timeout=15) as r:
+            return json.loads(r.read().decode('utf-8'))
+
+    def post(url, path, body=None):
+        data = json.dumps(body or {}).encode()
+        req = urllib.request.Request(url + path, data=data, method='POST')
+        req.add_header('Content-Type', 'application/json')
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode('utf-8'))
+
+    def wait_exit(p, timeout=20):
+        try:
+            p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            need(False, 'the sidecar did not exit within %s s' % timeout)
+        return p.returncode
+
+    try:
+        # 1. identity: the module needs a pid/exe to tell 'mine' from 'some old build'
+        p1, u1 = spawn('--idle-exit', '30')
+        h = get(u1, '/health')
+        need(h.get('ok') is True and h.get('protocol') == 1,
+             '/health lost its ok/protocol: %r' % (h,))
+        need(h.get('version'), '/health does not name the build: %r' % (h,))
+        need(h.get('pid') == p1.pid,
+             '/health pid %r is not the process it came from (%r)' % (h.get('pid'), p1.pid))
+        need(str(h.get('exe') or '').lower().endswith('logicd.py'),
+             '/health does not say where it runs from: %r' % (h.get('exe'),))
+        need(int(h.get('port') or 0) == int(u1.rsplit(':', 1)[1]),
+             '/health port %r does not match %r' % (h.get('port'), u1))
+        need(post(u1, '/ping').get('ok') is True, 'POST /ping did not answer')
+        need(post(u1, '/shutdown').get('ok') is True, 'POST /shutdown did not answer')
+        need(wait_exit(p1) == 0, 'a shutdown sidecar did not exit cleanly')
+        checks += 1
+
+        # 2. --idle-exit: nobody pings -> it goes away (this is what stops C2)
+        t0 = time.time()
+        p2, u2 = spawn('--idle-exit', '2')
+        get(u2, '/health')          # one heartbeat, then silence
+        rc = wait_exit(p2, 30)
+        took = time.time() - t0
+        need(rc == 0, 'the idle sidecar exited with %r' % (rc,))
+        need(took < 25, 'the idle sidecar took %.1f s to notice' % took)
+        checks += 1
+
+        # 3. pings keep it alive: a game that is open must not lose its backend
+        p3, u3 = spawn('--idle-exit', '2')
+        for _ in range(4):
+            time.sleep(0.8)
+            need(post(u3, '/ping').get('ok') is True, 'POST /ping failed mid-session')
+        need(p3.poll() is None, 'the sidecar exited while it was being pinged')
+        post(u3, '/shutdown')
+        wait_exit(p3)
+        checks += 1
+    finally:
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
+        shutil.rmtree(tmp, ignore_errors=True)
+    return checks
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='logicd contract tests')
     ap.add_argument('--no-sim', action='store_true', help='protocol half only (no JRE needed)')
@@ -1526,6 +1759,24 @@ def main(argv=None):
         return 1
     except Exception as exc:
         print('FAIL llm: %s: %s' % (type(exc).__name__, exc))
+        return 1
+    try:
+        n = test_diag()
+        print('diag: %d check(s) passed' % n)
+    except Fail as exc:
+        print('FAIL diag: %s' % exc)
+        return 1
+    except Exception as exc:
+        print('FAIL diag: %s: %s' % (type(exc).__name__, exc))
+        return 1
+    try:
+        n = test_life()
+        print('life: %d check(s) passed' % n)
+    except Fail as exc:
+        print('FAIL life: %s' % exc)
+        return 1
+    except Exception as exc:
+        print('FAIL life: %s: %s' % (type(exc).__name__, exc))
         return 1
     if a.no_sim:
         print('logicd OK (protocol only)')
