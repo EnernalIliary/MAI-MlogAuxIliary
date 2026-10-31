@@ -1,0 +1,10 @@
+# The effect slot accepts the bare name in every build and `@status-<name>`
+# from v160.x on (LParser normalises a bare known name to that constant), so
+# all of these are CORRECT and must produce no finding at all.
+ubind @flare
+status false unmoving @unit 60
+status true @status-wet @unit 0
+set s @status-wet
+status false s @unit 60
+status true wet @unit 0
+end

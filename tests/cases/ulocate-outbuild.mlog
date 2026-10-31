@@ -1,0 +1,4 @@
+# building form with the outBuild slot at 0: the reference is thrown away
+ubind @flare
+ulocate building core true @copper 0 0 found 0
+end

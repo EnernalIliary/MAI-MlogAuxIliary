@@ -1,0 +1,27 @@
+{
+  "id": "jump-target-out-of-range",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "A `jump` target outside `0..n-1` is a jump to a line that does not exist.",
+  "why": "LParser resolves labels to statement indices and stores -1 for an unknown one; JumpI guards against -1, so the jump silently falls through instead of looping.",
+  "source": "source",
+  "ref": "m14738",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/labels-check.mlog",
+  "match": {
+    "sevs": [
+      "ERR"
+    ],
+    "msg_any": [
+      "jump target",
+      "out of range"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 2,
+    "programs": 2,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

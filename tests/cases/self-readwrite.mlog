@@ -1,0 +1,12 @@
+set secret 7
+read a @this "secret"
+write 9 @this "secret"
+read b @this "secret"
+write 5 @this "nope"
+read c @this "missing"
+read d @this "cell1"
+print a
+print b
+print c
+print d
+end

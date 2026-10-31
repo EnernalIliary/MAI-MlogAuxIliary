@@ -1,0 +1,4 @@
+set t 0
+read c stream0 frame
+print t
+end

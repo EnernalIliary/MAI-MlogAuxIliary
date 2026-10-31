@@ -1,0 +1,20 @@
+{
+  "id": "self-write-noop",
+  "kind": "semantics",
+  "severity": "INFO",
+  "claim": "write ... @this with a name no statement mentions is a no-op: LogicBlock.write returns silently when the variable does not exist.",
+  "why": "LogicBlock.java:240-260 write() looks the name up in vars and returns without a trace when it is missing, so a typo in a slot name changes nothing and the reader of that slot gets null -- the failure surfaces one processor away, as a wrong value.",
+  "source": "source",
+  "ref": "Mindustry-Source/core/src/mindustry/logic/LogicBlock.java:240-260",
+  "since": "2026-10-25",
+  "counter_example": "tests/cases/status-bare-ok.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "names a variable this program never mentions"
+    ]
+  },
+  "auto_downgrade": false
+}

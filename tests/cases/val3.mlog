@@ -1,0 +1,10 @@
+﻿sensor data cell1 0
+loop:
+op sub neg 0 data
+op and low data neg
+op logn id low 2
+op sub data data low
+jump loop notEqual low 0
+print id
+print low
+end

@@ -1,0 +1,5 @@
+set x 1
+sensor n core @hyper-processor
+sensor m core @copper
+sensor h core @health
+end

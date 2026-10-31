@@ -1,0 +1,28 @@
+{
+  "id": "reactor-link-name-proves-nothing",
+  "kind": "semantics",
+  "severity": "INFO",
+  "claim": "A link named `reactor1` may be a thorium reactor or an impact reactor. The response-time budget only applies to thorium, so an unproven reactor guard is a question, not a verdict.",
+  "why": "Impact reactors are not NuclearReactor and have their own heat rules; the names are shared by users who reuse one template. WARN only when `@thorium-reactor` appears in the program.",
+  "source": "user",
+  "ref": "m13856",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-impact.mlog",
+  "match": {
+    "sevs": [
+      "WARN",
+      "INFO"
+    ],
+    "msg_any": [
+      "reactor guard",
+      "checked once every"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 11,
+    "programs": 9,
+    "share": 0.0001,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

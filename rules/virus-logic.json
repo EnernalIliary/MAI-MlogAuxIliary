@@ -1,0 +1,27 @@
+{
+  "id": "virus-logic",
+  "kind": "semantics",
+  "severity": "INFO",
+  "claim": "`ucontrol build <x> <y> @micro-processor 0 @this` builds a processor whose config is this program: self-replication.",
+  "why": "Community calls it 病毒逻辑. It is a design, not an error — but it is the first line worth seeing when you open someone else's map. Corpus: 9,232 programs use `ucontrol build`, 9,151 of them replicate; only 2 distinct programs.",
+  "source": "user",
+  "ref": "m14126",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/virus-logic-clean.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "virus logic",
+      "self-replication"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 5,
+    "programs": 5,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

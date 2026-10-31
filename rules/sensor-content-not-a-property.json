@@ -1,0 +1,20 @@
+{
+ "id": "sensor-content-not-a-property",
+ "kind": "semantics",
+ "severity": "INFO",
+ "claim": "A block/unit/status name in sensor's third operand is a Content, not an LAccess attribute: it asks the building for a payload count, never for a property, and reads null on a building with no payload container.",
+ "why": "Measured on v160.7: 'sensor x vault1 @hyper-processor' -> null, 'sensor n vault1 @copper' -> 100 and a vault holding no titanium -> 0. Item and liquid names are the legitimate inventory read (rules/sensor-item-read-is-fine) and are deliberately not reported. Evidence: out/takeover-20261024/15-sensor-link-oracle.md.",
+ "source": "source",
+ "ref": "m00511",
+ "since": "2026-10-24",
+ "counter_example": "tests/cases/reactor-guard-ok.mlog",
+ "match": {
+  "sevs": [
+   "INFO"
+  ],
+  "msg_any": [
+   "-- a Content, not one of the"
+  ]
+ },
+ "auto_downgrade": false
+}

@@ -1,0 +1,8 @@
+set x 100
+set y 100
+ubind @poly
+jump 5 equal @unit null
+ucontrol build x y @micro-processor 0 0
+ucontrol build x y @micro-processor 0 item
+print "built a processor, but not a copy of me"
+end

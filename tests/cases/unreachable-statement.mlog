@@ -1,0 +1,10 @@
+# a jump target off by one: `jump loop always` is at index 2, so the statement
+# after it (index 3) can never run -- the program still parses and passes every
+# structural check, which is exactly how a generator breaks a program silently
+loop:
+sensor n core1 @copper
+jump enough greaterThanEq n 100
+jump loop always
+control shootp turret1 null 0
+enough:
+end

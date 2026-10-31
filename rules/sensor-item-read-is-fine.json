@@ -1,0 +1,18 @@
+{
+ "id": "sensor-item-read-is-fine",
+ "kind": "negative",
+ "severity": "SUPPRESSED",
+ "claim": "sensor with an item or liquid name is the normal inventory read (vault + @copper -> 100, an item the container does not hold -> 0, a non-container -> null). It is correct code and must never be reported as sensor-not-a-property.",
+ "why": "Measured on v160.7 (out/takeover-20261024/15-sensor-link-oracle.md). This rule exists only to stop the tempting generalisation 'a non-LAccess @name in sensor is a bug'; item and liquid reads are how the game exposes stock.",
+ "source": "source",
+ "ref": "m00511",
+ "since": "2026-10-24",
+ "counter_example": "tests/cases/sensor-not-prop.mlog",
+ "match": {
+  "sevs": [],
+  "msg_any": [
+   "@copper"
+  ]
+ },
+ "auto_downgrade": false
+}

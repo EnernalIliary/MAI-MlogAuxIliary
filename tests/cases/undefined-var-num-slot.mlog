@@ -1,0 +1,8 @@
+# A never-assigned name in a NUMERIC slot is INFO, not an error: numi() reads
+# null as 0, so the statement runs with 0 instead of failing.  This pins the
+# severity split introduced when the two undefined-var rules were merged
+# (ref m07644): num/bool slot -> INFO, any other slot -> ERR.
+set t 0
+op add t zz 1
+print t
+end

@@ -1,0 +1,20 @@
+{
+ "id": "link-name-unbindable",
+ "kind": "semantics",
+ "severity": "WARN",
+ "claim": "A bare name used in a link slot (sensor.from, control.target, drawflush.target, printflush.target, read/write.cell, radar.building, setprop.of, bullet.from) that no statement ever assigns and that does not end in a digit can never be bound: the game builds link names from the block's internal name plus a 1-based index.",
+ "why": "LogicBlock.findLinkName (LogicBlock.java:331-360) and getLinkName (:123-135) derive the name from the linked block's internal name's last '-' segment plus an index, hence vault1/message1/furnace1; a name not ending in a digit never binds and the instruction has no target. Measured on v160.7: 'sensor vault1 @health' -> 495 with the link in the table, but an unbound target reads null (out/takeover-20261024/15-sensor-link-oracle.md). The generic undefined-var pass cannot see this because the analyser drops words from KEYWORDS (core, storage, reactor, ...) before checking uses_of, so this rule runs as its own token-based pass.",
+ "source": "source",
+ "ref": "m00511",
+ "since": "2026-10-24",
+ "counter_example": "tests/cases/reactor-guard-ok.mlog",
+ "match": {
+  "sevs": [
+   "WARN"
+  ],
+  "msg_any": [
+   "is the link this"
+  ]
+ },
+ "auto_downgrade": false
+}

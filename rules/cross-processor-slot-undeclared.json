@@ -1,0 +1,27 @@
+{
+  "id": "cross-processor-slot-undeclared",
+  "kind": "semantics",
+ "surface": "blueprint",
+  "severity": "WARN",
+  "claim": "`read`/`write` of a named slot only works if the other processor declares that variable; otherwise the read returns null and the write lands nowhere.",
+  "why": "LogicBlock.read looks the name up in the target's own variable table; there is no dynamic symbol creation across processors.",
+  "source": "source",
+  "ref": "m08520",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/labels-check.mlog",
+  "match": {
+    "sevs": [
+      "WARN"
+    ],
+    "msg_any": [
+      "cross-processor"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 0,
+    "programs": 0,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

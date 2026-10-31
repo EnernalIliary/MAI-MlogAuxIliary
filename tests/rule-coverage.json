@@ -1,0 +1,124 @@
+{
+  "bool-param-constantly-zero": [
+    "bool-param-zero.mlog"
+  ],
+  "constant-null-guard": [
+    "const-null-guard.mlog"
+  ],
+  "unreachable-statement": [
+    "counter-op.mlog",
+    "counter-set.mlog",
+    "jump-range.mlog",
+    "label-index.mlog",
+    "unreachable-statement.mlog"
+  ],
+  "self-read-undefined": [
+    "declared-by-mention.mlog",
+    "self-readwrite.mlog"
+  ],
+  "version-gate": [
+    "gate-emod.mlog",
+    "gate1.mlog",
+    "select-gate.mlog"
+  ],
+  "noop-means-version-drift": [
+    "gate1.mlog"
+  ],
+  "undefined-var-read": [
+    "index-only-summary.mlog",
+    "pack1.mlog",
+    "status-effect-slot.mlog",
+    "undefined-var-num-slot.mlog",
+    "undefined-var-read.mlog",
+    "virus-logic-clean.mlog"
+  ],
+  "jump-target-out-of-range": [
+    "jump-range.mlog"
+  ],
+  "jump-to-jump-chain": [
+    "label-index.mlog"
+  ],
+  "link-name-not-bound": [
+    "link-hyphen-ok.mlog",
+    "link-hyphen.mlog",
+    "loop-labels-ok.mlog",
+    "reactor-guard-impact-ok.mlog",
+    "reactor-guard-impact.mlog",
+    "reactor-guard-ok.mlog",
+    "reactor-guard-slow.mlog",
+    "reactor-guard-unknown.mlog",
+    "surplus-slot.mlog",
+    "unreachable-statement.mlog",
+    "val3.mlog"
+  ],
+  "link-name-hyphen": [
+    "link-hyphen.mlog"
+  ],
+  "link-shaped-variable": [
+    "link-shaped-var.mlog"
+  ],
+  "link-name-unbound-fragment": [
+    "link-unbound-fragment.mlog"
+  ],
+  "unknown-op": [
+    "op-long-unknown.mlog"
+  ],
+  "link-name-unbindable": [
+    "printflush-clears.mlog",
+    "sensor-not-prop.mlog",
+    "sensor-not-property.mlog"
+  ],
+  "printflush-clears-buffer": [
+    "printflush-clears.mlog"
+  ],
+  "privileged-var-needs-world-processor": [
+    "privileged-var.mlog"
+  ],
+  "radar-takes-no-count": [
+    "radar-count-misuse.mlog"
+  ],
+  "impact-reactor-cap-is-not-protection": [
+    "reactor-guard-impact.mlog"
+  ],
+  "reactor-guard-response-time": [
+    "reactor-guard-slow.mlog"
+  ],
+  "reactor-link-name-proves-nothing": [
+    "reactor-guard-unknown.mlog"
+  ],
+  "self-write-noop": [
+    "self-readwrite.mlog"
+  ],
+  "sensor-content-not-a-property": [
+    "sensor-not-prop.mlog"
+  ],
+  "sensor-not-a-property": [
+    "sensor-not-property.mlog"
+  ],
+  "spin-deadlock": [
+    "spin.mlog"
+  ],
+  "status-effect-slot": [
+    "status-at-prefix.mlog",
+    "status-effect-slot.mlog"
+  ],
+  "surplus-parameter-is-not-an-error": [
+    "surplus-slot.mlog"
+  ],
+  "ubind-missing": [
+    "ubind-missing.mlog"
+  ],
+  "ulocate-flag-invalid": [
+    "ulocate-flag.mlog"
+  ],
+  "ulocate-outbuild-discarded": [
+    "ulocate-flag.mlog",
+    "ulocate-outbuild.mlog"
+  ],
+  "ulocate-outxy-discarded": [
+    "ulocate-outxy.mlog"
+  ],
+  "virus-logic": [
+    "virus-logic.mlog"
+  ]
+}

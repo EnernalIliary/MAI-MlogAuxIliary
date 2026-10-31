@@ -1,0 +1,7 @@
+set x 0
+jump 3 always
+print "dead1"
+op add @counter @counter 1
+print "dead2"
+print "live"
+end

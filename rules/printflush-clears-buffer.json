@@ -1,0 +1,27 @@
+{
+  "id": "printflush-clears-buffer",
+  "kind": "semantics",
+  "severity": "INFO",
+  "claim": "`printflush <anything>` clears the print buffer unconditionally, so an unquoted token there is a deliberate flush, not a typo.",
+  "why": "LExecutor.java:1174-1178 — `exec.textBuffer.setLength(0)` sits outside the `if(target ...)` branch, so the clear happens even with no message block linked.",
+  "source": "source",
+  "ref": "m07990",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/virus-logic.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "clears the print buffer"
+    ]
+  },
+  "auto_downgrade": false,
+  "line_regex": "^printflush\\b",
+  "observed": {
+    "hits": 305,
+    "programs": 189,
+    "share": 0.0015,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

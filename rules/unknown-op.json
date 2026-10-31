@@ -1,0 +1,27 @@
+{
+  "id": "unknown-op",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "An `op` whose operator name is not in the 45-operator table does not exist in this build; at best it becomes noop.",
+  "why": "LogicOp is a fixed enum; LAssembler looks the name up and produces InvalidStatement on a miss. Also the drift detector for renamed operators (the editor shows `not` for `flip`).",
+  "source": "source",
+  "ref": "m14750",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/virus-logic-clean.mlog",
+  "match": {
+    "sevs": [
+      "ERR"
+    ],
+    "msg_any": [
+      "unknown op"
+    ]
+  },
+  "auto_downgrade": false,
+  "line_regex": "^op\\b",
+  "observed": {
+    "hits": 2,
+    "programs": 2,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

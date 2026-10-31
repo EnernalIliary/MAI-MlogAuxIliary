@@ -1,0 +1,4 @@
+# ulocate flag slot is `0`, which is not a BlockFlag; the outBuild slot is thrown away
+ubind @flare
+ulocate building 0 0 @copper 0 0 0 0
+end

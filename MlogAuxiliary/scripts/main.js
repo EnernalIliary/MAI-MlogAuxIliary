@@ -1,0 +1,4962 @@
+// ============================================================================
+//  Mlog辅助 (MlogAuxiliary) —— scripts/main.js   v0.1  (P1: API 接入 + 写入通道)
+//
+//  玩家不写 mlog。选中处理器 → 选一个意图模板 → 本地 sidecar (tools/logicd.py)
+//  把意图变成代码并跑仓库那套静态检查 → 面板列出 findings 与成本 → 确认写入。
+//
+//  写入不是"改 b.code 字段"，而是走原版 config 通道：
+//      LogicBlock.config(byte[].class, (build, data) -> build.readCompressed(data, true))
+//      （Mindustry-Source/core/src/mindustry/world/blocks/logic/LogicBlock.java:65-69）
+//  载荷 = compress(code, links)：版本字节 1 + 代码 + 链接表 deflate（同文件 :137-166），
+//  由 sidecar 用 tools/msch.py 的 build_logic_data() 生成 —— 和游戏自己的编码器同一格式。
+//  于是单机与联机同一条路径，联机时服务端执行，不需要模组自己造同步。
+//
+//  ── 三条 Rhino 铁律（沿用 DP-CameraUnbind/METHOD.md 的实测结论）────────────
+//   1) 按键常量写全限定名 Packages.arc.input.KeyCode.v
+//   2) 控制台里只挂"顶层全局函数"（对象副本在控制台里是 undefined），所以末尾用
+//      ScriptableObject.putProperty 把函数逐个挂到脚本作用域，并读回自检
+//   3) 覆写/回调一律包 try/catch —— 顶层抛异常会让整个脚本静默中止
+//
+//  ── 本版边界（别假装它做了）─────────────────────────────────────────────
+//   · UI 面板这一层**没有机器验证过**（无头模拟器里没有界面），协议层与写入通道
+//     由 tests/logicd/run_logicd_tests.py 逐条验（含真 v160.7 处理器回读）。
+//   · 游戏内快检已接（P2：scripts/quickcheck.js + rules.generated.js，五条单行判据），
+//     但它只能“少报”：未赋值变量、成本 CFG、值域都在 sidecar 全量检查里。
+//   · 撤销只在内存（P3）、没有 diff 预览（P3）、不接 LLM（P4）。
+// ============================================================================
+
+function __logicWriterMain(){
+    "use strict";
+
+    var MOD_VERSION = "0.14.6";
+    var URL_KEY     = "mlogauxiliary-url";
+    var DEFAULT_URL = "http://127.0.0.1:8765";
+    // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
+    var LLM_URL_KEY   = "mlogauxiliary-llm-url";
+    var LLM_KEY_KEY   = "mlogauxiliary-llm-key";
+    // v0.14.4（用户 2026-11-01）：「是否将AI工作提示发送到服务器聊天框，默认关闭」。
+    var CHAT_SEND_KEY = "mlogauxiliary-chat-send";
+    // v0.14.5（用户 2026-11-01）：「做一个hud倍率自己调就好」。框角控件在 HUD 上的大小
+    // 因人而异，我给 84×40 只是起点；倍率存在 Core.settings 里，设置页加减，下一帧生效。
+    var HUD_SCALE_KEY  = "mlogauxiliary-hud-scale";
+    var HUD_SCALE_MIN  = 0.5;
+    var HUD_SCALE_MAX  = 2;
+    var HUD_SCALE_STEP = 0.1;
+    var hudScaleBtn    = null;     // 设置页中间那格（显示当前倍率，点一下回 1.0×）
+    var LLM_MODEL_KEY = "mlogauxiliary-llm-model";
+    var KEY_REGION  = ["f7"];      // F7：扫鼠标周围 10 格，列出链接候选
+    var KEY_SELECT  = ["f3"];      // F3：按住 = 鼠标左键拉框（v0.5.0；F8 是游戏控制台，F9/F10 也被占）
+var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下的空键只有 F2，F1/F5/F6/F8/F11/F12 是游戏自己的）
+    var TIMEOUT_MS  = 4000;        // 连接超时：sidecar 是本机的，慢就是没开
+
+    function log(msg){ print("[mai] " + msg); }
+
+    // ---------------------------------------------------------- 设置界面
+    // 设置 -> 「Mlog辅助」一栏。把调试信息全摊开（版本 / 构建 / 快检模块是否加载 /
+    // 规则表条数 / sidecar 地址与可达性 / 数据目录 / mods 目录），省得再往控制台敲命令。
+    // 所有游戏对象访问都套 try：无头环境里只是返回 false，不会炸。
+
+    var sidecarOk = null;
+    var settingsDone = false;
+    var settingsErr = null;
+    var settingsTries = 0;    // 见热键钩子：UI 晚于脚本建好时每 60 帧重试一次   // 注册失败时的原文，摊在诊断里，省得翻 last_log.txt
+
+    function countKeys(o){
+        var n = 0;
+        if(o === null || o === undefined){ return 0; }
+        for(var k in o){ if(Object.prototype.hasOwnProperty.call(o, k)){ n++; } }
+        return n;
+    }
+
+    function dirText(fi){
+        try{ return String(fi.absolutePath()); }
+        catch(e){ return "?"; }
+    }
+
+    // 诊断数据只算一次，两个出口共用：设置页（键值两列对齐）与控制台/剪贴板（纯文本）。
+    function diagParts(){
+        var parts = [];
+        parts.push({k: "版本", v: MOD_VERSION + "（构建 " + gameBuild() + "）"});
+        if(RULES === null){
+            parts.push({k: "快检", v: "未加载（缺 rules.generated.js 或 quickcheck.js）"});
+        }else{
+            parts.push({k: "快检", v: "已加载 · 指令 " + countKeys(RULES.instr) + " 条 / 版本门 "
+                       + countKeys(RULES.ops) + " 条 / 链接槽 " + countKeys(RULES.link) + " 条"});
+        }
+        parts.push({k: "sidecar", v: base + "（"
+                    + (sidecarOk === null ? "未探测" : (sidecarOk ? "可达" : "不可达")) + "）"});
+        parts.push({k: "大模型", v: llmText()});
+        parts.push({k: "数据目录", v: dirText(Vars.dataDirectory)});
+        parts.push({k: "mods 目录", v: dirText(Vars.modDirectory)});
+        parts.push({k: "设置项", v: settingsDone ? "已注册（设置 → Mlog辅助）"
+                    : (settingsErr === null ? "未注册（Vars.ui 未就绪）" : "注册失败：" + settingsErr)});
+        return parts;
+    }
+
+    function diagLines(){
+        var parts = diagParts(), out = [];
+        for(var i = 0; i < parts.length; i++){ out.push(parts[i].k + "：" + parts[i].v); }
+        return out;
+    }
+
+    function diagText(){ return diagLines().join("\n"); }
+
+    function probeSidecar(){
+        httpJson("GET", "/health", null, function(code, text){
+            sidecarOk = (code === 200);
+            var body = String(text).substring(0, 200);
+            log("health " + code + " " + body.substring(0, 100));
+            var msg = sidecarOk ? ("可达：" + base + "\n" + body)
+                                : ("不可达（" + code + "）：" + base + "\n先启动 sidecar：python tools/logicd.py");
+            if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 连接", msg); }
+        });
+    }
+
+    // ------------------------------------------------- 自动拉起 sidecar（v0.13.1）
+    // 装了包之后玩家不该再开命令行窗口。F3 一按（或打开面板），模组先探一次 /health：
+    // 探不到就把包里的 sidecar/bin/logicd.exe 拉起来 —— 那是 PyInstaller 打的 onedir
+    // 构建，不需要玩家装 Python —— 然后每 400 ms 轮询到它开口。
+    // 找不到 exe 时（在源码树里跑、或者玩家删了 bin）退回原样：只提示「先开 sidecar」。
+    // 为什么要轮询而不是等进程输出：ProcessBuilder 的输出被重定向到 sidecar.log 了，
+    // 模组读不到管道；而 sidecar 的 ready 行写在它自己的 stdout 上。
+    var SIDE = {state: "idle", tries: 0, at: 0, why: "", exe: ""};
+
+    // v0.14.6（用户 m06631：游戏内导入的模组是 zip）：`m.root` 是 ZipFi，随包的
+    // logicd.exe 只是 zip 里的一个条目 —— ProcessBuilder 执行不了它，`pb.directory()`
+    // 也拿不到真实目录。所以第一次用到时把 sidecar 整棵解到数据目录（目录名带版本号，
+    // 升级自动换新），此后一律从那里跑；`安装.bat` 装到磁盘的走原路径，不解压。
+    var SIDE_BIN = null;
+
+    function sidecarIsZip(){
+        try{
+            var m = Vars.mods.getMod("mlog-auxiliary");
+            if(m === null || m === undefined){ return false; }
+            return String(m.root.getClass().getName()).indexOf("ZipFi") >= 0;
+        }catch(e){ log("sidecarIsZip: " + e); return false; }
+    }
+
+    // 不用 try/finally：v160.7 的 Rhino 在 finally 体里带 try/catch 时 codegen 会炸
+    // （见 run_ui_smoke.py 的红线）。这里逐层 try/catch 兜底即可。
+    function sidecarCopyTree(src, dst){
+        dst.mkdirs();
+        var kids = src.list();
+        for(var i = 0; i < kids.length; i++){
+            var k = kids[i];
+            var t = dst.child(String(k.name()));
+            if(k.isDirectory()){
+                sidecarCopyTree(k, t);
+            }else if(!(t.exists() && t.length() === k.length())){
+                var inp = k.read();
+                t.write(inp, false);
+                inp.close();
+            }
+        }
+    }
+
+    function sidecarBinDir(){
+        if(SIDE_BIN !== null && SIDE_BIN.exists()){ return SIDE_BIN; }
+        try{
+            var m = Vars.mods.getMod("mlog-auxiliary");
+            if(m === null || m === undefined){ return null; }
+            var src = m.root.child("sidecar");
+            if(src === null || !src.exists()){ return null; }
+            if(!sidecarIsZip()){
+                SIDE_BIN = src.child("bin");
+                return SIDE_BIN;
+            }
+            var out = Vars.dataDirectory.child("mlogauxiliary").child("sidecar")
+                .child(String(MOD_VERSION));
+            var bin = out.child("bin");
+            if(!bin.child("logicd.exe").exists()){
+                log("sidecar: mod is a zip, extracting to " + out.absolutePath());
+                hint("从模组包解出逻辑后端（首次约 40 MB）…");
+                sidecarCopyTree(src, out);
+            }
+            SIDE_BIN = bin;
+            return SIDE_BIN;
+        }catch(e){ log("sidecarBinDir: " + e); return null; }
+    }
+
+    function sidecarExe(){
+        try{
+            var d = sidecarBinDir();
+            if(d === null || d === undefined){ return null; }
+            var f = d.child("logicd.exe");
+            return (f !== null && f.exists()) ? f : null;
+        }catch(e){ log("sidecarExe: " + e); return null; }
+    }
+
+    function sidecarDir(){
+        try{ return sidecarBinDir(); }
+        catch(e){ return null; }
+    }
+
+    function sidecarPort(){
+        try{ return endpoint(base).port; }
+        catch(e){ return 8765; }
+    }
+
+    // 用 ProcessBuilder 而不是 Runtime.exec：exec 只能给一个命令行字符串，路径里的空格
+    // （saves/mods 常常在 "Program Files (x86)" 下面）会被它按空格切开；数组形式没这个问题。
+    // 输出必须重定向到文件 —— 子进程的 stdout 管道没人读，攒满 64 KB 后它会卡死。
+    function sidecarSpawn(exe, dir){
+        try{
+            var arr = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.String, 3);
+            arr[0] = String(exe.absolutePath());
+            arr[1] = "--port";
+            arr[2] = String(sidecarPort());
+            var pb = new Packages.java.lang.ProcessBuilder(arr);
+            pb.directory(new Packages.java.io.File(String(dir.absolutePath())));
+            pb.redirectErrorStream(true);
+            pb.redirectOutput(new Packages.java.io.File(String(dir.absolutePath()), "sidecar.log"));
+            var p = pb.start();
+            SIDE.exe = String(exe.absolutePath());
+            log("sidecar spawned: " + SIDE.exe);
+            return p;
+        }catch(e){
+            log("sidecarSpawn failed: " + e);
+            SIDE.why = String(e);
+            return null;
+        }
+    }
+
+    // 每帧便宜地看一眼：只在 starting 状态才真的发请求。
+    function sidecarTick(){
+        if(SIDE.state !== "starting"){ return; }
+        var now = Date.now();
+        if(SIDE.at > 0 && (now - SIDE.at) < 400){ return; }
+        SIDE.at = now;
+        SIDE.tries++;
+        var tries = SIDE.tries;
+        httpJson("GET", "/health", null, function(code, text){
+            if(code === 200){
+                sidecarOk = true;
+                SIDE.state = "up";
+                log("sidecar is up after " + tries + " probe(s)");
+                hint("sidecar 已就绪：" + base);
+                llmAutoSync();          // v0.14.4：模型档随 sidecar 就绪自动挂载
+            }else if(tries >= 25){
+                SIDE.state = "failed";
+                hint("sidecar 启动失败（25 次探测无响应），日志见 sidecar.log");
+            }
+        });
+    }
+
+    // v0.14.4（用户 2026-11-01）：「大模型也应该随游戏自动挂载」。
+    // sidecar 每次重启都会把内存里的模型档忘掉（配置只在进程里），所以只要它一就绪，
+    // 就把 Core.settings 里的 地址/密钥/模型 推一遍。60 s 内不重复推（每帧的 health 回调会反复命中）。
+    var llmAutoAt = 0;
+    function llmAutoSync(){
+        var now = 0;
+        try{ now = Packages.java.lang.System.currentTimeMillis(); }catch(e){ }
+        if(llmAutoAt > 0 && now > 0 && now - llmAutoAt < 60000){ return; }
+        llmAutoAt = (now > 0) ? now : 1;
+        try{ llmSync(); }catch(e){ log("llm auto-sync skipped: " + e); }
+    }
+
+    // 幂等：已经在 starting 就不重复拉；已经在跑就不管。
+    function ensureSidecar(quiet){
+        if(SIDE.state === "starting"){ return; }
+        if(SIDE.state === "up" && sidecarOk === true){ return; }
+        httpJson("GET", "/health", null, function(code, text){
+            if(code === 200){
+                sidecarOk = true; SIDE.state = "up";
+                llmAutoSync();      // v0.14.4：已经在跑的 sidecar 也补一次模型档
+                return;
+            }
+            var exe = sidecarExe();
+            var dir = sidecarDir();
+            if(exe === null || dir === null){
+                SIDE.state = "noexe";
+                if(quiet !== true){
+                    hint("连不上 sidecar（" + base + "），安装里也没有 sidecar/bin/logicd.exe。源码树先跑 "
+                         + "python tools/logicd.py，装包版重新双击 安装.bat。");
+                }
+                return;
+            }
+            var p = sidecarSpawn(exe, dir);
+            if(p === null){
+                SIDE.state = "failed";
+                if(quiet !== true){ hint("sidecar 启动失败：" + SIDE.why); }
+                return;
+            }
+            SIDE.state = "starting"; SIDE.tries = 0; SIDE.at = 0;
+            if(quiet !== true){ hint("正在启动 sidecar…"); }
+        });
+    }
+
+    function sidecarStateText(){
+        if(SIDE.state === "up"){ return "已就绪"; }
+        if(SIDE.state === "starting"){ return "启动中（探测 " + SIDE.tries + " 次）"; }
+        if(SIDE.state === "noexe"){ return "缺少 logicd.exe"; }
+        if(SIDE.state === "failed"){ return "启动失败"; }
+        return "未尝试";
+    }
+
+    function isLogicBuild(b){
+        try{ return b instanceof Packages.mindustry.world.blocks.logic.LogicBlock.LogicBuild; }
+        catch(e){ return b !== null && b !== undefined && typeof b.code === "string"; }
+    }
+
+    function aimedBuild(){
+        try{
+            var t = Vars.world.tileWorld(Core.input.mouseWorldX(), Core.input.mouseWorldY());
+            if(t === null || t.build === null){ return null; }
+            return isLogicBuild(t.build) ? t.build : null;
+        }catch(e){ return null; }
+    }
+
+    function quickAimed(){
+        var b = aimedBuild();
+        if(b === null || Vars.ui === null){
+            if(Vars.ui !== null){
+                Vars.ui.showText("Mlog辅助 · 快检", "先把光标指向处理器");
+            }
+            return;
+        }
+        var res = quickRun(String(b.code), b);
+        var out = [quickSummary(res)];
+        var ls = quickLines(res);
+        for(var i = 0; i < ls.length && i < 12; i++){ out.push(ls[i]); }
+        Vars.ui.showText("Mlog辅助 · 快检", out.join("\n"));
+    }
+
+    // 只碰 Table / Cell 的少数几个方法，方便在没有 UI 的环境里用假表 smoke。
+    // ------------------------------------------------------------ 设置页
+    // 只用真引擎复核过的 Table / Cell 形状（tests/mlogauxiliary/run_ui_smoke.py）：
+    // 一律平铺成「键 值 + 按钮」，绝不 t.table(fn)（v160.7 Rhino 里重载歧义），
+    // 也不 t.scrollPane(fn) / t.textarea(fn)（Table 上根本没有这两个方法）。
+    // 原版风格的排版素材。分段标题 + 3px 强调线：BaseDialog 的标题就是这么画的
+    //   titleTable.image(Tex.whiteui, Pal.accent).growX().height(3f)   BaseDialog.java:25
+    // 行用灰底 Styles.grayPanel：原版 CheckSetting 用的同一个 Drawable（SettingsMenuDialog.java:825-827），
+    // 行宽/内边距也照它（minWidth 500、padTop 7 -> 这里 540 / 5，给中文留点余量）。
+    var LABEL_W = 128, VALUE_W = 390, ROW_W = 540;
+
+    // 造一行灰底容器。Styles/Tex 在无头环境里可能还没初始化（静态字段要 atlas），
+    // 所以一律 try：拿不到就用无背景的 Table，功能一样，只是不好看。
+    function realRow(){
+        try{ return new Packages.arc.scene.ui.layout.Table(Packages.mindustry.ui.Styles.grayPanel); }
+        catch(e){ return new Packages.arc.scene.ui.layout.Table(); }
+    }
+
+    function section(t, title){
+        t.add(title).color(Pal.accent).left().padTop(12).padBottom(2).row();
+        try{
+            t.image(Packages.mindustry.gen.Tex.whiteui, Pal.accent).growX().height(3).padTop(2).padBottom(4).row();
+        }catch(e){
+            t.add("").height(4).row();
+        }
+    }
+
+    // mk 是行工厂：真机用 realRow()，selfTest 喂假表（无 UI 时真 Table 的 labelWrap 会 NPE）。
+    function kv(t, k, v, mk){
+        mk = mk || realRow;
+        var row = mk();
+        row.margin(8).left();
+        if(k.length > 0){ row.add(k).width(LABEL_W).left().color(Pal.gray); }
+        row.labelWrap(String(v)).width(VALUE_W).left();
+        t.add(row).width(ROW_W).left().padTop(5).row();
+    }
+
+    function buttonRow(t, labels, handlers, mk){
+        mk = mk || realRow;
+        var row = mk();
+        row.margin(6).left();
+        for(var i = 0; i < labels.length; i++){
+            row.button(labels[i], handlers[i]).height(38).padRight(6);
+        }
+        t.add(row).width(ROW_W).left().padTop(5).row();
+    }
+
+    function copyDiag(){
+        try{
+            Core.app.setClipboardText(diagText());
+            if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 诊断", "诊断已复制。"); }
+        }catch(e){ log("clipboard failed: " + e); }
+    }
+
+    // v0.14.4（用户 2026-11-01）：「运行环境应该放在最后」「删除sidecar」「默认当隐藏API密钥」
+    // 「增加一个设置选项，是否将AI工作提示发送到服务器聊天框，默认关闭」。
+    // 顺序固定：大模型 → 聊天播报 → 快捷动作 → 本地快检 → 说明 → 运行环境（永远最后）。
+    // sidecar 不再单独成段：地址固定本机 8765、随游戏自启，出问题时看运行环境那一行。
+    function buildSettingsTable(t, mk){
+        mk = mk || realRow;
+        t.defaults().pad(3).left();
+        kv(t, "", "Mlog辅助 " + MOD_VERSION + " · 说一句要什么 → 生成 → 预检 → 写入；写入走原版 config 通道，联机由服务端执行", mk);
+        var parts = diagParts(), i;
+
+        section(t, "大模型（启用后由模型直接写逻辑）");
+        kv(t, "档位", llmText(), mk);
+        var lrow = mk();
+        lrow.margin(8).left();
+        lrow.add("地址").width(LABEL_W).left().color(Pal.gray);
+        lrow.field(llmUrl(), function(v){
+            llmSave(LLM_URL_KEY, String(v));
+            log("llm url = " + v);
+        }).width(300).left();
+        t.add(lrow).width(ROW_W).left().padTop(5).row();
+        // 密钥默认遮成 *：setPasswordMode 只换显示，明文仍在 Core.settings 里。
+        // v0.12 只调了 setPasswordMode(true)，但 Fonts.def 里没有 bullet 字形，等于没遮；
+        // v0.14.4 补 setPasswordCharacter('*')，并给一个「显示密钥」按钮按需看明文。
+        var keyField = null;
+        var krow = mk();
+        krow.margin(8).left();
+        krow.add("密钥").width(LABEL_W).left().color(Pal.gray);
+        var kcell = krow.field(llmKey(), function(v){
+            llmSave(LLM_KEY_KEY, String(v));
+            log("llm key saved (" + String(v).length + " chars)");
+        }).width(300).left();
+        try{
+            keyField = kcell.get();
+            keyField.setPasswordMode(true);
+            try{ keyField.setPasswordCharacter('*'); }catch(e1){ log("password char skipped: " + e1); }
+        }catch(e){ log("password mode skipped (this table has no cell.get)"); }
+        t.add(krow).width(ROW_W).left().padTop(5).row();
+        var kbtn = mk();
+        kbtn.margin(6).left();
+        var ktoggle = kbtn.button("显示密钥", function(){
+            var masked = true;
+            try{ masked = keyField.isPasswordMode(); }catch(e0){ }
+            try{
+                keyField.setPasswordMode(!masked);
+                ktoggle.get().setText(!masked ? "隐藏密钥" : "显示密钥");
+            }catch(e2){ log("password toggle skipped: " + e2); }
+        }).height(38).padRight(6);
+        t.add(kbtn).width(ROW_W).left().padTop(5).row();
+        var mrow = mk();
+        mrow.margin(8).left();
+        mrow.add("模型").width(LABEL_W).left().color(Pal.gray);
+        mrow.field(llmModel(), function(v){
+            llmSave(LLM_MODEL_KEY, String(v));
+            log("llm model = " + v);
+        }).width(300).left();
+        t.add(mrow).width(ROW_W).left().padTop(5).row();
+        buttonRow(t, ["获取模型", "测试端点", "启用模型档"], [
+            function(){ showLlmModels(); },
+            function(){ llmProbe(); },
+            function(){ llmEnable(); }
+        ], mk);
+        kv(t, "", "地址填 OpenAI 兼容的 /chat/completions（例：" + LLM_DEFAULT_URL
+           + "），只填到 /v1 也可以，sidecar 会自动补全。密钥只存于本机 Core.settings 与 sidecar 内存，"
+           + "界面默认遮成 *，点「显示密钥」可查看。改完回车保存。", mk);
+
+        section(t, "聊天播报");
+        var crow = mk();
+        crow.margin(6).left();
+        var csend = crow.button("发送到服务器聊天框：" + (chatSendOn() ? "开" : "关"), function(){
+            toggleChatSend();
+            try{ csend.get().setText("发送到服务器聊天框：" + (chatSendOn() ? "开" : "关")); }
+            catch(e0){ log("chat toggle label not updated"); }
+        }).height(38).padRight(6);
+        t.add(crow).width(ROW_W).left().padTop(5).row();
+        kv(t, "", "开启后，作业的启用与完成状态会发到联机聊天框（MAI<逻辑徽标> 状态 (x,y): 信息）；"
+           + "关闭时只在本机提示。默认关闭。", mk);
+
+        section(t, "框选控件");
+        var hrow = mk();
+        hrow.margin(6).left();
+        hrow.button("缩小", function(){ hudScaleStep(-1); hudScaleRefresh(); }).height(38).padRight(6);
+        hudScaleBtn = hrow.button(hudScaleBtnText(), function(){ hudScaleSet(1); hudScaleRefresh(); })
+            .height(38).padRight(6);
+        hrow.button("放大", function(){ hudScaleStep(1); hudScaleRefresh(); }).height(38);
+        t.add(hrow).width(ROW_W).left().padTop(5).row();
+        kv(t, "", "框角「查看 / 取消」和状态条的大小倍率（" + HUD_SCALE_MIN + "×–" + HUD_SCALE_MAX
+           + "×，每次 " + HUD_SCALE_STEP + "×）。按钮、字号、留白一起缩放，下一帧生效；"
+           + "点中间那一格回到 1.0×。", mk);
+
+        section(t, "快捷动作");
+        buttonRow(t, ["AI 辅助编程", "复制诊断"], [
+            function(){ showAiPanel(); },
+            function(){ copyDiag(); }
+        ], mk);
+        buttonRow(t, ["快检光标下的处理器", "打印诊断"], [
+            function(){ quickAimed(); },
+            function(){ print("[mai] --- diag ---"); print(diagText()); }
+        ], mk);
+        buttonRow(t, ["重新注册分类", "审查状态"], [
+            function(){ settingsDone = false; registerSettings(); },
+            function(){ showReview(); }
+        ], mk);
+        buttonRow(t, ["撤销上次写入", "撤销快照"], [
+            function(){ var r = undo(); if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 撤销", r); } },
+            function(){ if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 撤销", undoInfo()); } }
+        ], mk);
+
+        section(t, "本地快检");
+        for(i = 0; i < parts.length; i++){
+            if(parts[i].k === "快检"){ kv(t, parts[i].k, parts[i].v, mk); }
+        }
+        kv(t, "", "模组自带的离线静态检查：不联网也能标出不可达语句、未定义变量、链接没绑上这类问题，"
+           + "规则与 sidecar 的检查器同源，只在本机跑。", mk);
+
+        section(t, "说明");
+        kv(t, "", "F3：指向处理器，描述意图 → 生成 → 预检 → 写入；原版逻辑编辑器底部会多一条「审查」栏。"
+           + "sidecar 随游戏自启，未就绪时投递会提示稍后再投。", mk);
+
+        section(t, "运行环境");
+        for(i = 0; i < parts.length; i++){
+            if(parts[i].k !== "快检"){ kv(t, parts[i].k, parts[i].v, mk); }
+        }
+    }
+
+    // 区域面板的布线（v0.6.0）：框选松手之后不再只弹一段纯文本，而是把「区域摘要 +
+    // 每个处理器的链接候选」放进可滚动的对话框，并且每个处理器给一个「生成」按钮。
+    // 这里只碰 table 的接口、不碰引擎类，所以能像设置页一样用假表在无 UI 环境里数行数。
+    function buildRegionTable(t, snap, head, candText, pick){
+        t.add(String(head)).left().row();
+        t.labelWrap(String(candText)).left().growX().row();
+        var ps = (snap && snap.processors) || [], i;
+        if(ps.length === 0){
+            t.add("（区域里没有处理器）").left().row();
+        }
+        for(i = 0; i < ps.length && i < 8; i++){
+            (function(p){
+                t.button("用 @" + p.x + "," + p.y + " 生成", function(){ pick(p.x, p.y); })
+                 .width(240).left().row();
+            })(ps[i]);
+        }
+        if(ps.length > 8){
+            t.add("…还有 " + (ps.length - 8) + " 个处理器").left().row();
+        }
+        return t;
+    }
+
+    // ---------------------------------------------------------- 处理器清单（v0.7.0，F2）
+    // 全图扫一遍处理器，按「问题多的排前面」列出来，点一行就跳过去并开 AI 面板。
+    // 这三个只碰 table 的接口（不碰引擎类），所以 selfTest 能用假表数行数。
+    function listHead(res){
+        var errs = 0, warns = 0, i;
+        for(i = 0; i < res.rows.length; i++){ errs += res.rows[i].err; warns += res.rows[i].warn; }
+        return "全图 " + res.rows.length + " 个处理器，ERR " + errs + " / WARN " + warns
+             + "，" + res.ms + " ms"
+             + (res.api === true ? "" : "（快检不可用，只列清单）");
+    }
+
+    function listRowLabel(r){
+        var tail = "";
+        if(r.err > 0){ tail += "  ERR " + r.err; }
+        if(r.warn > 0){ tail += "  WARN " + r.warn; }
+        if(r.err === 0 && r.warn === 0){ tail = "  干净"; }
+        return "@" + r.x + "," + r.y + "  " + r.lines + " 行" + tail;
+    }
+
+    function buildListTable(t, res, head, pick){
+        var rows = res.rows || [], max = 24, i;
+        t.add(String(head)).left().row();
+        if(rows.length === 0){ t.add("这张图上没有处理器").left().row(); }
+        for(i = 0; i < rows.length && i < max; i++){
+            (function(row){
+                t.button(listRowLabel(row), function(){ pick(row.x, row.y); })
+                 .width(320).left().row();
+            })(rows[i]);
+        }
+        if(rows.length > max){ t.add("…还有 " + (rows.length - max) + " 个处理器").left().row(); }
+        return t;
+    }
+
+
+    // 无 UI 环境下也能验证设置表格的布线：喂一张假表，数它被填了多少行/格。
+    // 假表只实现真实页面用到的方法 —— 少实现一个，selfTest 立刻炸；
+    // 同时把用到的名字记下来，供 run_ui_smoke 去真引擎里复核「有没有重载歧义」。
+    // 假表：无 UI 环境里真 Table 的 labelWrap/field 会 NPE（scene.getStyle 需要 skin），
+    // 所以 selfTest 用这个骨架跑一遍布线。它同时记下「用到了哪些 Table/Cell 方法」，
+    // 测试再把这些名字拿到真引擎里逐个解析 —— 重载歧义只有在真引擎里才暴露得出来。
+    // 一个对象同时当「表」和「格子」用：所有方法都返回自己，链式调用就一条路。
+    function fakeTable(){
+        var n = 0;
+        var used = [];
+        function hit(m){ used.push(m); }
+        var node = {
+            pad: function(){ hit("pad"); return node; },
+            padTop: function(){ hit("padTop"); return node; },
+            padBottom: function(){ hit("padBottom"); return node; },
+            padRight: function(){ hit("padRight"); return node; },
+            left: function(){ hit("left"); return node; },
+            right: function(){ hit("right"); return node; },
+            width: function(){ hit("width"); return node; },
+            height: function(){ hit("height"); return node; },
+            growX: function(){ hit("growX"); return node; },
+            color: function(){ hit("color"); return node; },
+            colspan: function(){ hit("colspan"); return node; },
+            margin: function(){ hit("margin"); return node; },
+            defaults: function(){ hit("defaults"); return node; },
+            row: function(){ n++; hit("row"); return node; },
+            clear: function(){ hit("clear"); return node; },
+            add: function(){ n++; hit("add"); return node; },
+            image: function(){ n++; hit("image"); return node; },
+            label: function(){ n++; hit("label"); return node; },
+            labelWrap: function(){ n++; hit("labelWrap"); return node; },
+            field: function(v, f){ n++; hit("field"); return node; },
+            button: function(s, f){ n++; hit("button"); return node; }
+        };
+        return {table: node, count: function(){ return n; },
+                methods: function(){
+                    var out = [], seen = {};
+                    for(var i = 0; i < used.length; i++){
+                        if(seen[used[i]] !== true){ seen[used[i]] = true; out.push(used[i]); }
+                    }
+                    out.sort();
+                    return out.join(",");
+                }};
+    }
+
+    function selfTest(){
+        var ft = fakeTable();
+        try{ buildSettingsTable(ft.table, function(){ return ft.table; }); }
+        catch(e){ return "设置表格布线失败：" + e; }
+        var rg = fakeTable();
+        var fakeSnap = {processors: [{x: 1, y: 2, block: "micro-processor", links: []},
+                                     {x: 5, y: 6, block: "micro-processor", links: []}]};
+        try{ buildRegionTable(rg.table, fakeSnap, "区域 0,0 - 9,9 方块 4 处理器 2", "候选文本", function(){}); }
+        catch(e){ return "区域表格布线失败：" + e; }
+        var ls = fakeTable();
+        var fakeList = {rows: [{x: 1, y: 2, lines: 4, err: 1, warn: 0, rules: "undefined-var"},
+                               {x: 5, y: 6, lines: 2, err: 0, warn: 2, rules: "printflush-clears-buffer"}],
+                        ms: 3, api: true};
+        try{ buildListTable(ls.table, fakeList, listHead(fakeList), function(){}); }
+        catch(e){ return "清单表格布线失败：" + e; }
+        var fakeB = {tile: {x: 3, y: 4}, code: "set n 0\nprint n\nend", links: {size: 0}};
+        var snapOk = "no";
+        try{
+            var back = parse(snapshotText(fakeB, "selftest"));
+            snapOk = (back !== null && back.x === 3 && back.y === 4 && back.code === fakeB.code) ? "ok" : "bad";
+        }catch(e){ snapOk = "fail"; }
+        if(snapOk !== "ok"){ return "撤销快照序列化失败：" + snapOk; }
+        return "设置表格可建，填了 " + ft.count() + " 行/格；区域表格 " + rg.count()
+               + " 行；清单表格 " + ls.count() + " 行；诊断 " + diagLines().length
+               + " 行；撤销快照 " + snapOk + "；用到的方法 " + ft.methods();
+    }
+
+    // 设置分类的图标用原版逻辑徽标（图标字体里的 glyph，和 @editor.worldprocessors 那个按钮同一个）。
+    // 它由 Icon 的静态初始化从 Fonts.def 造出来，个别环境可能还是 null —— 那时退回无图标写法，
+    // 不传 null 给 addCategory（String/Drawable 两个重载会挑不出来）。
+    function categoryIcon(){
+        try{
+            var ic = Packages.mindustry.gen.Icon.logic;
+            if(ic !== null && ic !== undefined){ return ic; }
+        }catch(e){ log("logic icon unavailable: " + e); }
+        return null;
+    }
+
+    function registerSettings(){
+        if(settingsDone){ return true; }
+        try{
+            if(Vars.ui === null || Vars.ui.settings === null){ return false; }
+            var icon = categoryIcon();
+            if(icon !== null){
+                Vars.ui.settings.addCategory("Mlog辅助", icon, function(t){ buildSettingsTable(t); });
+            }else{
+                Vars.ui.settings.addCategory("Mlog辅助", function(t){ buildSettingsTable(t); });
+            }
+            settingsDone = true;
+            settingsErr = null;
+            log("settings category registered");
+            return true;
+        }catch(e){
+            settingsErr = String(e);
+            log("settings category failed: " + e);
+            return false;
+        }
+    }
+
+
+    try{
+        var Core    = Packages.arc.Core;
+        var Events  = Packages.arc.Events;
+        var Threads = Packages.arc.util.Threads;
+        var Vars    = Packages.mindustry.Vars;
+        var ET      = Packages.mindustry.game.EventType;
+        var Groups  = Packages.mindustry.gen.Groups;
+        var Pal     = Packages.mindustry.graphics.Pal;
+
+        // P2 的两个模块。游戏只执行 scripts/main.js（Mods.loadScripts:809 只取 main.js，
+        // 除非 scripts/ 下只有一个文件），其余文件必须 require 进来 —— Scripts.java:30-32
+        // 给脚本作用域装了 CommonJS 模块提供器，模块里 module.exports 就是取到的东西。
+        var QUICK = null, RULES = null;
+        try{
+            RULES = require("rules.generated");
+            QUICK = require("quickcheck");
+            log("quick check loaded: " + countKeys(RULES.instr) + " instruction(s)");
+        }catch(e){
+            log("quick check unavailable (" + e + ") -- 面板会少一行本地预检");
+        }
+
+        var base = String(Core.settings.getString(URL_KEY, DEFAULT_URL));
+// 旧版本把地址存在 mlogauxiliary 之前的名字下（logicwriter-url）：存在就搬过来一次，读的人不用重配。
+(function(){
+    try{
+        var legacy = Core.settings.getString("logic" + "writer-url", null);
+        if(legacy !== null && legacy !== undefined && String(legacy).length > 0){
+            if(String(Core.settings.getString(URL_KEY, "")).length === 0){
+                Core.settings.put(URL_KEY, String(legacy)); base = String(legacy);
+                log("migrated sidecar url from the old key: " + base);
+            }
+        }
+    }catch(e){ log("legacy url migration skipped: " + e); }
+})();
+        var undoStack = [];        // P1：内存快照，重启即失效（P3 落盘）
+
+        // ---------------------------------------------------------- 大模型（v0.11.0）
+        // 玩家在设置页填 地址 / 密钥 / 模型，模组只把它们发给本机 sidecar 的 POST /llm，
+        // sidecar 在进程里把 provider 换成模型档 —— 不用重启 sidecar。密钥只留在本机
+        // Core.settings 与 sidecar 内存里：面板、诊断、日志永远只显示尾巴。
+        var LLM_DEFAULT_URL = "https://api.deepseek.com/v1/chat/completions";
+        // v0.14.4：模板档已删，默认就是「未配置模型」——没配模型时只提示，不生成任何代码。
+        var llmState = {kind: "none", url: "", model: "", key_set: false, key_hint: "", timeout: 60};
+
+        function llmGet(key, dflt){
+            try{
+                var v = Core.settings.getString(key, dflt);
+                return (v === null || v === undefined) ? dflt : String(v);
+            }catch(e){ return dflt; }
+        }
+        function llmUrl(){ return llmGet(LLM_URL_KEY, ""); }
+        function llmModel(){ return llmGet(LLM_MODEL_KEY, ""); }
+        function llmKey(){ return llmGet(LLM_KEY_KEY, ""); }
+        function llmSave(key, v){
+            try{ Core.settings.put(key, String(v)); }
+            catch(e){ log("save " + key + " failed: " + e); }
+        }
+
+        function llmText(){
+            var tier = (llmState.kind === "llm") ? "模型档"
+                     : (llmState.kind === "fake" ? "回放档" : "未配置模型");
+            var url = llmState.url.length > 0 ? llmState.url : (llmUrl().length > 0 ? llmUrl() : "未填");
+            var model = llmState.model.length > 0 ? llmState.model
+                      : (llmModel().length > 0 ? llmModel() : "未填");
+            var key = llmState.key_set ? ("已填 " + String(llmState.key_hint))
+                    : (llmKey().length > 0 ? "已填（未同步）" : "未填");
+            return tier + " · " + url + " · " + model + " · 密钥 " + key;
+        }
+
+        function llmNote(text){
+            if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 大模型", String(text)); }
+            else{ print("[mai] llm: " + text); }
+        }
+
+        function llmRefresh(cb){
+            httpJson("GET", "/llm", null, function(code, text){
+                var d = parse(text);
+                if(d !== null && d.ok === true){ llmState = d; }
+                if(cb){ cb(code, d, text); }
+            });
+        }
+
+        function llmApply(body, cb){
+            httpJson("POST", "/llm", body, function(code, text){
+                var d = parse(text);
+                if(d !== null && d.ok === true){ llmState = d; }
+                if(cb){ cb(code, d, text); }
+            });
+        }
+
+        // 「获取模型」：模组自己的裸 Socket 只走明文 HTTP，所以 https 端点必须由 sidecar 代取。
+        function llmFetchModels(cb){
+            var url = llmUrl();
+            if(url.length === 0){ cb(false, null, "先填模型地址（例如 " + LLM_DEFAULT_URL + "）"); return; }
+            httpJson("POST", "/models", JSON.stringify({url: url, key: llmKey()}), function(code, text){
+                var d = parse(text);
+                if(d === null){ cb(false, null, "sidecar 没回 JSON：" + jobWhy(code, text, null)); return; }
+                if(d.ok !== true){ cb(false, null, String(d.error || "取模型列表失败")); return; }
+                cb(true, d, "");
+            });
+        }
+
+        // 选模型：Dialog + cont.pane(host)，host 必须是真 Table
+        // （v0.4.1 的教训：pane() 交回来的是 ScrollPane，它没有 add）。
+        function showPickList(title, items, onPick){
+            var d = new Packages.arc.scene.ui.Dialog(String(title));
+            d.addCloseButton();
+            try{ d.closeOnBack(); }catch(e){}
+            var host = new Packages.arc.scene.ui.layout.Table();
+            try{ d.cont.pane(host).width(560).height(360); }
+            catch(e){ d.cont.add(host).growX(); }
+            var n = 0;
+            for(var i = 0; i < items.length && n < 80; i++){
+                (function(item){
+                    host.button(String(item), function(){
+                        try{ onPick(String(item)); }catch(e2){ log("pick failed: " + e2); }
+                        d.hide();
+                    }).growX().height(36).padBottom(3).row();
+                })(items[i]);
+                n++;
+            }
+            if(n === 0){ host.add("（端点没有返回模型，可手填模型名）").left().row(); }
+            d.cont.row();
+            d.cont.button("关闭", function(){ d.hide(); }).height(40).width(120).padTop(8);
+            d.show();
+        }
+
+        function showLlmModels(){
+            log("asking the endpoint for its model list");
+            llmFetchModels(function(ok, doc, err){
+                if(!ok){ llmNote("取模型列表失败：" + err); return; }
+                var list = (doc && doc.models) || [];
+                showPickList("Mlog辅助 · 选择模型（" + list.length + "）", list, function(m){
+                    llmSave(LLM_MODEL_KEY, m);
+                    llmNote("模型已选：" + m + "\n点「启用模型档」后生效。");
+                });
+            });
+        }
+
+        function llmEnable(){
+            var url = llmUrl();
+            if(url.length === 0){ llmNote("先填模型地址（例如 " + LLM_DEFAULT_URL + "）"); return; }
+            var want = llmModel();
+            llmApply(JSON.stringify({kind: "llm", url: url, model: want, key: llmKey()}),
+                function(code, d, text){
+                    if(d === null || d.ok !== true){
+                        llmNote("启用失败：" + ((d && d.error) ? String(d.error) : jobWhy(code, text, null)));
+                        return;
+                    }
+                    var head = "已切到模型档：" + String(d.model || "(端点默认)")
+                        + "\n地址：" + String(d.url)
+                        + "\n此后描述意图由模型直接写逻辑。";
+                    // v0.12.1：模型名填错时端点大多不报错，只回一堆空回复，作业里只会看到 empty reply；
+                    // 所以启用时顺手拿一次端点列表比一比，对不上就当场说出来。
+                    llmFetchModels(function(ok, doc, err){
+                        var list = (ok && doc && doc.models) || [];
+                        if(ok && want.length > 0 && list.indexOf(want) < 0){
+                            llmNote(head + "\n注意：模型 " + want + " 不在端点列表（现有："
+                                + list.join(", ") + "）");
+                        }else{
+                            llmNote(head);
+                        }
+                    });
+                });
+        }
+
+        // ---------------------------------------------------------- 传输层
+        // 不用 java.net.URL.openConnection()：它返回的是 sun.net.www.protocol.http.HttpURLConnection，
+        // 属于 java.base 不 export 的 JDK 内部类；Rhino 按运行期类做成员绑定（MemberBox），于是
+        // setRequestMethod / getResponseCode 这类被内部类覆写的方法一调就抛
+        //   IllegalAccessException: class rhino.MemberBox cannot access class
+        //   sun.net.www.protocol.http.HttpURLConnection (in module java.base)
+        // —— v0.4.3 真机实测。这里退回 java.net.Socket：请求行与头自己写，响应读到 EOF
+        // （请求带 Connection: close，python 的 BaseHTTPRequestHandler 是 HTTP/1.0，读完就关）。
+        // 只用公开类（Socket / InputStreamReader / StringBuilder），不再碰 JDK 内部类型。
+        
+        // "http://host:port/path" -> {host, port, path}，host 缺省 127.0.0.1、port 缺省 8765。
+        // ---------------------------------------------------------- 模型档自愈（v0.12.1）
+
+        // sidecar 重启会把它内存里的模型档配置忘干净（配置只在进程里），
+        // 结果玩家明明设置过，重启后却静悄悄退回模板档、报「没匹配到样板」。
+        // 模组的 Core.settings 才是源头，所以启动时与每次开面板都把设置再推一遍。
+        function llmSync(cb){
+            var url = llmUrl();
+            if(url.length === 0){ if(cb){ cb(false, "no url saved"); } return; }
+            var want = llmModel();
+            llmRefresh(function(code, d, text){
+                if(d === null || d.ok !== true){
+                    if(cb){ cb(false, "sidecar unreachable"); }
+                    return;
+                }
+                if(d.kind === "llm" && String(d.model || "") === want){
+                    if(cb){ cb(true, "already synced"); }
+                    return;
+                }
+                llmApply(JSON.stringify({kind: "llm", url: url, model: want, key: llmKey()}),
+                    function(c2, d2, t2){
+                        if(d2 !== null && d2.ok === true){
+                            log("llm tier re-synced from settings: " + String(d2.url));
+                            if(cb){ cb(true, "synced"); }
+                        }else if(cb){
+                            cb(false, (d2 && d2.error) ? String(d2.error) : jobWhy(c2, t2, null));
+                        }
+                    });
+            });
+        }
+
+        // 「测试端点」：直接问一次端点，把 HTTP 状态、finish_reason、回复长度都摊开。
+        // 作业路径只会说「empty reply」，玩家无从判断是地址错、模型名错还是被 token 截断。
+        function llmProbe(){
+            var url = llmUrl();
+            if(url.length === 0){ llmNote("先填模型地址（例如 " + LLM_DEFAULT_URL + "）"); return; }
+            llmNote("正在测试端点…");
+            httpJson("POST", "/llm/probe",
+                JSON.stringify({url: url, model: llmModel(), key: llmKey()}),
+                function(code, text){
+                    var d = parse(text);
+                    if(d === null){ llmNote("sidecar 没回 JSON：" + jobWhy(code, text, null)); return; }
+                    if(d.ok !== true){ llmNote("测试失败：" + String(d.error || jobWhy(code, text, null))); return; }
+                    var lines = [];
+                    lines.push("地址：" + String(d.url));
+                    lines.push("HTTP " + String(d.status) + " · 模型 " + String(d.model || "(端点默认)"));
+                    if(d.error){ lines.push("错误：" + String(d.error)); }
+                    if(d.finish_reason !== undefined && d.finish_reason !== null){
+                        lines.push("finish_reason：" + String(d.finish_reason));
+                    }
+                    if(d.content_len !== undefined){ lines.push("回复长度：" + String(d.content_len) + " 字符"); }
+                    if(d.reasoning_len !== undefined){
+                        lines.push("仅返回 reasoning（" + String(d.reasoning_len) + " 字符），content 为空");
+                    }
+                    if(d.content){ lines.push("回复：" + String(d.content).slice(0, 160)); }
+                    else if(d.raw){ lines.push("原文：" + String(d.raw).slice(0, 200)); }
+                    llmNote(lines.join("\n"));
+                });
+        }
+
+        function endpoint(url){
+            var s = String(url);
+            var m = /^https?:\/\/([^\/:]+)(?::(\d+))?(\/[^\s]*)?$/.exec(s);
+            if(m === null){ return {host: "127.0.0.1", port: 8765, path: "/"}; }
+            var port = m[2] === undefined ? 80 : parseInt(m[2], 10);
+            if(!(port > 0 && port < 65536)){ port = 8765; }
+            return {host: m[1], port: port, path: m[3] === undefined ? "/" : m[3]};
+        }
+        
+        function readAllStr(rd){
+            var sb = new Packages.java.lang.StringBuilder();
+            var cbuf = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.Character.TYPE, 8192);
+            var n;
+            while((n = rd.read(cbuf, 0, 8192)) !== -1){
+                sb.append(new Packages.java.lang.String(cbuf, 0, n));
+            }
+            return String(sb.toString());
+        }
+        
+        // 同步原生请求：返回 {code, text, head}。code = -1 表示连不上/超时（text 里是原因）。
+        function httpRaw(method, url, body){
+            var ep = endpoint(url);
+            var sock = null;
+            var res = {code: -1, text: "", head: ""};
+            // 注意：这里刻意不用 try/finally —— 真 v160.7 的 Rhino 在 finally 里再嵌 try/catch
+            // 时会抛 ArrayIndexOutOfBoundsException(arraycopy ...)，脚本整段静默不执行。
+            // 收尾改成末尾独立的 try{ if(sock!==null){ sock.close(); } }catch(e1){}。
+            try{
+                sock = new Packages.java.net.Socket();
+                sock.connect(new Packages.java.net.InetSocketAddress(ep.host, ep.port), TIMEOUT_MS);
+                sock.setSoTimeout(TIMEOUT_MS * 4);
+                var payload = (body === null || body === undefined) ? null
+                    : new Packages.java.lang.String(String(body)).getBytes("UTF-8");
+                var head = method + " " + ep.path + " HTTP/1.1\r\n"
+                         + "Host: " + ep.host + ":" + ep.port + "\r\n"
+                         + "Connection: close\r\n"
+                         + "Accept: application/json\r\n";
+                if(payload !== null){
+                    head += "Content-Type: application/json\r\n"
+                          + "Content-Length: " + payload.length + "\r\n";
+                }
+                head += "\r\n";
+                var os = sock.getOutputStream();
+                os.write(new Packages.java.lang.String(head).getBytes("UTF-8"));
+                if(payload !== null){ os.write(payload); }
+                os.flush();
+        
+                var rd = new Packages.java.io.InputStreamReader(sock.getInputStream(), "UTF-8");
+                var raw = readAllStr(rd);
+                try{ rd.close(); }catch(e0){}
+                var idx = raw.indexOf("\r\n\r\n"), sepLen = 4;
+                if(idx < 0){ idx = raw.indexOf("\n\n"); sepLen = 2; }
+                var headPart = idx < 0 ? raw : raw.substring(0, idx);
+                var textPart = idx < 0 ? "" : raw.substring(idx + sepLen);
+                var code = -1;
+                // 这里原本写 /^HTTP\/1\.[01] (\d{3})/ —— 真 v160.7 的 Rhino 编译这一条正则时
+                // 直接抛 IllegalStateException: FAILED ASSERTION: invalid bytecode（正则字面量
+                // 的 codegen bug，和脚本内容无关），整个 main.js 静默不执行。改成字符串比对。
+                if(headPart.length >= 12 && headPart.substring(0, 5) === "HTTP/"){
+                    var sp = headPart.indexOf(" ");
+                    if(sp > 0){
+                        var num = parseInt(headPart.substring(sp + 1, sp + 4), 10);
+                        if(!isNaN(num)){ code = num; }
+                    }
+                }
+                res = {code: code, text: textPart, head: headPart};
+            }catch(e){
+                res = {code: -1, text: String(e), head: ""};
+            }
+            try{ if(sock !== null){ sock.close(); } }catch(e1){}
+            return res;
+        }
+        
+        function httpJson(method, path, body, cb){
+            Threads.daemon(function(){
+                var code = -1, text = "";
+                try{
+                    var r = httpRaw(method, base + path, body);
+                    code = r.code; text = r.text;
+                }catch(e){
+                    text = String(e);
+                }
+                var c = code, t = text;
+                Core.app.post(function(){
+                    try{ cb(c, t); }
+                    catch(e2){ log("callback failed: " + e2); }
+                });
+            });
+        }
+
+        function parse(text){
+            try{ return JSON.parse(text); }
+            catch(e){ return null; }
+        }
+
+        function base64Bytes(b64){
+            return Packages.java.util.Base64.getDecoder().decode(b64);
+        }
+
+        // ---------------------------------------------------------- 目标处理器
+        // 鼠标指着哪个方块就是哪个处理器。比"遍历全图找处理器"更可预期，
+        // 也不需要猜玩家想改哪一个。
+
+        function targetBuild(){
+            var mw = Core.input.mouseWorld();
+            var tile = Vars.world.tileWorld(mw.x, mw.y);
+            if(tile === null || tile.build === null){ return null; }
+            var b = tile.build;
+            // 鸭子类型而不是 instanceof 嵌套类：LogicBuild 是 LogicBlock 的静态内部类，
+            // 名字里的 $ 在不同版本/混淆下不稳，而这两个字段是 LogicBuild 独有的。
+            if(b.executor === undefined || b.code === undefined){ return null; }
+            return b;
+        }
+
+        function describe(b){
+            if(b === null){ return "光标下没有处理器"; }
+            return "处理器 @ " + b.tile.x + "," + b.tile.y +
+                   "  代码 " + String(b.code).split("\n").length + " 行" +
+                   "  链接 " + b.links.size;
+        }
+
+        // ------------------------------------------------- 撤销快照（P5 第一刀：落盘）
+        // 内存栈（undoStack）重启就没了，而「写错了想回滚」常常发生在第二天。
+        // 每次写入前把「坐标 + 原代码 + 链接表 + 时间」写成
+        // <dataDir>/mlogauxiliary/undo/<毫秒时间戳>_<x>_<y>.json —— 文件名可排序 = 时间顺序。
+        // 回滚只还原代码（写入从不动链接表），走 build.updateCode()，联机下仍然只是本地生效。
+        var UNDO_KEEP = 40;
+
+        function undoRoot(){
+            try{
+                var fi = Vars.dataDirectory.child("mlogauxiliary").child("undo");
+                if(!fi.exists()){ fi.mkdirs(); }
+                return fi;
+            }catch(e){ log("undo dir failed: " + e); return null; }
+        }
+
+        function linkPairs(b){
+            var out = [], ls = b && b.links, i;
+            try{
+                for(i = 0; i < ls.size; i++){
+                    var l = ls.get(i);
+                    out.push({name: String(l.name), x: l.x, y: l.y,
+                              block: (l.block && l.block.name) ? String(l.block.name) : ""});
+                }
+            }catch(e){ }
+            return out;
+        }
+
+        function snapshotText(b, why, batch){
+            return JSON.stringify({schema: 1, x: b.tile.x, y: b.tile.y, at: Date.now(),
+                                   why: String(why || ""),
+                                   batch: String(batch || ""),
+                                   code: String(b.code), links: linkPairs(b)});
+        }
+
+        function undoFilesOf(root){
+            var out = [], names = [], files, i;
+            if(root === null){ return out; }
+            try{
+                files = root.list(".json");
+                for(i = 0; i < files.length; i++){ names.push(String(files[i].name())); }
+                names.sort();
+                names.reverse();                       // newest first
+                for(i = 0; i < names.length; i++){ out.push(root.child(names[i])); }
+            }catch(e){ log("undo list failed: " + e); }
+            return out;
+        }
+
+        function undoFiles(){ return undoFilesOf(undoRoot()); }
+
+        function saveUndoTo(root, b, why, batch){
+            if(root === null){ return null; }
+            var name = Date.now() + "_" + b.tile.x + "_" + b.tile.y + ".json";
+            try{ root.child(name).writeString(snapshotText(b, why, batch), false); }
+            catch(e){ log("undo save failed: " + e); return null; }
+            var files = undoFilesOf(root), i;
+            for(i = UNDO_KEEP; i < files.length; i++){ try{ files[i].delete(); }catch(e2){ } }
+            return name;
+        }
+
+        function saveUndo(b, why){ return saveUndoTo(undoRoot(), b, why); }
+
+        // 从磁盘上最新的一份快照回滚。处理器已经不存在（拆了 / 换图了）就跳过，继续往前找。
+        function undoFromDisk(){
+            var files = undoFiles(), i;
+            for(i = 0; i < files.length; i++){
+                var f = files[i], name = String(f.name()), parts = name.split("_");
+                if(parts.length < 3){ continue; }
+                var x = parseInt(parts[1], 10), y = parseInt(parts[2], 10);
+                if(isNaN(x) || isNaN(y)){ continue; }
+                var snap = null;
+                try{ snap = parse(f.readString("UTF-8")); }catch(e){ continue; }
+                if(!snap || typeof snap.code !== "string"){ continue; }
+                // v0.12.0：带 batch 的快照是事务写入留下的，整批一起还原。
+                if(String(snap.batch || "").length > 0){ return undoBatchFromDisk(String(snap.batch), files); }
+                var b = null;
+                try{ b = Vars.world.build(x, y); }catch(e2){ b = null; }
+                if(b === null || b.code === undefined){ continue; }
+                try{
+                    b.updateCode(snap.code);
+                    try{ f.delete(); }catch(e3){ }
+                    return "已从磁盘快照回滚 @ " + x + "," + y + "（"
+                         + snap.code.split("\n").length + " 行，快照 " + name + "）";
+                }catch(e4){ return "回滚失败：" + e4; }
+            }
+            return "磁盘上没有可回滚的快照";
+        }
+
+        // 整批还原：把同一个 batch 的快照全找出来，逐台 updateCode，全删掉。
+        function undoBatchFromDisk(batch, files){
+            var back = [], n = 0, i;
+            for(i = 0; i < files.length; i++){
+                var f = files[i], snap = null;
+                try{ snap = parse(f.readString("UTF-8")); }catch(e){ continue; }
+                if(!snap || String(snap.batch || "") !== batch){ continue; }
+                n++;
+                var b = null;
+                try{ b = Vars.world.build(snap.x, snap.y); }catch(e2){ b = null; }
+                if(b === null || b.code === undefined){ try{ f.delete(); }catch(e3){ } continue; }
+                try{
+                    b.updateCode(String(snap.code));
+                    back.push("@" + snap.x + "," + snap.y);
+                    try{ f.delete(); }catch(e4){ }
+                }catch(e5){ }
+            }
+            if(n === 0){ return "磁盘上没有可回滚的快照"; }
+            return "已按事务 " + batch + " 回滚 " + back.length + "/" + n + " 台"
+                 + (back.length > 0 ? "：" + back.join(" ") : "（处理器都不在了）");
+        }
+
+        function undoInfo(){
+            var root = undoRoot();
+            return "撤销快照 " + undoFilesOf(root).length + " 份（目录 " + dirText(root) + "）";
+        }
+
+        // ------------------------------------------------ 工作区快照（v0.14.0，W1 数据层）
+        // 用户 m03632：「相当于每个选框就是一个工作区快照。即使写完一次逻辑也不会让工作区消失，
+        // 保留上下文，可以选择归档或释放工作区，释放工作区就不再留存上下文。」
+        // 落盘：<dataDirectory>/mlogauxiliary/workspaces/<id>.json（和 undo 快照同级，跟着存档走）。
+        // 存的是**上下文**不是世界快照：bounds + 地图 + 每台处理器的描述/链接表/最后写进去的代码/投递历史；
+        // 世界快照仍在投递时现算（regionSnapshot），所以工作区文件不会随方块变动而膨胀。
+        // 归属判定（用户 m03985 批准）：选框中心落在某个 active 工作区的 bounds 内、且地图一致 ⇒ 复用。
+        // 读写走 wsReadText / wsWriteText / wsDeleteFile 三个原语：无头模拟器里 Vars.dataDirectory
+        // 可能是 null（mlogsim 不调 Vars.loadSettings），探针把它们换成内存表，逻辑照样能验。
+        var WS_SCHEMA = 1;
+        var WS_KEEP = 200;      // 工作区文件上限，超出按「最近更新」从旧到新释放
+        var WS_HISTORY = 20;    // 每台处理器保留几次投递历史
+        var WS_JOBS = 50;       // 每个工作区保留多少个作业 id
+        var wsCache = {};       // id -> 已解析的工作区对象
+        var wsCurrent = null;   // 当前框选挂靠的工作区 id
+        var wsMem = null;       // 探针用内存表（非 null 时不碰磁盘）
+        var wsSeq = 0;
+
+        function wsStamp(){
+            try{ return Packages.java.lang.System.currentTimeMillis(); }catch(e){ return 0; }
+        }
+
+        function wsRoot(){
+            try{
+                var fi = Vars.dataDirectory.child("mlogauxiliary").child("workspaces");
+                if(!fi.exists()){ fi.mkdirs(); }
+                return fi;
+            }catch(e){ log("workspace dir failed: " + e); return null; }
+        }
+
+        function wsFileOf(id){
+            var root = wsRoot();
+            if(root === null){ return null; }
+            try{ return root.child(String(id) + ".json"); }catch(e){ return null; }
+        }
+
+        function wsReadText(id){
+            var key = String(id);
+            if(wsMem !== null){ return (wsMem[key] === undefined) ? null : String(wsMem[key]); }
+            var f = wsFileOf(key);
+            if(f === null){ return null; }
+            try{ return f.exists() ? String(f.readString("UTF-8")) : null; }
+            catch(e){ log("workspace read failed: " + e); return null; }
+        }
+
+        function wsWriteText(id, text){
+            var key = String(id);
+            if(wsMem !== null){ wsMem[key] = String(text); return true; }
+            var f = wsFileOf(key);
+            if(f === null){ return false; }
+            try{ f.writeString(String(text), false); return true; }
+            catch(e){ log("workspace write failed: " + e); return false; }
+        }
+
+        function wsDeleteFile(id){
+            var key = String(id);
+            if(wsMem !== null){ delete wsMem[key]; return true; }
+            var f = wsFileOf(key);
+            if(f === null){ return false; }
+            try{ if(f.exists()){ f.delete(); } return true; }
+            catch(e){ log("workspace delete failed: " + e); return false; }
+        }
+
+        function wsFileNames(){
+            var out = [], key;
+            if(wsMem !== null){
+                for(key in wsMem){ if(wsMem.hasOwnProperty(key)){ out.push(String(key) + ".json"); } }
+                return out;
+            }
+            var root = wsRoot(), files = null, i;
+            if(root === null){ return out; }
+            try{ files = root.list(".json"); }catch(e){ files = null; }
+            if(files === null){ return out; }
+            for(i = 0; i < files.length; i++){ out.push(String(files[i].name())); }
+            return out;
+        }
+
+        function wsParseText(text){
+            if(text === null || text === undefined){ return null; }
+            var obj = null;
+            try{ obj = parse(String(text)); }catch(e){ obj = null; }
+            if(obj === null || obj === undefined || typeof obj !== "object"){ return null; }
+            return obj;
+        }
+
+        function wsLoad(id){
+            var key = String(id);
+            if(wsCache[key] !== undefined && wsCache[key] !== null){ return wsCache[key]; }
+            var obj = wsParseText(wsReadText(key));
+            if(obj === null || obj.id === undefined){ return null; }
+            if(obj.procs === undefined || obj.procs === null){ obj.procs = []; }
+            if(obj.jobs === undefined || obj.jobs === null){ obj.jobs = []; }
+            if(obj.state === undefined || obj.state === null){ obj.state = "active"; }
+            wsCache[key] = obj;
+            return obj;
+        }
+
+        function wsSave(ws){
+            if(ws === null || ws === undefined || ws.id === undefined){ return null; }
+            var key = String(ws.id);
+            ws.schema = WS_SCHEMA;
+            ws.mod = MOD_VERSION;
+            ws.updated = wsStamp();
+            if(!wsWriteText(key, JSON.stringify(ws))){ return null; }
+            wsCache[key] = ws;
+            wsPrune();
+            return ws;
+        }
+
+        function wsList(){
+            var names = wsFileNames(), out = [], i;
+            for(i = 0; i < names.length; i++){
+                var nm = String(names[i]);
+                var id = nm.substring(0, nm.length - 5);
+                var obj = wsLoad(id);
+                if(obj === null){ continue; }
+                out.push({id: String(obj.id), name: String(obj.name || obj.id),
+                          state: String(obj.state || "active"), map: String(obj.map || "?"),
+                          bounds: obj.bounds || null, updated: Number(obj.updated || 0),
+                          procs: (obj.procs || []).length, jobs: (obj.jobs || []).length});
+            }
+            out.sort(function(a, b){ return b.updated - a.updated; });
+            return out;
+        }
+
+        function wsPrune(){
+            var names = wsFileNames();
+            if(names.length <= WS_KEEP){ return; }
+            var rows = wsList(), i;
+            for(i = WS_KEEP; i < rows.length; i++){
+                wsDeleteFile(rows[i].id);
+                delete wsCache[String(rows[i].id)];
+            }
+            log("workspace prune: released " + String(rows.length - WS_KEEP) + " old workspace(s)");
+        }
+
+        function wsCenter(r){
+            return {x: Math.floor((Number(r.x1) + Number(r.x2)) / 2),
+                    y: Math.floor((Number(r.y1) + Number(r.y2)) / 2)};
+        }
+
+        function wsNameFor(r){
+            var c = wsCenter(r);
+            return "区域 (" + c.x + "," + c.y + ")";
+        }
+
+        function wsNew(r, name){
+            wsSeq++;
+            var id = "ws" + String(wsStamp()) + "_" + String(wsSeq);
+            var map = "?";
+            try{ map = String(mapName); }catch(e){ map = "?"; }
+            var ws = {schema: WS_SCHEMA, mod: MOD_VERSION, id: id,
+                      name: String(name || ("工作区 " + id)), state: "active", map: map,
+                      world: null, bounds: {x1: Number(r.x1), y1: Number(r.y1),
+                                            x2: Number(r.x2), y2: Number(r.y2)},
+                      created: wsStamp(), updated: wsStamp(), notes: "",
+                      procs: [], jobs: [], archivedAt: 0};
+            try{ ws.world = {width: Vars.world.width(), height: Vars.world.height()}; }catch(e){ ws.world = null; }
+            wsCurrent = id;
+            return ws;
+        }
+
+        // 按 id 找 active 工作区：选框中心落在 bounds 内 + 地图一致（用户 m03985 批准的判定口径）。
+        function wsFindActive(r){
+            if(r === null || r === undefined){ return null; }
+            var c = wsCenter(r), map = "?";
+            try{ map = String(mapName); }catch(e){ map = "?"; }
+            var rows = wsList(), i;
+            for(i = 0; i < rows.length; i++){
+                var row = rows[i];
+                if(String(row.state) !== "active"){ continue; }
+                if(String(row.map) !== map){ continue; }
+                var b = row.bounds;
+                if(b === null || b === undefined){ continue; }
+                if(c.x >= Number(b.x1) && c.x <= Number(b.x2)
+                   && c.y >= Number(b.y1) && c.y <= Number(b.y2)){
+                    return String(row.id);
+                }
+            }
+            return null;
+        }
+
+        function wsProcOf(ws, b){
+            var k = procKey(b), list = ws.procs || [], i;
+            for(i = 0; i < list.length; i++){
+                if(String(list[i].k) === k){ return list[i]; }
+            }
+            return null;
+        }
+
+        function wsTouchProc(ws, b, desc){
+            if(ws === null || ws === undefined || b === null || b === undefined){ return null; }
+            var k = procKey(b), row = wsProcOf(ws, b);
+            if(row === null){
+                var bn = "?";
+                try{ bn = String(b.block.name); }catch(e){ bn = "?"; }
+                row = {k: k, x: b.tile.x, y: b.tile.y, block: bn, desc: "", links: null,
+                       code: "", accepted: 0, history: []};
+                ws.procs.push(row);
+            }
+            var d = String(desc || "");
+            if(d.length > 0){ row.desc = d; }
+            row.links = linkSig(b);
+            try{ row.code = String(b.code); }catch(e){ }
+            return row;
+        }
+
+        // F3 批量路径：复用中心落在框内的工作区，否则新建一个（这块框选从此有了身份）。
+        function wsAttach(r, targets, desc){
+            var id = wsFindActive(r);
+            var ws = (id === null) ? wsNew(r, wsNameFor(r)) : wsLoad(id);
+            if(ws === null){ return null; }
+            if(id !== null){
+                // 复用的时候把框扩成并集：同一个工作区覆盖的范围只增不减
+                var b = ws.bounds || {};
+                ws.bounds = {x1: Math.min(Number(b.x1), Number(r.x1)),
+                             y1: Math.min(Number(b.y1), Number(r.y1)),
+                             x2: Math.max(Number(b.x2), Number(r.x2)),
+                             y2: Math.max(Number(b.y2), Number(r.y2))};
+            }
+            for(var i = 0; i < (targets || []).length; i++){ wsTouchProc(ws, targets[i].b, desc); }
+            wsSave(ws);
+            wsCurrent = String(ws.id);
+            return ws;
+        }
+
+        // 单台路径（AI 面板）：只有这台处理器已经落在某个 active 工作区里才挂靠，不凭空造工作区。
+        function wsTouchHere(b, desc){
+            if(b === null || b === undefined){ return null; }
+            var r = null;
+            try{ r = {x1: b.tile.x, y1: b.tile.y, x2: b.tile.x, y2: b.tile.y}; }catch(e){ return null; }
+            var id = wsFindActive(r);
+            if(id === null){ return null; }
+            var ws = wsLoad(id);
+            if(ws === null){ return null; }
+            wsTouchProc(ws, b, desc);
+            wsSave(ws);
+            wsCurrent = String(ws.id);
+            return ws;
+        }
+
+        // 写入成功：把「这台处理器现在跑的就是这段代码」记进工作区（按 procKey 找行，找不到就跳过）。
+        function wsAccepted(b, res){
+            try{
+                if(b === null || b === undefined || res === null || res === undefined){ return; }
+                var k = procKey(b), rows = wsList(), i, j;
+                for(i = 0; i < rows.length; i++){
+                    var ws = wsLoad(rows[i].id);
+                    if(ws === null){ continue; }
+                    var list = ws.procs || [];
+                    for(j = 0; j < list.length; j++){
+                        if(String(list[j].k) !== k){ continue; }
+                        var row = list[j];
+                        row.code = String(b.code);
+                        row.accepted = Number(row.accepted || 0) + 1;
+                        row.links = linkSig(b);
+                        var hist = row.history || [];
+                        hist.push({t: wsStamp(), template: String(res.template || "code"),
+                                   statements: Number(res.statements || 0),
+                                   bytes: Number(res.bytes_len || 0)});
+                        while(hist.length > WS_HISTORY){ hist.shift(); }
+                        row.history = hist;
+                        wsSave(ws);
+                        return;
+                    }
+                }
+            }catch(e){ log("workspace accepted failed: " + e); }
+        }
+
+        function wsRecordJob(ws, jid, desc){
+            if(ws === null || ws === undefined || jid === null || jid === undefined){ return; }
+            try{
+                ws.jobs.push({id: String(jid), desc: String(desc || ""), at: wsStamp(), state: ""});
+                while(ws.jobs.length > WS_JOBS){ ws.jobs.shift(); }
+                wsSave(ws);
+            }catch(e){ log("workspace job failed: " + e); }
+        }
+
+        function wsRecordTerminal(ws, job){
+            if(ws === null || ws === undefined || job === null || job === undefined){ return; }
+            try{
+                var list = ws.jobs || [], i;
+                for(i = 0; i < list.length; i++){
+                    if(String(list[i].id) !== String(job.id)){ continue; }
+                    list[i].state = String(job.state || "");
+                    list[i].template = String(job.template || "");
+                    list[i].statements = Number(job.statements || 0);
+                    var fs = job.findings || [], keep = [], fi;
+                    for(fi = 0; fi < fs.length && keep.length < 12; fi++){
+                        keep.push({sev: String(fs[fi].sev || ""), rid: String(fs[fi].rid || ""),
+                                   msg: String(fs[fi].msg || "").substring(0, 300)});
+                    }
+                    list[i].findings = keep;
+                    wsSave(ws);
+                    return;
+                }
+            }catch(e){ log("workspace terminal failed: " + e); }
+        }
+
+        function wsArchive(id){
+            var ws = wsLoad(id);
+            if(ws === null){ return "工作区不存在"; }
+            ws.state = "archived";
+            ws.archivedAt = wsStamp();
+            if(wsSave(ws) === null){ return "归档失败：无法写入磁盘"; }
+            return "已归档工作区「" + String(ws.name) + "」";
+        }
+
+        function wsRestore(id){
+            var ws = wsLoad(id);
+            if(ws === null){ return "工作区不存在"; }
+            ws.state = "active";
+            ws.archivedAt = 0;
+            if(wsSave(ws) === null){ return "恢复失败：无法写入磁盘"; }
+            return "已恢复工作区「" + String(ws.name) + "」";
+        }
+
+        // 释放 = 删文件 + 忘掉缓存：用户要的「不再留存上下文」就是这一条。
+        function wsRelease(id){
+            var key = String(id);
+            var ws = wsLoad(key);
+            if(ws === null){ return "工作区不存在"; }
+            var nm = String(ws.name);
+            if(!wsDeleteFile(key)){ return "释放失败：无法删除文件"; }
+            delete wsCache[key];
+            if(wsCurrent === key){ wsCurrent = null; }
+            return "已释放工作区「" + nm + "」（上下文不再留存）";
+        }
+
+        function wsStateText(ws){
+            if(ws === null || ws === undefined){ return "没有工作区"; }
+            var st = String(ws.state || "active");
+            var cn = (st === "active") ? "进行中" : ((st === "archived") ? "已归档" : st);
+            return "「" + String(ws.name) + "」" + cn + " · "
+                 + String((ws.procs || []).length) + " 台处理器 · "
+                 + String((ws.jobs || []).length) + " 个作业";
+        }
+
+        // ------------------------------------------------ 写前冲突检测（v0.10.1 / v0.12.8）
+        // 作业是异步的：投递那一刻处理器上是 A，面板上点「写入」时可能已经是 B
+        // （等结果的时候顺手改了代码、或者另一台处理器写了同一格）。静默覆盖会吃掉这段改动，
+        // 所以写入前比对「投递作业那一刻的代码」：不一致就拒绝一次，再点一次「写入」才算确认覆盖。
+        // 不用对话框是有意的 —— 无头环境里 Core.scene 是 null，弹窗会直接 NPE，
+        // 而「拒绝一次 + 再点一次」在真机和测试里走的是同一条路径。
+        // v0.12.8：基线不再只是代码文本，链接表一起比。等结果的那几十秒里拆/加一条链接，
+        // 生成代码里的链接名就全废了 —— 那时静默写入比覆盖掉代码更糟（规划 §5 的口径里
+        // 链接表本来就该一起拦）。
+
+        var JOB_ORIG  = {};       // "x,y" -> 投递作业那一刻的代码
+        var JOB_LINKS = {};       // "x,y" -> 投递作业那一刻的链接表签名
+        var JOB_FORCE = {};       // "x,y" -> 已经拒绝过一次，下一次写入视为确认覆盖
+
+        function procKey(b){
+            try{ return String(b.tile.x) + "," + String(b.tile.y); }
+            catch(e){ return "?"; }
+        }
+
+        // 链接表签名：名字 + 绝对坐标。把一条链接从一台方块换到另一台（同名不同位置）
+        // 对生成的代码是另一个事实，必须算改动。null = 不知道这个处理器的链接表
+        // （无头假处理器没有 links 字段），这时不判链接冲突。
+        function linkSig(b){
+            var l = linkListOrNull(b);
+            if(l === null){ return null; }
+            var parts = [];
+            for(var i = 0; i < l.length; i++){
+                parts.push(String(l[i].name) + "@" + String(l[i].x) + "," + String(l[i].y));
+            }
+            parts.sort();
+            return parts.join(" ");
+        }
+
+        function linkSigText(sig){
+            if(sig === null || sig === undefined || String(sig).length === 0){ return "空"; }
+            return String(sig).split(" ").join(", ");
+        }
+
+        function rememberOrig(b){
+            try{
+                var k = procKey(b);
+                JOB_ORIG[k] = String(b.code);
+                JOB_LINKS[k] = linkSig(b);
+                JOB_FORCE[k] = false;
+            }catch(e){ log("rememberOrig failed: " + e); }
+        }
+
+        function forgetOrig(b){
+            try{
+                var k = procKey(b);
+                delete JOB_ORIG[k]; delete JOB_LINKS[k]; delete JOB_FORCE[k];
+            }catch(e){ }
+        }
+
+        function conflictReason(b){
+            var k = procKey(b);
+            var parts = [];
+            var orig = JOB_ORIG[k];
+            if(orig !== undefined && orig !== null && String(b.code) !== String(orig)){
+                parts.push("代码 " + String(orig).split("\n").length + " 行 → "
+                           + String(b.code).split("\n").length + " 行");
+            }
+            var olinks = JOB_LINKS[k];
+            if(olinks !== undefined && olinks !== null){
+                var nowLinks = linkSig(b);
+                if(nowLinks !== null && nowLinks !== olinks){
+                    parts.push("链接表 [" + linkSigText(olinks) + "] → ["
+                               + linkSigText(nowLinks) + "]");
+                }
+            }
+            if(parts.length === 0){ return null; }
+            return "处理器在投递后已被改动（提交时 " + parts.join("；") + "）";
+        }
+
+        function conflictGate(b){
+            var why = conflictReason(b);
+            if(why === null){ return null; }
+            var k = procKey(b);
+            if(JOB_FORCE[k] === true){
+                JOB_FORCE[k] = false;          // 只放行一次
+                return null;
+            }
+            JOB_FORCE[k] = true;
+            return "拒绝写入：" + why + "；再点一次「写入」以覆盖";
+        }
+
+        // ------------------------------------------------ 联机写入（v0.12.8）
+        // 联机里 b.configure(bytes) 只是发一个 Call.tileConfig 给服务端，真正的写入由服务端做。
+        // 服务端两道闸（Mindustry-Source/core/src/mindustry/input/InputHandler.java:710-726）：
+        //   ① Units.canInteract(player, build) = build.interactable(player.team()) || rules.editor
+        //   ② netServer.admins.allowAction(player, ActionType.configure, ...)
+        // 拒了就发一个「撤销配置」包把客户端改回去（源码注释原话 "undo the config on the client"），
+        // 但**客户端收不到任何错误** —— 看起来写成功了，其实存档里没变。这就是「无权限」要专门报的原因。
+        // 所以这里做两层：判得了的（队伍不对）当场拒绝并说「无权限」；
+        // 判不了的（服务端权限等级/规则）在写完一两秒后回读代码，没生效就报「无权限」。
+
+        function netClient(){
+            try{ return Vars.net !== null && Vars.net !== undefined && Vars.net.client() === true; }
+            catch(e){ return false; }
+        }
+
+        function localPlayer(){
+            try{ if(Vars.player === null || Vars.player === undefined){ return null; } return Vars.player; }
+            catch(e){ return null; }
+        }
+
+        function isAdmin(){
+            var p = localPlayer();
+            try{ return p !== null && p.admin === true; }catch(e){ return false; }
+        }
+
+        // v0.13.0：原版 ChatFragment 的可见性就是 net.active() && hudfrag.shown
+        // （ChatFragment.java:50-60），单机会话里聊天记录每帧都被清掉 —— 播报要据此选通道。
+        function netActive(){
+            try{ return Vars.net !== null && Vars.net !== undefined && Vars.net.active() === true; }
+            catch(e){ return false; }
+        }
+
+        // 服务端第一道闸的客户端复刻。返回 null = 放行（或判不了，让服务端说话）。
+        function permWhy(b){
+            if(!netClient()){ return null; }
+            var p = localPlayer();
+            if(p === null){ return null; }                 // 还没拿到玩家：不猜
+            var ok = true;
+            try{ ok = b.interactable(p.team()) === true || Vars.state.rules.editor === true; }
+            catch(e){ return null; }                       // 判不了就当放行
+            if(ok){ return null; }
+            var mine = "", theirs = "";
+            try{ mine = String(p.team()); }catch(e1){ }
+            try{ theirs = String(b.team); }catch(e2){ }
+            return "无权限：处理器属于 " + theirs + "，你在 " + mine
+                 + "；联机只接受本方队伍（或编辑器规则）的写入，本次未写入任何一台";
+        }
+
+        // 写后回读：联机里唯一能确认「服务端到底写没写」的办法。客户端会先把 configure
+        // 应用上去，被拒时服务端的撤销包把它改回来 —— 隔一两秒回读代码就分得清。
+        // 无头引擎里 Vars.net 是 null，armWriteCheck 直接不排，writeCheckTick 空转。
+        var WRITE_CHECK = [];
+        var WRITE_CHECK_WAIT_MS = 1500;
+        var WRITE_CHECK_TRIES = 3;
+
+        function normCode(s){
+            var t = String(s === null || s === undefined ? "" : s).replace(/\r/g, "");
+            while(t.length > 0){
+                var c = t.charAt(t.length - 1);
+                if(c === " " || c === "\n" || c === "\t"){ t = t.substring(0, t.length - 1); }
+                else{ break; }
+            }
+            return t;
+        }
+
+        // 期望落地的代码：sidecar 返回的 code 就是载荷解码出来的文本
+        // （LogicBlock.readCompressed 用同一个 charset 解 byte[]，updateCode 原样存进 code）。
+        // 没有 code 字段就不核验 —— 宁可不报，也不误报。
+        function wantCode(res){
+            if(res === null || res === undefined){ return null; }
+            if(res.code !== undefined && res.code !== null && String(res.code).length > 0){
+                return String(res.code);
+            }
+            return null;
+        }
+
+        function armWriteCheck(b, want, label){
+            if(!netClient()){ return; }
+            var w = normCode(want);
+            if(w.length === 0){ return; }
+            if(WRITE_CHECK.length >= 16){ WRITE_CHECK.shift(); }
+            var now = Packages.java.lang.System.currentTimeMillis();
+            WRITE_CHECK.push({b: b, want: w, at: now + WRITE_CHECK_WAIT_MS, tries: 0,
+                              label: String(label || ("@" + b.tile.x + "," + b.tile.y))});
+        }
+
+        // 每帧一次：到点回读，代码对上了就销案，连续三次对不上才报「无权限」。
+        function writeCheckTick(){
+            if(WRITE_CHECK.length === 0){ return; }
+            var now = Packages.java.lang.System.currentTimeMillis();
+            var keep = [], i;
+            for(i = 0; i < WRITE_CHECK.length; i++){
+                var w = WRITE_CHECK[i];
+                if(now < w.at){ keep.push(w); continue; }
+                var gone = false;
+                try{ gone = (w.b === null || w.b.tile === null || w.b.tile.build !== w.b); }
+                catch(e){ gone = true; }
+                if(gone){ continue; }                            // 方块没了：不归这里管
+                var got = "";
+                try{ got = String(w.b.code); }catch(e2){ got = ""; }
+                if(normCode(got) === w.want){ continue; }         // 服务端收下了
+                w.tries++;
+                if(w.tries >= WRITE_CHECK_TRIES){
+                    hint("无权限：" + w.label + " 的写入未生效（服务端未接受）。"
+                         + "联机逻辑块由服务端执行，需房主或管理员授权。");
+                    continue;
+                }
+                w.at = now + WRITE_CHECK_WAIT_MS;
+                keep.push(w);
+            }
+            WRITE_CHECK = keep;
+        }
+
+        // ---------------------------------------------------------- 写入
+        // 唯一的写入口。四道闸：0 ERR、目标存在、载荷由 sidecar 生成（模组不自己拼代码）、写前没被改过。
+
+        function writeBuild(b, res){
+            if(b === null){ return "没有目标处理器"; }
+            if(!res || res.ok !== true){
+                return "拒绝写入：静态检查有 ERR（" + ((res && res.errors) || "?") + " 条）";
+            }
+            if(!res.bytes_b64){ return "拒绝写入：sidecar 未返回载荷"; }
+            var noPerm = permWhy(b);
+            if(noPerm !== null){ return noPerm; }
+            var blocked = conflictGate(b);
+            if(blocked !== null){ return blocked; }
+            try{
+                var snapName = saveUndo(b, "write:" + String(res.template || "code"));
+                undoStack.push({b: b, code: String(b.code), snap: snapName});
+                if(undoStack.length > 20){ undoStack.shift(); }
+                b.configure(base64Bytes(res.bytes_b64));
+                forgetOrig(b);          // 写成功之后这次作业的基线就过期了
+                jobBoxWritten(b);       // v0.12.7：写入成功 = 这块框选的活干完了，框才消失
+                wsAccepted(b, res);     // v0.14.0：工作区记下「这台现在跑的就是这段」
+                armWriteCheck(b, wantCode(res), null);   // v0.12.8：联机里回读一次，确认服务端真收下了
+                return "已写入 " + (res.template || "") + "（" + res.statements + " 条语句，"
+                     + res.bytes_len + " 字节）";
+            }catch(e){
+                return "写入失败：" + e;
+            }
+        }
+
+        // ------------------------------------------------ 事务写入（v0.12.0，P5 第三刀上半）
+        // 一句话发给一片处理器时，每台一个作业（链接表、门禁、修复循环各自独立），
+        // 但**写入是一次事务**：全部预检通过才逐台写；任一台写失败就把已经写过的按快照回滚，
+        // 不让存档停在一半新一半旧的状态。撤销也按批次整批还原（快照 JSON 带 batch 字段）。
+        // 为什么不用「一个作业产出 N 段代码」：那要扩 sidecar 的作业契约；而每台的链接名
+        // 本来就不一样，让队列按台各跑一遍反而更准（规划 §5 第三刀）。
+        var UNDO_BATCH = "";
+
+        function batchId(){
+            return String(Date.now()) + "_b";
+        }
+
+        function writeMany(items, why){
+            if(items === null || items === undefined || items.length === 0){ return "没有要写的处理器"; }
+            var i, it, bad = [], conflicts = [];
+            for(i = 0; i < items.length; i++){
+                it = items[i];
+                if(it === null || it === undefined || it.b === null || it.b === undefined || !it.b.tile){
+                    bad.push("第 " + (i + 1) + " 台：目标不存在");
+                    continue;
+                }
+                if(!it.res || it.res.ok !== true){
+                    bad.push("@" + procKey(it.b) + "：静态检查有 ERR");
+                    continue;
+                }
+                if(!it.res.bytes_b64){ bad.push("@" + procKey(it.b) + "：sidecar 未返回载荷"); continue; }
+                var np = permWhy(it.b);
+                if(np !== null){ bad.push("@" + procKey(it.b) + " " + np); }
+            }
+            if(bad.length > 0){ return "拒绝写入（未写入任何一台）：" + bad.join("；"); }
+            // 冲突检查也是整批的：只要有一台被改过，整批先拒绝一次；再调一次 = 确认覆盖。
+            for(i = 0; i < items.length; i++){
+                var why2 = conflictReason(items[i].b);
+                if(why2 === null){ continue; }
+                var k = procKey(items[i].b);
+                if(JOB_FORCE[k] === true){ JOB_FORCE[k] = false; }
+                else{ JOB_FORCE[k] = true; conflicts.push("@" + k + " " + why2); }
+            }
+            if(conflicts.length > 0){
+                return "拒绝写入（未写入任何一台）：" + conflicts.join("；") + "；再点一次以覆盖";
+            }
+            // 先把每一台的原代码落盘（同一个 batch），再逐台 configure。
+            var batch = batchId(), snaps = [], written = [];
+            for(i = 0; i < items.length; i++){
+                var sn = saveUndoTo(undoRoot(), items[i].b, "batch:" + String(why || ""), batch);
+                snaps.push({b: items[i].b, code: String(items[i].b.code), snap: sn});
+            }
+            for(i = 0; i < items.length; i++){
+                it = items[i];
+                try{
+                    it.b.configure(base64Bytes(it.res.bytes_b64));
+                    written.push(it.b);
+                }catch(e){
+                    // configure 只吃载荷；回滚走 updateCode（快照里存的就是原代码）。
+                    var back = [], j;
+                    for(j = 0; j < written.length; j++){
+                        try{
+                            written[j].updateCode(String(snaps[j].code));
+                            back.push("@" + procKey(written[j]));
+                        }catch(e2){ }
+                    }
+                    try{ it.b.updateCode(String(snaps[i].code)); }catch(e3){ }
+                    return "写入失败（@" + procKey(it.b) + "：" + e + "）；已回滚 " + back.length + " 台"
+                         + (back.length > 0 ? "：" + back.join(" ") : "");
+                }
+            }
+            for(i = 0; i < items.length; i++){ forgetOrig(items[i].b); }
+            for(i = 0; i < items.length; i++){ wsAccepted(items[i].b, items[i].res); }   // v0.14.0：工作区回写
+            for(i = 0; i < items.length; i++){ armWriteCheck(items[i].b, wantCode(items[i].res), null); }
+            undoStack.push({many: snaps, batch: batch});
+            if(undoStack.length > 20){ undoStack.shift(); }
+            UNDO_BATCH = batch;
+            var names = [];
+            for(i = 0; i < items.length; i++){ names.push("@" + procKey(items[i].b)); }
+            return "已写入 " + items.length + " 台（事务 " + batch + "）：" + names.join(" ");
+        }
+
+        function undo(){
+            if(undoStack.length){
+                var snap = undoStack.pop();
+                if(snap.many){
+                    // v0.12.0：事务写入的撤销是整批的，一台都不能少。
+                    var back = [], i;
+                    for(i = 0; i < snap.many.length; i++){
+                        try{
+                            snap.many[i].b.updateCode(snap.many[i].code);
+                            if(snap.many[i].snap){ try{ undoRoot().child(snap.many[i].snap).delete(); }catch(e0){ } }
+                            back.push("@" + procKey(snap.many[i].b));
+                        }catch(e1){ }
+                    }
+                    return "已回滚 " + back.length + " 台（事务 " + String(snap.batch || "") + "）：" + back.join(" ");
+                }
+                try{
+                    snap.b.updateCode(snap.code);      // P1：仅本地回滚，联机下请重进地图
+                    if(snap.snap){ try{ undoRoot().child(snap.snap).delete(); }catch(e){ } }
+                    return "已回滚到上一版代码（" + String(snap.code).split("\n").length + " 行）";
+                }catch(e){ return "回滚失败：" + e; }
+            }
+            return undoFromDisk();
+        }
+
+        // ---------------------------------------------------------- 展示
+        // 结果用原版文本对话框显示：这是最稳的一层（面板表格在无头环境里验不了）。
+
+        function findingsText(res, b){
+            var lines = [];
+            lines.push(quickSummary(quickRun(res.code, b)));
+            lines.push("模板：" + (res.template || "-") + "    语句：" + res.statements
+                     + "    字节：" + res.bytes_len);
+            lines.push("检查：" + (res.ok ? "通过（无 ERR）" : "有 ERR，禁止写入")
+                     + "    ERR " + res.errors + " / WARN " + res.warns);
+            lines.push("");
+            lines.push("--- 代码 ---");
+            lines.push(res.code);
+            if(res.findings && res.findings.length){
+                lines.push("");
+                lines.push("--- 问题 ---");
+                for(var i = 0; i < res.findings.length; i++){
+                    var f = res.findings[i];
+                    lines.push("L" + f.line + " " + f.sev + " [" + (f.rid || "-") + "] " + f.msg);
+                }
+            }
+            if(res.cost){
+                lines.push("");
+                lines.push("--- 成本 ---");
+                lines.push(res.cost);
+            }
+            return lines.join("\n");
+        }
+
+        function showResult(res, b){
+            var text = findingsText(res, b);
+            if(!res.ok){
+                Vars.ui.showText("Mlog辅助 · 已拒绝", text);
+                return;
+            }
+            Vars.ui.showConfirm("Mlog辅助 · 确认写入",
+                text + "\n\n写入目标：" + describe(b),
+                function(){
+                    var msg = writeBuild(b, res);
+                    log(msg);
+                    Vars.ui.showText("Mlog辅助", msg);
+                });
+        }
+
+        // ------------------------------------------ 原版逻辑编辑器里的审查
+        // LogicDialog 是 Vars.ui.logic 上的单例（UI.java:228 `logic = new LogicDialog()`），
+        // 它的构造里 clearChildren() 之后只放了三样东西：add(canvas).grow() / row() /
+        // add(buttons).growX()（LogicDialog.java:39-72）。所以最低侵入的接法是往它自己
+        // 身上再补一行：不改原版源码、不碰 canvas，只在底部加一条「审查」状态栏，
+        // 代码一变（canvas.save() 变了）就重算一次。
+        // 无头环境里 Vars.ui 是 null（Vars.java:209/332），每次访问都套 try。
+
+        var reviewHost = null, reviewBar = null, reviewLast = "", reviewFrame = 0, reviewRes = null;
+
+        // LogicDialog.executor 是**包私有**字段（真 v160.7 反射实测：canvas 是 public，
+        // executor / privileged / consumer / wasRows 全是包私有），而 Rhino 只按 public
+        // 成员绑定 —— 写 L.executor 拿到的是 undefined，不是 null，于是 v0.4.6 及之前的
+        // 审查栏永远认为「没有处理器」，把链接表当成空表喂给 quickcheck。
+        // 唯一能读到它的路是反射：getDeclaredField + setAccessible（Mindustry 在
+        // classpath 上，没有模块系统挡着，实测 setAccessible 可用）。
+        var logicExecField = null, logicExecProbed = false;
+
+        function logicExecutor(){
+            try{
+                var L = Vars.ui.logic;
+                if(L === null || L === undefined){ return null; }
+                if(!logicExecProbed){
+                    logicExecProbed = true;
+                    try{
+                        var cls = Packages.java.lang.Class.forName("mindustry.logic.LogicDialog");
+                        var f = cls.getDeclaredField("executor");
+                        f.setAccessible(true);
+                        logicExecField = f;
+                    }catch(e){ log("LogicDialog.executor is not reachable: " + e); }
+                }
+                if(logicExecField === null){ return null; }
+                var ex = logicExecField.get(L);
+                return (ex === undefined) ? null : ex;
+            }catch(e){ return null; }
+        }
+
+        function reviewTargets(){
+            // LExecutor.build 是 public（v160.7 实测），所以拿到 executor 之后这一步直读即可。
+            var ex = logicExecutor();
+            if(ex === null){ return null; }
+            try{
+                var b = ex.build;
+                return (b === undefined) ? null : b;
+            }catch(e){ return null; }
+        }
+
+        function reviewCode(){
+            try{ return String(Vars.ui.logic.canvas.save()); }catch(e){ return null; }
+        }
+
+        // 审查栏/详情里都要说清「链接表是数出来的还是不知道」——v0.4.6 的假 WARN 就是
+        // 因为把「不知道」当成了「一个链接都没有」。
+        function linkLine(res){
+            var st = (res === null || res === undefined) ? null : res.stats;
+            if(st === null || st === undefined){ return "链接 ?"; }
+            if(st.linkKnown === true){ return "链接 " + st.linkCount; }
+            return "链接 ?（读不到处理器）";
+        }
+
+        function reviewCount(res){
+            var err = 0, warn = 0, info = 0, f = res.findings;
+            for(var k = 0; k < f.length; k++){
+                if(f[k].sev === "ERR"){ err++; } else if(f[k].sev === "WARN"){ warn++; } else { info++; }
+            }
+            return {err: err, warn: warn, info: info, total: f.length};
+        }
+
+        function refreshReview(force){
+            if(reviewBar === null){ return; }
+            var code = reviewCode();
+            if(code === null){ return; }
+            if(!force && code === reviewLast){ return; }
+            reviewLast = code;
+            var res = quickRun(code, reviewTargets());
+            reviewRes = res;
+            // 审查栏重画之后把行内箭头也同步一遍（箭头贴在原版画布上，见下面的「行内箭头」段）
+            syncArrows(res, null, null);
+            var c = reviewCount(res);
+            reviewBar.clear();
+            reviewBar.left();
+            reviewBar.add("审查").padRight(8);
+            if(c.total === 0){
+                reviewBar.add("没有发现问题").color(Pal.accent).padRight(16);
+            }else{
+                if(c.err > 0){ reviewBar.add("ERR " + c.err).color(Pal.remove).padRight(8); }
+                if(c.warn > 0){ reviewBar.add("WARN " + c.warn).color(Pal.lightOrange).padRight(8); }
+                if(c.info > 0){ reviewBar.add("INFO " + c.info).padRight(8); }
+            }
+            reviewBar.add("语句 " + res.stats.statements + " · 线性 " + res.stats.linearCost
+                          + " · ipt " + res.stats.ticksPerPass
+                          + " · " + linkLine(res)).padRight(16);
+            reviewBar.button("详情", function(){ showReview(); }).width(90);
+            reviewBar.button("AI 辅助", function(){ showAiPanel(); }).width(120);
+        }
+
+        function reviewText(){
+            // 控制台/诊断用的纯文本版审查（showReview 会弹对话框）
+            var b = reviewTargets();
+            var code = reviewCode();
+            if(code === null && b !== null){ code = String(b.code); }
+            var res = quickRun(code === null ? "" : code, b);
+            if(res.missing){ return "本地快检不可用（quickcheck.js 未加载）"; }
+            var out = [quickSummary(res)];
+            var ls = quickLines(res);
+            for(var i = 0; i < ls.length; i++){ out.push(ls[i]); }
+            return out.join("\n");
+        }
+
+        function showReview(){
+            var code = reviewCode();
+            var res = reviewRes;
+            if(code !== null){ res = quickRun(code, reviewTargets()); }
+            if(res === null){ if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 审查", "没有可审查的处理器。"); } return; }
+            var out = [quickSummary(res)];
+            var ls = quickLines(res);
+            for(var i = 0; i < ls.length; i++){ out.push(ls[i]); }
+            if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 审查", out.join("\n")); }
+        }
+
+        // ------------------------------------------ 行内箭头（v0.4.7）
+        // 用户要的交互：哪一行有问题就在那一行贴个箭头，点箭头看这一行的原因。
+        //
+        // 为什么不做「往原版行里插一个 Cell」：Arc 的 Table.cells 是私有字段
+        // （arc/scene/ui/layout/Table.java:35），插不到 addressLabel 前面；追加到行尾
+        // 又会被行内按钮挤位置。所以改成覆盖层：一个铺在 statements 父容器里的 Table，
+        // 箭头是它的普通孩子（不是 cell），手动摆位、每帧跟着布局重算。
+        //
+        // 三个依据（真 v160.7 实测 / 源码）：
+        //  * LCanvas.statements 是 public 字段（LCanvas.java:32），子元素按语句顺序排，
+        //    每个 StatementElem 的第一行（表头）高 38（LCanvas.java:427-491）。
+        //  * quickcheck 的 finding.line 是 1 起的语句序号（quickcheck.js:97），
+        //    所以第 i 个孩子对应 line = i + 1。
+        //  * 覆盖层用 Touchable.childrenOnly：空白处不拦鼠标（原版画布要能拖行、点按钮），
+        //    只有箭头自己被命中（Group.hit 先测孩子，Element.hit 对非 enabled 返回 null）。
+        var ARROW = 16;                       // 箭头边长（像素）
+        var arrowHost = null, arrowParent = null, arrowRows = [], arrowByLine = {};
+        var arrowDraw;                        // undefined = 还没找过，null = 这个环境没有图标
+
+        function sevRank(sev){
+            if(sev === "ERR"){ return 0; }
+            if(sev === "WARN"){ return 1; }
+            return 2;
+        }
+
+        function sevColor(sev){
+            if(sev === "ERR"){ return Pal.remove; }
+            if(sev === "WARN"){ return Pal.lightOrange; }
+            return Pal.accent;
+        }
+
+        // 箭头图标：原版行内按钮用的是 Icon（v160.7 里 Icon 是「带静态 Drawable 字段的类」，
+        // 不是 v159.3 那个 enum）。无头引擎没有图集，Icon.right 是 null —— 那时返回 null，
+        // 审查栏照常工作，只是不画箭头。
+        function arrowDrawable(){
+            if(arrowDraw !== undefined){ return arrowDraw; }
+            arrowDraw = null;
+            try{
+                var d = Packages.mindustry.gen.Icon.right;
+                if(d !== null && d !== undefined){ arrowDraw = d; }
+            }catch(e){ /* ignore */ }
+            if(arrowDraw === null){ log("no Icon.right in this build -- review arrows stay off"); }
+            return arrowDraw;
+        }
+
+        function reviewStatements(){
+            try{
+                var L = Vars.ui.logic;
+                if(L === null || L === undefined){ return null; }
+                var s = L.canvas.statements;      // canvas 是 public（v160.7 反射实测）
+                return (s === undefined) ? null : s;
+            }catch(e){ return null; }
+        }
+
+        function arrowHostFor(statements){
+            var parent = null;
+            try{ parent = statements.parent; }catch(e){ return null; }
+            if(parent === null || parent === undefined){ return null; }
+            if(arrowHost !== null && arrowParent === parent){ return arrowHost; }
+            var host = new Packages.arc.scene.ui.layout.Table();
+            host.setFillParent(true);
+            host.touchable = Packages.arc.scene.event.Touchable.childrenOnly;
+            try{ parent.addChild(host); }catch(e){ return null; }
+            host.update(function(){ layoutArrows(); });
+            arrowHost = host;
+            arrowParent = parent;
+            return host;
+        }
+
+        // 第 i 个孩子 = 第 i+1 条语句；纵向取表头行的中心（表头在行顶，高 38）。
+        // statements 只给测试传（无头引擎没有真画布），真机由每帧 update 回调传空。
+        function layoutArrows(statements){
+            if(arrowHost === null || arrowRows.length === 0){ return; }
+            if(statements === null || statements === undefined){ statements = reviewStatements(); }
+            if(statements === null){ return; }
+            for(var i = 0; i < arrowRows.length; i++){
+                var r = arrowRows[i], e = r.elem, img = r.img;
+                try{
+                    if(e === null || e === undefined){ img.visible = false; continue; }
+                    img.visible = true;
+                    var x = statements.x + e.x - ARROW - 2;     // 优先放进行左侧的空白
+                    if(x < 2){ x = statements.x + e.x + 2; }     // 没空白就压进行内左端
+                    var y = statements.y + e.y + e.getHeight() - 19 - (ARROW / 2);
+                    img.setPosition(x, y);
+                }catch(err){ img.visible = false; }
+            }
+        }
+
+        function showLineReview(line){
+            var out = ["第 " + line + " 行"];
+            var by = arrowByLine[line];
+            if(by === undefined){
+                out.push("（这一行现在没有问题了）");
+            }else{
+                for(var i = 0; i < by.items.length; i++){
+                    var f = by.items[i];
+                    out.push(f.sev + " [" + (f.rid || "-") + "] " + f.msg);
+                }
+            }
+            print("[mai] " + out.join("\n"));
+            if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 第 " + line + " 行", out.join("\n")); }
+        }
+
+        // Rhino 里 var 是函数作用域，循环里直接闭包会全部指向最后一个值 —— 用工厂函数。
+        function tapLine(line){
+            return function(){ showLineReview(line); };
+        }
+
+        // 测试用：把箭头的颜色翻译回严重度（比较 Color 对象，不依赖 toString 格式）
+        function sevNameOf(img){
+            try{
+                if(img.color.equals(Pal.remove)){ return "ERR"; }
+                if(img.color.equals(Pal.lightOrange)){ return "WARN"; }
+                if(img.color.equals(Pal.accent)){ return "INFO"; }
+            }catch(e){ /* ignore */ }
+            return "?";
+        }
+
+        function clearArrows(){
+            if(arrowHost !== null){ try{ arrowHost.clearChildren(); }catch(e){ /* ignore */ } }
+            arrowRows = [];
+        }
+
+        // res.findings -> 每行一个箭头。statements / drawable 只给测试用，真机传 null。
+        function syncArrows(res, statements, drawableOverride){
+            if(statements === null || statements === undefined){ statements = reviewStatements(); }
+            if(statements === null){
+                clearArrows();
+                arrowByLine = {};
+                return 0;
+            }
+            var host = arrowHostFor(statements);
+            if(host === null){ return 0; }
+            var byLine = {}, lines = [], i;
+            var f = (res === null || res === undefined || res.findings === undefined) ? [] : res.findings;
+            for(i = 0; i < f.length; i++){
+                var ln = f[i].line;
+                if(byLine[ln] === undefined){ byLine[ln] = {sev: f[i].sev, items: []}; lines.push(ln); }
+                byLine[ln].items.push(f[i]);
+                if(sevRank(f[i].sev) < sevRank(byLine[ln].sev)){ byLine[ln].sev = f[i].sev; }
+            }
+            arrowByLine = byLine;
+            clearArrows();
+            var draw = (drawableOverride === null || drawableOverride === undefined) ? arrowDrawable() : drawableOverride;
+            if(draw === null || draw === undefined || lines.length === 0){ return 0; }
+            var kids = null;
+            try{ kids = statements.getChildren(); }catch(e){ return 0; }
+            for(i = 0; i < lines.length; i++){
+                var line = lines[i], idx = line - 1;
+                if(idx < 0 || idx >= kids.size){ continue; }
+                var elem = kids.get(idx), img = null;
+                try{ img = new Packages.arc.scene.ui.Image(draw); }catch(e){ continue; }
+                try{ img.setSize(ARROW, ARROW); }catch(e){ /* ignore */ }
+                try{ img.setColor(sevColor(byLine[line].sev)); }catch(e){ /* ignore */ }
+                try{ img.touchable = Packages.arc.scene.event.Touchable.enabled; }catch(e){ /* ignore */ }
+                try{ img.tapped(tapLine(line)); }catch(e){ /* ignore */ }
+                try{ host.addChild(img); }catch(e){ continue; }
+                arrowRows.push({elem: elem, img: img, line: line, items: byLine[line].items.length});
+            }
+            layoutArrows(statements);
+            return arrowRows.length;
+        }
+        function injectReview(){
+            try{
+                var L = Vars.ui.logic;
+                if(L === null || L === undefined || reviewHost === L){ return false; }
+                var bar = new Packages.arc.scene.ui.layout.Table();
+                bar.left();
+                L.row();
+                L.add(bar).growX().height(46).pad(6);
+                reviewHost = L;
+                reviewBar = bar;
+                log("review bar injected into the vanilla logic editor");
+                refreshReview(true);
+                return true;
+            }catch(e){ log("review inject failed: " + e); return false; }
+        }
+
+        // 每帧被调一次：面板没开时只做两次属性读，代价可忽略。
+        function reviewTick(){
+            try{
+                if(Vars.ui === null || Vars.ui.logic === null || !Vars.ui.logic.isShown()){ return; }
+                if(reviewHost !== Vars.ui.logic){ injectReview(); }
+                reviewFrame++;
+                if(reviewFrame % 30 === 0){ refreshReview(false); }
+            }catch(e){ /* 每帧回调里绝不抛出去 */ }
+        }
+
+        // ------------------------------------------ AI 辅助编程（F3 单格选中）
+        // 一句话 → sidecar POST /plan → 代码 + 预检 → 确认写入。
+        // 现在是规则式意图路由（tools/logicd.py 的 INTENTS 表），模型的接入点只在
+        // /plan 的实现里，模组这一侧不用改。
+
+        var aiPanel = null;
+
+        function aiShown(){
+            try{ return aiPanel !== null && aiPanel.isShown(); }catch(e){ return false; }
+        }
+
+        // Link coordinates travel as absolute tile positions (LogicLink.x/y), but the
+        // byte[] payload stores them relative to the processor
+        // (LogicBlock.config -> readCompressed(data, true), LogicBlock.java:304-307).
+        // Omitting the origin silently wrote a link table pointing at empty tiles.
+        function originOf(b){
+            try{
+                if(b !== null && b !== undefined && b.tile){
+                    return {x: b.tile.x, y: b.tile.y};
+                }
+            }catch(e){ }
+            return null;
+        }
+
+        // target 可选：区域面板里点「生成」时直接指定那个处理器，不必再把鼠标移过去。
+        function showAiPanel(target){
+            try{ llmSync(); }catch(e){ log("llm sync skipped"); }
+            if(aiShown()){ try{ aiPanel.toFront(); return; }catch(e){ /* ignore */ } }
+            var b = (target === undefined || target === null) ? targetBuild() : target;
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · AI 辅助编程 v" + MOD_VERSION);
+            d.cont.defaults().pad(4).left();
+            d.cont.add("目标：" + describe(b)).row();
+            d.cont.add("描述这段逻辑要做什么，然后点「生成」：").padTop(6).row();
+            var intent = "";
+            d.cont.field("", function(v){ intent = String(v); }).width(560).row();
+            d.cont.add("例：巡逻，遇到敌人就开火 / 容器里铜够 250 就打印 / 每 2 秒打印一次计数").row();
+            // 同 openPanel：pane() 给的是 ScrollPane，必须自己造 Table 交给它托管。
+            var host = new Packages.arc.scene.ui.layout.Table();
+            host.defaults().pad(2).left();
+            host.add("（还没生成）").row();
+            try{
+                d.cont.pane(host).height(300).width(600);
+            }catch(e){
+                log("pane() overload unavailable, falling back to a plain table: " + e);
+                d.cont.add(host).growX();
+            }
+            d.buttons.defaults().pad(4);
+            // v0.8.0：默认走作业队列（落盘 + 更严的门禁 + 可取消）。
+            d.buttons.button("生成", function(){ startJob(b, host, d, intent); }).width(140);
+            d.buttons.button("取消作业", function(){ hint(cancelJob()); }).width(120);
+            d.buttons.button("关闭", function(){ d.hide(); }).width(140);
+            d.closeOnBack();
+            d.show();
+            aiPanel = d;
+        }
+
+        // ---------------------------------------------------------- 作业队列（v0.8.0 / P4 第二刀）
+        // AI 面板的「生成」不再直接 /plan，而是往 sidecar 的作业队列里投一个 job：
+        // 作业会落盘、sidecar 崩了能续跑、过比分析器更严的门禁（link-name-not-bound
+        // 从 WARN 提升成 ERR，见 tools/jobqueue.py 的 FATAL_RIDS）。
+        // 游戏这边只做两件事：投递 + 每秒查一次状态；生成逻辑全在 sidecar。
+        // 契约：docs/Mlog辅助-规划.md §4.1；端点：POST /jobs、GET /jobs?id=、DELETE /jobs?id=。
+        var aiJob = null;                 // {id, b, desc, host, d, lastPoll, job}
+        var JOB_POLL_MS = 1000;
+        var JOB_TERMINAL = {done: 1, rejected: 1, failed: 1, cancelled: 1};
+        // v0.12.5: F3 松手之后框不立刻消失——它代表「这一批作业还在跑」，一直到这一批
+        // 全部终态再多留 8 秒，玩家才有机会点右下角的徽标看思考过程。
+        var jobBox = null;                // {r, ids, jobs, pend, started, termAt, lastPoll}
+        var jobBadge = null;              // 徽标在世界坐标里的点击区 {x, y, w, h}
+        // v0.12.7（用户 2026-10-31）：「选框不应该自行消失，只能在应用后消失，或者主动关闭。」
+        // 所以这里没有「留几秒」的常量：框一直画着，直到写入成功（jobBoxWritten）或玩家主动关（closeJobBox）。
+        // 管理窗的列表是异步拉回来的：点进详情之后，迟到的列表回调不能往详情页里塞行。
+        var managerSeq = 0;
+
+        function isJobTerminal(state){
+            return JOB_TERMINAL[String(state)] === 1;
+        }
+
+        // job 的 snapshot 只是给 sidecar 存档/将来自由档用的世界事实；
+        // 处理器周围 13×13 足够，太大了会把整张图的格子塞进请求里。
+        function jobBody(b, desc, wsInfo){
+            var snap = null;
+            try{
+                if(b !== null && b !== undefined && b.tile){
+                    snap = regionSnapshot(b.tile.x - 6, b.tile.y - 6, b.tile.x + 6, b.tile.y + 6);
+                }
+            }catch(e){ snap = null; }
+            if(snap === null){
+                snap = {schema: 1, cells: 0, truncated: false, grid: [], processors: []};
+            }
+            var job = {mode: "new", desc: String(desc), links: linkListOrNull(b), ipt: 2,
+                       origin: originOf(b), snapshot: snap};
+            if(wsInfo !== null && wsInfo !== undefined){
+                job.mode = "improve";                  // v0.14.1：同一块区域的上一版当依据
+                job.workspace = wsInfo;
+            }
+            return {job: job};
+        }
+
+        function jobSubmit(b, desc, cb, wsInfo){
+            ensureSidecar(true);             // v0.13.1：装包版里后端是模组自己拉起来的
+            if(SIDE.state === "starting"){
+                cb(null, "sidecar 正在启动（首次需几秒），稍后再投");
+                return;
+            }
+            // v0.14.4：模板档已删，没有模型就不生成任何代码 —— 先说清楚要配什么，
+            // 别让玩家等一个注定失败的作业。llmState 只反映 sidecar 内存，落盘配置另算。
+            if(llmState.kind !== "llm" && llmState.kind !== "fake"){
+                if(llmUrl().length === 0 || llmModel().length === 0){
+                    cb(null, "未配置模型：先在「设置 → Mlog辅助 → 大模型」填地址、密钥、模型，"
+                           + "再点「启用模型档」");
+                    return;
+                }
+                llmAutoSync();               // 配置在、sidecar 忘了（刚重启）：先推一遍再投
+            }
+            rememberOrig(b);                 // v0.10.1：投递那一刻的代码就是冲突基线
+            httpJson("POST", "/jobs", JSON.stringify(jobBody(b, desc, wsInfo)), function(code, text){
+                var res = parse(text);
+                if(code !== 200 || res === null || res.ok !== true){
+                    cb(null, jobWhy(code, text, res));
+                    return;
+                }
+                cb(res, null);
+            });
+        }
+
+        function jobGet(id, cb){
+            httpJson("GET", "/jobs?id=" + String(id), null, function(code, text){
+                var res = parse(text);
+                if(code !== 200 || res === null || res.ok !== true || !res.job){
+                    cb(null, jobWhy(code, text, res));
+                    return;
+                }
+                cb(res.job, null);
+            });
+        }
+
+        function jobCancel(id, cb){
+            httpJson("DELETE", "/jobs?id=" + String(id), null, function(code, text){
+                var res = parse(text);
+                if(code !== 200 || res === null || res.ok !== true){
+                    cb(null, jobWhy(code, text, res));
+                    return;
+                }
+                cb(res.job || null, null);
+            });
+        }
+
+        function jobSevCounts(job){
+            var f = (job && job.findings) ? job.findings : [];
+            var c = {err: 0, warn: 0, info: 0, total: f.length};
+            for(var i = 0; i < f.length; i++){
+                var s = String(f[i].sev);
+                if(s === "ERR"){ c.err++; } else if(s === "WARN"){ c.warn++; } else { c.info++; }
+            }
+            return c;
+        }
+
+        // job -> /plan 那套渲染要的形状。writeBuild 只认 ok/bytes_b64/statements/bytes_len，
+        // renderPlan 还要 findings/template/reason，所以这里一次补齐。
+        function jobAsPlan(job){
+            var c = jobSevCounts(job);
+            return {ok: String(job.state) === "done",
+                    template: job.template || "",
+                    reason: job.explanation || "",
+                    findings: job.findings || [],
+                    code: job.code || "",
+                    statements: job.statements || 0,
+                    bytes_b64: job.bytes_b64 || "",
+                    bytes_len: job.bytes_len || 0,
+                    errors: c.err, warns: c.warn};
+        }
+
+        function jobProgressText(job){
+            if(job === null || job === undefined){ return "作业：查不到状态"; }
+            var st = String(job.state), a = job.attempts || 0, id = String(job.id || "?");
+            var c = jobSevCounts(job);
+            if(st === "queued"){ return "作业 " + id + "：排队中（第 " + a + " 次尝试）"; }
+            if(st === "running"){ return "作业 " + id + "：生成中（第 " + a + " 次尝试）"; }
+            if(st === "done"){
+                return "作业 " + id + "：完成（" + (job.statements || 0) + " 条语句，"
+                     + (job.bytes_len || 0) + " 字节，尝试 " + a + " 次）";
+            }
+            if(st === "rejected"){
+                return "作业 " + id + "：被门禁拒绝（尝试 " + a + " 次，ERR " + c.err + " 条）";
+            }
+            if(st === "cancelled"){ return "作业 " + id + "：已取消"; }
+            return "作业 " + id + "：" + st
+                 + (job.explanation ? "（" + String(job.explanation) + "）" : "");
+        }
+
+        // v0.12.6：作业还在跑的时候，findings 里躺着的是「上一次尝试」的问题，不是结论。
+        // 真机上截断那一下（模型把预算花在思考上）就被人当成「生成失败」——所以非终态的
+        // findings 必须挂一个「正在重试」的抬头，再补一句人话说明截断。
+        function jobFindingLines(job, maxLines){
+            var fs = job.findings || [], out = [], i, m, n = 0;
+            for(i = 0; i < fs.length && n < maxLines; i++){
+                m = String(fs[i].msg);
+                out.push(String(fs[i].sev) + " L" + fs[i].line + " " + m);
+                n++;
+                if(m.indexOf("finish_reason=length") >= 0 && n < maxLines){
+                    out.push("  （模型把预算用在思考上，sidecar 会自动加大预算重试）");
+                    n++;
+                }
+            }
+            return out;
+        }
+
+        function jobRetryHead(job){
+            if(isJobTerminal(String(job.state))){ return ""; }
+            var fs = job.findings || [];
+            if(fs.length === 0){ return ""; }
+            return "--- 上一次尝试的问题（第 " + (job.attempts || 0) + " 次，还在重试）---";
+        }
+
+        // v0.12.4：模型自己的思考过程现在跟着作业一起回来（sidecar 的 job.reasoning），
+        // 面板直接摊开——推理模型想歪、或者把预算全花在想上时，光看 ERR 一行看不出为什么。
+        // 端点不返回 reasoning_content 的话这里是空串，面板就什么都不加。
+        function jobReasoningText(job){
+            if(job === null || job === undefined){ return ""; }
+            var t = job.reasoning;
+            return (t === null || t === undefined) ? "" : String(t);
+        }
+
+        var REASON_LINE = 40, REASON_LINES = 16;
+
+        function jobReasoningLines(job, maxLines, perLine){
+            var t = jobReasoningText(job);
+            if(t.length === 0){ return []; }
+            var w = perLine || REASON_LINE, cap = (maxLines || REASON_LINES) * w;
+            var body = (t.length > cap) ? t.substring(0, cap) : t;
+            var out = [];
+            for(var i = 0; i < body.length; i += w){ out.push(body.substring(i, i + w)); }
+            return out;
+        }
+
+        // v0.13.2：作业视图以前只给 findings/代码。两样东西一直存在但没人看得见：
+        // 模型的 assumptions（它替玩家假定的前提，错了就是「生成的逻辑不对」的源头）
+        // 和 cost 报告（里面有 UNREACHABLE 段落——永远执行不到的语句）。
+        function jobAssumptionLines(job, maxLines, perLine){
+            var a = job.assumptions || [], out = [], i, s, w = perLine || 88;
+            for(i = 0; i < a.length && i < (maxLines || 4); i++){
+                s = String(a[i]);
+                out.push(s.length > w ? s.substring(0, w - 1) + "…" : s);
+            }
+            return out;
+        }
+
+        function jobCostLines(job, maxLines){
+            var c = job.cost;
+            if(c === null || c === undefined || String(c).length === 0){ return []; }
+            var rows = String(c).split("\n"), out = [];
+            for(var i = 0; i < rows.length && i < (maxLines || 8); i++){ out.push(rows[i]); }
+            return out;
+        }
+
+        function renderJob(host, job, b, d){
+            if(host === null || host === undefined || job === null || job === undefined){ return; }
+            host.clear();
+            host.add(jobProgressText(job)).row();
+            var think = jobReasoningLines(job, REASON_LINES, REASON_LINE);
+            if(think.length > 0){
+                var whole = jobReasoningText(job).length;
+                host.add("--- 模型思考（" + whole + " 字符"
+                         + (whole > REASON_LINES * REASON_LINE ? "，只显示开头" : "") + "）---").row();
+                for(var ti = 0; ti < think.length; ti++){ host.add(think[ti]).row(); }
+            }
+            var st = String(job.state);
+            if(st === "done"){
+                var res = jobAsPlan(job), c = jobSevCounts(job);
+                host.add(c.err === 0 ? "预检：通过（0 条 ERR）" + (c.total ? "，另有 " + c.warn + " 条 WARN" : "")
+                                     : ("预检：ERR " + c.err + " / WARN " + c.warn)).row();
+                if(job.explanation){ host.add(String(job.explanation)).row(); }
+                var ls = job.findings || [];
+                for(var i = 0; i < ls.length && i < 6; i++){
+                    host.add("  " + ls[i].sev + " L" + ls[i].line + " " + ls[i].msg).row();
+                }
+                var as = jobAssumptionLines(job, 4, 88);
+                if(as.length > 0){
+                    host.add("--- 模型假定的前提（错了就是逻辑不对的源头）---").row();
+                    for(var ai = 0; ai < as.length; ai++){ host.add("  · " + as[ai]).row(); }
+                }
+                var costRows = jobCostLines(job, 8);
+                if(costRows.length > 0){
+                    host.add("--- 成本（UNREACHABLE = 永远执行不到的语句）---").row();
+                    for(var ci = 0; ci < costRows.length; ci++){ host.add(costRows[ci]).row(); }
+                }
+                host.add("--- 代码（" + (job.statements || 0) + " 条语句，" + (job.bytes_len || 0) + " 字节）---").row();
+                var code = String(job.code || "").split("\n");
+                for(var k = 0; k < code.length && k < 40; k++){ host.add(code[k]).row(); }
+                if(code.length > 40){ host.add("… 共 " + code.length + " 行").row(); }
+                if(d !== null && d !== undefined){
+                    d.buttons.clearChildren();
+                    d.buttons.defaults().pad(4);
+                    d.buttons.button("写入", function(){ hint(writeBuild(b, res)); d.hide(); }).width(140);
+                    d.buttons.button("关闭", function(){ d.hide(); }).width(140);
+                }
+                return;
+            }
+            if(st === "rejected" || st === "failed" || st === "cancelled"){
+                var fs = job.findings || [];
+                for(var i2 = 0; i2 < fs.length && i2 < 6; i2++){
+                    host.add("  " + fs[i2].sev + " L" + fs[i2].line + " " + fs[i2].msg).row();
+                }
+                if(job.explanation){ host.add(String(job.explanation)).row(); }
+                return;
+            }
+            var rh = jobRetryHead(job);
+            if(rh !== ""){
+                host.add(rh).row();
+                var rl = jobFindingLines(job, 4);
+                for(var ri = 0; ri < rl.length; ri++){ host.add("  " + rl[ri]).row(); }
+            }
+            host.add("（每 " + (JOB_POLL_MS / 1000) + " 秒查一次，可先做别的）").row();
+        }
+
+        // 每帧调一次：只有「有作业 + 面板还开着 + 到点了」才发请求。
+        function jobTick(){
+            if(aiJob === null){ return; }
+            if(!aiShown()){ aiJob = null; return; }       // 面板关了就别轮询了
+            var now = Packages.java.lang.System.currentTimeMillis();
+            if(now - aiJob.lastPoll < JOB_POLL_MS){ return; }
+            aiJob.lastPoll = now;
+            var mine = aiJob;
+            jobGet(mine.id, function(job, why){
+                if(aiJob !== mine){ return; }             // 期间换了作业/取消了
+                if(job === null){ return; }               // 网络抖一下：下次再查
+                mine.job = job;
+                try{ renderJob(mine.host, job, mine.b, mine.d); }
+                catch(e){ log("renderJob failed: " + e); }
+                if(isJobTerminal(job.state)){ jobChatDone(job); aiJob = null; }
+            });
+        }
+
+        function startJob(b, host, d, intent){
+            if(b === null || b === undefined){ host.add("光标下没有处理器").row(); return "没有目标处理器"; }
+            var desc = String(intent);
+            if(desc.length === 0){ host.add("先写一句要做什么").row(); return "描述是空的"; }
+            var ws = wsTouchHere(b, desc);   // v0.14.0：这台已经在某个工作区里就挂靠过去
+            host.clear();
+            host.add("正在投递作业…").row();
+            jobSubmit(b, desc, function(res, why){
+                if(res === null){ host.clear(); host.add("投递失败：" + why).row(); return; }
+                aiJob = {id: String(res.id), b: b, desc: desc, host: host, d: d,
+                         lastPoll: 0, job: res.job || null};
+                jobChatStart(b, String(res.id), desc);   // v0.13.0：启用即播报
+                wsRecordJob(ws, String(res.id), desc);   // v0.14.0
+                try{ renderJob(host, res.job, b, d); }
+                catch(e){ log("renderJob failed: " + e); }
+            });
+            return "已投递";
+        }
+
+        function cancelJob(){
+            if(aiJob === null){ return "没有进行中的作业"; }
+            var mine = aiJob;
+            aiJob = null;
+            jobCancel(mine.id, function(job, why){
+                hint(why === null ? ("已取消作业 " + mine.id) : ("取消失败：" + why));
+            });
+            return "已请求取消 " + mine.id;
+        }
+
+        // 同步跑完一个作业：**只给控制台/自检用**（会阻塞当前线程）。
+        // 游戏内 UI 走的是上面那条异步路径 —— 主线程 busy-wait 永远等不到 Core.app.post 的回调。
+        function jobSync(b, desc, timeoutMs){
+            rememberOrig(b);                 // v0.10.1：这条路径也是一次投递，基线同样要记
+            var t0 = Packages.java.lang.System.currentTimeMillis();
+            var limit = (timeoutMs > 0) ? timeoutMs : 20000;
+            var r1 = httpRaw("POST", base + "/jobs", JSON.stringify(jobBody(b, desc)));
+            var j1 = parse(r1.text);
+            if(r1.code !== 200 || j1 === null || j1.ok !== true){
+                return JSON.stringify({ok: false, code: r1.code, text: String(r1.text).substring(0, 300)});
+            }
+            var id = String(j1.id), job = j1.job || null, tries = 0;
+            while(tries < 400){
+                tries++;
+                if(job !== null && isJobTerminal(job.state)){ break; }
+                if(Packages.java.lang.System.currentTimeMillis() - t0 > limit){ break; }
+                try{ Packages.java.lang.Thread.sleep(50); }catch(e0){ }
+                var r2 = httpRaw("GET", base + "/jobs?id=" + id, null);
+                var j2 = parse(r2.text);
+                if(r2.code === 200 && j2 !== null && j2.ok === true && j2.job){ job = j2.job; }
+            }
+            if(job === null){ return JSON.stringify({ok: false, code: 0, text: "no job state"}); }
+            return JSON.stringify(job);
+        }
+
+
+        // ---------------------------------------------------------- 作业框 / 徽标 / 作业管理（v0.12.5）
+        // 用户 2026-10-31：框选区域在作业完成之前保留；正在进行的作业在框选区域右下角显示；
+        // 点击作业可以看详细思考过程；要一个统一的作业管理窗口；F3 之后的窗口只剩一个描述框。
+
+        function jobBoxState(){
+            if(jobBox === null){ return null; }
+            var ids = jobBox.ids || [], i, st, terminal = 0, ok = 0, failed = 0;
+            for(i = 0; i < ids.length; i++){
+                var j = jobBox.jobs[ids[i]];
+                st = (j === null || j === undefined) ? "queued" : String(j.state);
+                if(isJobTerminal(st)){
+                    terminal++;
+                    if(st === "done"){ ok++; } else { failed++; }
+                }
+            }
+            return {total: ids.length, terminal: terminal, done: ok, failed: failed,
+                    pending: (jobBox.pend || 0), finished: ids.length > 0 && terminal === ids.length};
+        }
+
+        function jobBadgeText(){
+            if(jobBox === null){ return ""; }
+            var s = jobBoxState();
+            if(s === null){ return ""; }
+            var written = jobBox.written || 0;
+            if(s.total === 0){ return (s.pending > 0) ? "投递中…" : ""; }
+            if(!s.finished){ return "作业 " + s.terminal + "/" + s.total + " · 生成中"; }
+            if(written > 0){
+                return "作业 " + s.total + "/" + s.total + " · 已写入"
+                       + (written > 1 ? " " + written + " 台" : "");
+            }
+            if(s.failed === 0){ return "作业 " + s.total + "/" + s.total + " · 完成"; }
+            return "作业 " + s.total + "/" + s.total + " · " + s.done + " 成 " + s.failed + " 败";
+        }
+
+        function jobBoxFinishIfDone(){
+            if(jobBox === null){ return; }
+            var s = jobBoxState();
+            if(s !== null && s.finished && jobBox.termAt === 0){
+                jobBox.termAt = Packages.java.lang.System.currentTimeMillis();
+            }
+        }
+
+        // v0.12.7：框选框只有两个消失理由 —— 写入成功，或者玩家主动关。
+        function closeJobBox(why){
+            if(jobBox === null){ return "没有框选框"; }
+            jobBox = null;
+            jobBadge = null;
+            return (why === null || why === undefined || why === "") ? "框选框已关掉" : String(why);
+        }
+
+        function jobBoxContainsBuild(b){
+            if(jobBox === null || jobBox.r === null || b === null || b === undefined) { return false; }
+            try{
+                var t = b.tile;
+                if(t === null || t === undefined){ return false; }
+                var r = jobBox.r;
+                return t.x >= r.x1 && t.x <= r.x2 && t.y >= r.y1 && t.y <= r.y2;
+            }catch(e){ return false; }
+        }
+
+        // v0.14.2：写入成功不再把框（和工作区）一起抹掉 —— 框留着、工作区留着，玩家点「取消」才收。
+        // 这里只记一笔「写了几台」，徽标状态行据此改口。
+        function jobBoxWritten(b){
+            if(jobBox === null){ return; }
+            if(!jobBoxContainsBuild(b)){ return; }
+            jobBox.written = (jobBox.written || 0) + 1;
+        }
+
+        function jobBoxTick(){
+            if(jobBox === null){ return; }
+            var now = Packages.java.lang.System.currentTimeMillis();
+            // v0.12.7：这一批都终态了就不再轮询，但框和徽标留着 —— 等写入或玩家主动关。
+            if(jobBox.termAt > 0){ return; }
+            if(now - (jobBox.lastPoll || 0) < JOB_POLL_MS){ return; }
+            jobBox.lastPoll = now;
+            var ids = jobBox.ids || [], i;
+            for(i = 0; i < ids.length; i++){
+                var jid = ids[i], known = jobBox.jobs[jid];
+                if(known !== null && known !== undefined && isJobTerminal(String(known.state))){ continue; }
+                (function(want){
+                    jobGet(want, function(job, why){
+                        if(jobBox === null){ return; }
+                        jobBox.jobs[want] = (job === null)
+                            ? {id: want, state: "failed", explanation: String(why)}
+                            : job;
+                        jobChatDone(jobBox.jobs[want]);   // v0.13.0：完成即播报（同一作业只报一次）
+                        if(jobBox.ws !== null && jobBox.ws !== undefined){   // v0.14.0：终态记回工作区
+                            wsRecordTerminal(wsLoad(jobBox.ws), jobBox.jobs[want]);
+                        }
+                        jobBoxFinishIfDone();
+                    });
+                })(jid);
+            }
+            jobBoxFinishIfDone();
+        }
+
+        // v0.14.2：作业框的操作区 —— 状态一行 + 两个固定像素尺寸的按钮（查看 / 取消）。
+        // 原来那行「（点开看 · 右键关）」是画在世界坐标里的说明字：随镜头缩放会变形，也没有
+        // 可点的边界。现在按钮的像素尺寸固定（JOB_BTN_H 屏幕像素高），世界坐标只按
+        // 1/camerascale 换算，画面与命中区共用同一份几何（jobButtonLayout）。
+        var JOB_BTN_H = 18;      // 按钮高（屏幕像素）
+        var JOB_BTN_PAD = 9;     // 按钮左右内边距（屏幕像素）
+        var JOB_BTN_GAP = 6;     // 两个按钮之间（屏幕像素）
+        var JOB_BTN_EDGE = 4;    // 按钮行离框右边 / 底边（屏幕像素）
+
+        // 量一段字：优先 GlyphLayout 真量，量不出来按字数估（宁可点区大一点，也不要看得见点不着）。
+        function jobTextMeasure(font, text, unit){
+            var w = 0, hh = 13 * unit;
+            if(font !== null && font !== undefined){
+                try{
+                    font.getData().setScale(unit);
+                    var layout = new Packages.arc.graphics.g2d.GlyphLayout(font, text);
+                    if(layout.width > 0){ w = layout.width; }
+                    if(layout.height > 0){ hh = layout.height; }
+                }catch(e){ }
+            }
+            if(!(w > 0)){ w = text.length * 9 * unit; }
+            return {w: w, h: hh};
+        }
+
+        // 状态行 + 两个按钮的全部几何（世界坐标）。画和点都只认这一份。
+        // 排版：右对齐贴在框右下角外侧，从上到下是「状态行」再「按钮行」，取消在最右、查看在左。
+        function jobButtonLayout(a){
+            var text = jobBadgeText();
+            if(text === ""){ return null; }
+            var scale = 1;
+            try{ scale = Vars.renderer.camerascale; }catch(e0){ }
+            if(!(scale > 0)){ scale = 1; }
+            var unit = 1 / scale;
+            var font = Packages.mindustry.ui.Fonts.outline;
+            var st = jobTextMeasure(font, text, unit);
+            var h = JOB_BTN_H * unit, pad = JOB_BTN_PAD * unit, gap = JOB_BTN_GAP * unit;
+            var right = a.x + a.w - JOB_BTN_EDGE * unit;      // 按钮行右端
+            var statusTop = a.y - JOB_BTN_EDGE * unit;        // 状态行顶端（整行在框外）
+            var statusY = statusTop - st.h;                   // 状态行基线（font.draw 的 y 是基线）
+            var btnTop = statusY - JOB_BTN_EDGE * unit;       // 按钮行顶端
+            var btnY = btnTop - h;
+            var defs = [{id: "cancel", label: "取消"}, {id: "view", label: "查看"}];
+            var out = [], i, x = right;
+            for(i = 0; i < defs.length; i++){
+                var tm = jobTextMeasure(font, defs[i].label, unit);
+                var w = tm.w + 2 * pad;
+                x = x - w;
+                out.push({id: defs[i].id, label: defs[i].label,
+                          x: x, y: btnY, w: w, h: h, tw: tm.w, th: tm.h});
+                x = x - gap;
+            }
+            return {text: text, scale: scale, unit: unit, box: a,
+                    status: {text: text, x: right - st.w, y: statusY, w: st.w, h: st.h},
+                    buttons: out, top: statusTop, right: right, h: h, btnTop: btnTop};
+        }
+
+        function drawJobButtons(r, a){
+            try{
+                var m = jobButtonLayout(a);
+                if(m === null){ jobBadge = null; return; }
+                var font = Packages.mindustry.ui.Fonts.outline;
+                var D = Packages.arc.graphics.g2d.Draw;
+                var L = Packages.arc.graphics.g2d.Lines;
+                var F = Packages.arc.graphics.g2d.Fill;
+                var z = D.z();
+                D.z(Packages.mindustry.core.Layer.endPixeled);
+                var mx = 0, my = 0, hasMouse = true;
+                try{ mx = Core.input.mouseWorldX(); my = Core.input.mouseWorldY(); }catch(e0){ hasMouse = false; }
+                var i, b, hot;
+                for(i = 0; i < m.buttons.length; i++){
+                    b = m.buttons[i];
+                    hot = hasMouse && mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h;
+                    D.color(Pal.accentBack);
+                    D.alpha(hot ? 0.7 : 0.4);
+                    F.rect(b.x, b.y, b.w, b.h);
+                    D.alpha(1);
+                    L.stroke(hot ? 2 : 1);
+                    D.color(Pal.accent);
+                    L.rect(b.x, b.y, b.w, b.h);
+                }
+                D.color();
+                if(font !== null && font !== undefined){
+                    // 原版画选区尺寸时也关掉整数对齐：开着的话 1/camerascale 的小数位置会被
+                    // 量化成整数，字会整体飘开框的角——真机上看到的就是「错位」。
+                    var ints = true;
+                    try{ ints = font.usesIntegerPositions(); font.setUseIntegerPositions(false); }catch(e1){ }
+                    font.getData().setScale(m.unit);
+                    font.setColor(Pal.accent);
+                    font.draw(m.status.text, m.status.x, m.status.y);
+                    for(i = 0; i < m.buttons.length; i++){
+                        b = m.buttons[i];
+                        font.draw(b.label, b.x + (b.w - b.tw) / 2,
+                                  b.y + (b.h - b.th) / 2 + b.th * 0.78);
+                    }
+                    font.setColor(Packages.arc.graphics.Color.white);
+                    font.getData().setScale(1);
+                    try{ font.setUseIntegerPositions(ints); }catch(e2){ }
+                }
+                D.z(z);
+                jobBadge = {buttons: m.buttons, scale: m.scale, top: m.top, right: m.right};
+            }catch(e){ jobBadge = null; }
+        }
+
+        // 点「查看」= 开作业管理窗；点「取消」= 关掉这个框选框（工作区留着，只是不画框了）。
+        // 世界坐标命中，和 drawJobButtons 用的是同一份 jobButtonLayout 几何。
+        function jobButtonsClick(){
+            // v0.14.4：控件在管这一帧就交给 arc，别再走世界坐标命中（会双触发）。
+            if(jobWidget !== null && jobWidget.attached === true){ return false; }
+            if(jobBox === null || jobBadge === null || selDragging){ return false; }
+            var right = Core.input.keyTap(Packages.arc.input.KeyCode.mouseRight);
+            if(!right && !Core.input.keyTap(Packages.arc.input.KeyCode.mouseLeft)){ return false; }
+            var mx = Core.input.mouseWorldX(), my = Core.input.mouseWorldY();
+            var bs = jobBadge.buttons || [], i, b;
+            for(i = 0; i < bs.length; i++){
+                b = bs[i];
+                if(mx < b.x || mx > b.x + b.w){ continue; }
+                if(my < b.y || my > b.y + b.h){ continue; }
+                if(b.id === "cancel" || right){
+                    hint(closeJobBox(b.id === "cancel" ? "框选框已关掉（取消按钮）" : "框选框已关掉（右键）"));
+                    return true;
+                }
+                try{
+                    openJobManager();
+                }catch(e){
+                    hint("作业窗口打不开：" + e);
+                }
+                return true;
+            }
+            return false;
+        }
+
+
+        // v0.14.4（用户 2026-11-01）：「按照你说的修改UI」——框角的「查看 / 取消」改成原版控件：
+        // 往 Vars.ui.hudGroup（UI.java:53/192/239-244，setFillParent + touchable=childrenOnly）
+        // 挂一张自己的 Table，按钮用 Styles.defaultt 的 TextButton，由 arc 负责排版、缩放、
+        // 命中与悬停。上面那一套即时绘制（drawJobButtons / jobButtonLayout）留作降级：
+        // 拿不到 hudGroup 或建表失败时仍能看、能点，绝不因为 UI 变了就失去入口。
+        // 坐标：Camera.project(world) 给的是屏幕像素（原点左下、y 向上），与 arc scene 同一套；
+        // 若 scene 根节点另有缩放，用 graphics/scene 宽高比换算回来。
+        var jobWidget = null;       // {table, label, group, attached}
+        var jobWidgetTried = false;
+
+        function worldToScreen(x, y){
+            var px = x, py = y;
+            try{
+                var v = Core.camera.project(x, y);
+                if(v !== null && v !== undefined){ px = v.x; py = v.y; }
+            }catch(e){ }
+            var k = 1;
+            try{
+                var gw = Core.graphics.getWidth(), sw = Core.scene.getWidth();
+                if(gw > 0 && sw > 0){ k = gw / sw; }
+            }catch(e2){ }
+            return {x: px * k, y: py * k};
+        }
+
+        function jobWidgetBuild(){
+            if(jobWidget !== null){ return true; }
+            if(jobWidgetTried){ return false; }
+            jobWidgetTried = true;
+            try{
+                var ui = Vars.ui;
+                if(ui === null || ui === undefined){ return false; }
+                var group = ui.hudGroup;
+                if(group === null || group === undefined){ return false; }
+                var S = Packages.arc.scene.ui.layout.Scl;
+                var t = new Packages.arc.scene.ui.layout.Table();
+                var lbl = new Packages.arc.scene.ui.Label("", new Packages.arc.scene.ui.Label.LabelStyle(
+                    Packages.mindustry.ui.Fonts.outline, Pal.accent));
+                var hk = hudScale();
+                try{ lbl.setFontScale(hk); }
+                catch(ef){ log("label scale skipped: " + ef); }
+                t.add(lbl).right().padBottom(S.scl(3) * hk).row();
+                var btns = new Packages.arc.scene.ui.layout.Table();
+                btns.button("查看", Packages.mindustry.ui.Styles.defaultt, function(){ jobWidgetView(); })
+                    .size(S.scl(84) * hk, S.scl(40) * hk).padLeft(S.scl(6) * hk);
+                btns.button("取消", Packages.mindustry.ui.Styles.defaultt, function(){ jobWidgetCancel(); })
+                    .size(S.scl(84) * hk, S.scl(40) * hk).padLeft(S.scl(6) * hk);
+                t.add(btns).right().row();
+                t.pack();
+                jobWidget = {table: t, label: lbl, group: group, attached: false};
+                log("job widget ready (native buttons)");
+                return true;
+            }catch(e){
+                log("job widget unavailable, keeping the drawn buttons: " + e);
+                jobWidget = null;
+                return false;
+            }
+        }
+
+        function jobWidgetView(){
+            try{ openJobManager(); }
+            catch(e){ hint("作业窗口打不开：" + e); }
+        }
+
+        function jobWidgetCancel(){
+            hint(closeJobBox("框选框已关掉（取消按钮）"));
+        }
+
+        function jobWidgetHide(){
+            if(jobWidget === null || jobWidget.attached !== true){ return; }
+            try{ jobWidget.table.remove(); }
+            catch(e){ log("job widget detach failed: " + e); }
+            jobWidget.attached = false;
+        }
+
+        // 倍率变了要按新尺寸重建：摘掉旧的、把 jobWidgetTried 复位，
+        // 下一帧 jobButtonsSync 的 jobWidgetBuild() 就会用新倍率重新排一遍。
+        function jobWidgetDrop(){
+            jobWidgetHide();
+            try{ if(jobWidget !== null && jobWidget.table !== null){ jobWidget.table.remove(); } }
+            catch(e){ log("job widget drop failed: " + e); }
+            jobWidget = null;
+            jobWidgetTried = false;
+        }
+
+        // 每帧同步：框还在就把控件摆到框右下角外侧，框没了就摘下来。
+        // 返回 true 表示「这一帧由控件负责」，调用方就别再画即时版了。
+        function jobButtonsSync(){
+            if(!jobWidgetBuild()){ return false; }
+            var w = jobWidget;
+            var text = jobBadgeText();
+            var show = (jobBox !== null && jobBox.r !== null && !selDragging && text !== "");
+            if(!show){ jobWidgetHide(); return true; }
+            var a = selDrawArgs(jobBox.r);
+            var p = worldToScreen(a.x + a.w, a.y);
+            var hk2 = hudScale();
+            var edge = JOB_BTN_EDGE * hk2;
+            try{ edge = Packages.arc.scene.ui.layout.Scl.scl(JOB_BTN_EDGE) * hk2; }catch(e0){ }
+            try{
+                w.label.setText(text);
+                w.table.pack();
+                var tw = 0, th = 0;
+                try{ tw = w.table.width; th = w.table.height; }catch(e1){ }
+                w.table.setPosition(p.x - edge - tw, p.y - edge - th);
+                if(!w.attached){
+                    w.group.addChild(w.table);
+                    w.attached = true;
+                }
+            }catch(e2){
+                log("job widget sync failed, falling back to drawn buttons: " + e2);
+                jobWidgetHide();
+                return false;
+            }
+            return true;
+        }
+
+        // Rhino 的 String.prototype 不一定有 trim（v160.7 里 split 都能等价空匹配），自己来。
+        function trimText(s){
+            var t = String(s === null || s === undefined ? "" : s);
+            var a = 0, b = t.length;
+            while(a < b && t.charAt(a) <= " "){ a++; }
+            while(b > a && t.charAt(b - 1) <= " "){ b--; }
+            return t.substring(a, b);
+        }
+
+        function stateCn(state){
+            var s = String(state);
+            if(s === "queued"){ return "排队"; }
+            if(s === "running"){ return "生成中"; }
+            if(s === "done"){ return "完成"; }
+            if(s === "rejected"){ return "被拒"; }
+            if(s === "failed"){ return "失败"; }
+            if(s === "cancelled"){ return "已取消"; }
+            return s;
+        }
+
+        // ---------------------------------------------------------- 聊天框播报（v0.13.0）
+        // 用户 2026-10-31：作业「启用」和「完成」的时候把状态发到聊天框，格式
+        //   MAI<逻辑徽标> Generating (12,34): 给核心补铜（job 3f2a1b9c）
+        // 聊天框画字用的是 Fonts.def，图标必须是真 glyph：UI.formatIcons(":logic:")
+        // 会把 :name: 换成 Iconc 里的字符（和设置分类那个 Icon.logic 同源），
+        // 所以不要写 "[logic]" —— 那只是标签语法，聊天框不认。
+        var CHAT_DONE = {};        // 作业 id -> 终态已经播报过（一个作业只报一次）
+        var CHAT_ICON = null;      // 逻辑徽标字符；拿不到就是空串（照样播报，只是没图标）
+
+        function chatIcon(){
+            if(CHAT_ICON !== null){ return CHAT_ICON; }
+            CHAT_ICON = "";
+            try{
+                var s = String(Packages.mindustry.core.UI.formatIcons(":logic:"));
+                if(s.length > 0 && s !== ":logic:"){ CHAT_ICON = s; }
+            }catch(e){ log("chat icon unavailable: " + e); }
+            return CHAT_ICON;
+        }
+
+        // 格式固定成 MAI<图标> <状态> (x,y): <其它信息>；信息为空就不留冒号。
+        function chatLine(status, x, y, info){
+            var tail = (info === null || info === undefined || String(info) === "") ? "" : (": " + String(info));
+            return "MAI" + chatIcon() + " " + String(status) + " (" + String(x) + "," + String(y) + ")" + tail;
+        }
+
+        // 联机会话发聊天框；单机（没有聊天框）或无头（Vars.ui 为 null）退回既有的淡出提示，
+        // 状态不因为「没有聊天框」就消失。返回走了哪条通道，自检用得上。
+        function chatSay(text){
+            var s = String(text);
+            try{ log("[chat] " + s); }catch(e){ }
+            if(netActive() && chatSendOn()){
+                var ui = Vars.ui;
+                if(ui !== null && ui !== undefined){
+                    try{
+                        if(ui.chatfrag !== null && ui.chatfrag !== undefined){
+                            ui.chatfrag.addMessage(s);
+                            return "chat";
+                        }
+                    }catch(e){ log("chatSay failed: " + e); }
+                }
+            }
+            hint(s);
+            return "hint";
+        }
+
+        // v0.14.4（用户 2026-11-01）：播报要不要进服务器聊天框，做成设置项，默认关。
+        // 关掉时仍走 hint（本机淡出提示），状态不会因为「不想进聊天框」就消失。
+        function chatSendOn(){
+            try{ return Core.settings.getBool(CHAT_SEND_KEY, false) === true; }
+            catch(e){ return false; }
+        }
+
+        function toggleChatSend(){
+            var want = !chatSendOn();
+            try{ Core.settings.put(CHAT_SEND_KEY, want); }
+            catch(e){ log("save " + CHAT_SEND_KEY + " failed: " + e); }
+            log("chat broadcast = " + want);
+            return want;
+        }
+
+        // v0.14.5（用户 2026-11-01）：「做一个hud倍率自己调就好」。
+        // 只影响框角那两个原版控件（查看 / 取消）和它们上面的状态条，不影响游戏其它 HUD。
+        function hudScaleClamp(v){
+            var n = v;
+            if(!(n > 0)){ n = 1; }
+            if(n < HUD_SCALE_MIN){ n = HUD_SCALE_MIN; }
+            if(n > HUD_SCALE_MAX){ n = HUD_SCALE_MAX; }
+            return Math.round(n * 100) / 100;
+        }
+
+        function hudScale(){
+            var v = 1;
+            try{ v = Core.settings.getFloat(HUD_SCALE_KEY, 1); }
+            catch(e){ v = 1; }
+            return hudScaleClamp(v);
+        }
+
+        function hudScaleText(){
+            var s = String(hudScale());
+            return s + "×";
+        }
+
+        function hudScaleBtnText(){
+            return "倍率 " + hudScaleText();
+        }
+
+        function hudScaleRefresh(){
+            try{
+                if(hudScaleBtn !== null && hudScaleBtn !== undefined){
+                    hudScaleBtn.get().setText(hudScaleBtnText());
+                }
+            }catch(e){ log("hud scale label not updated"); }
+        }
+
+        function hudScaleSet(v){
+            var n = hudScaleClamp(v);
+            try{ Core.settings.put(HUD_SCALE_KEY, n); }
+            catch(e){ log("save " + HUD_SCALE_KEY + " failed: " + e); }
+            jobWidgetDrop();          // 按新倍率重建，下一帧 jobButtonsSync 会重做
+            log("hud scale = " + n);
+            return n;
+        }
+
+        function hudScaleStep(dir){
+            return hudScaleSet(hudScale() + (dir > 0 ? HUD_SCALE_STEP : -HUD_SCALE_STEP));
+        }
+
+        function chatTrim(s, max){
+            var v = String(s === null || s === undefined ? "" : s);
+            if(v.length > max){ v = v.substring(0, max) + "…"; }
+            return v;
+        }
+
+        function chatXY(b){
+            try{
+                if(b !== null && b !== undefined && b.tile !== null && b.tile !== undefined){
+                    return {x: b.tile.x, y: b.tile.y};
+                }
+            }catch(e){ }
+            return {x: "?", y: "?"};
+        }
+
+        // 启用：投递成功那一刻播报（真正的模型调用紧跟着开始）。
+        function jobChatStart(b, id, desc){
+            var p = chatXY(b);
+            var d = chatTrim(desc, 24);
+            var info = (d.length > 0 ? d : "（没写描述）") + "（job " + String(id) + "）";
+            chatSay(chatLine("Generating", p.x, p.y, info));
+        }
+
+        // 完成：终态只播报一次（jobTick 和 jobBoxTick 可能同时看到同一个作业）。
+        function jobChatDone(job){
+            if(job === null || job === undefined){ return; }
+            var st = String(job.state);
+            if(!isJobTerminal(st)){ return; }
+            var id = (job.id === undefined || job.id === null) ? "" : String(job.id);
+            if(id.length > 0){
+                if(CHAT_DONE[id] === true){ return; }
+                CHAT_DONE[id] = true;
+            }
+            var x = "?", y = "?";
+            try{
+                var o = job.origin;
+                if(o !== null && o !== undefined && o.x !== undefined){ x = o.x; y = o.y; }
+            }catch(e){ }
+            if(x === "?"){
+                var lb = lookupBuild(job);
+                var q = chatXY(lb);
+                if(q.x !== "?"){ x = q.x; y = q.y; }
+            }
+            var status, info;
+            if(st === "done"){
+                status = "Done";
+                var c = jobSevCounts(job), tpl = String(job.template || "");
+                info = (tpl.length > 0 ? tpl + " · " : "") + String(job.statements || 0) + " 条语句 · "
+                     + String(job.bytes_len || 0) + " 字节 · " + (c.err === 0 ? "0 ERR" : ("ERR " + c.err));
+            }else if(st === "rejected"){
+                status = "Rejected";
+                var c2 = jobSevCounts(job);
+                info = "静态检查有 ERR（" + c2.err + " 条）";
+            }else if(st === "cancelled"){
+                status = "Cancelled";
+                info = "已取消";
+            }else{
+                status = "Failed";
+                info = chatTrim(String(job.explanation || ""), 60);
+                if(String(info) === ""){ info = "没有说明"; }
+            }
+            chatSay(chatLine(status, x, y, info));
+        }
+
+        // 一个描述框 → 这块区域里每个处理器各投一个作业（P5 批量入口，v0.12.5）。
+        function startJobBatch(targets, desc, rect, improve){
+            var ws = wsAttach(rect, targets, desc);        // v0.14.0：这块框选 = 一个工作区快照
+            var box = {r: rect, ws: (ws === null ? null : String(ws.id)),
+                       ids: [], jobs: {}, pend: targets.length,
+                       started: Packages.java.lang.System.currentTimeMillis(),
+                       termAt: 0, lastPoll: 0};
+            jobBox = box;
+            jobBadge = null;
+            var failed = 0;
+            for(var i = 0; i < targets.length; i++){
+                (function(t){
+                    var payload = (improve === true) ? wsImprovePayload(ws, t.b) : null;
+                    jobSubmit(t.b, desc, function(res, why){
+                        box.pend--;
+                        if(res === null || res.id === undefined || res.id === null){
+                            failed++;
+                            hint("投递失败（@" + t.x + "," + t.y + "）：" + String(why));
+                        }else{
+                            var jid = String(res.id);
+                            box.ids.push(jid);
+                            box.jobs[jid] = res.job ? res.job : {id: jid, state: "queued", desc: desc};
+                            jobChatStart(t.b, jid, desc);     // v0.13.0：启用即播报
+                            wsRecordJob(ws, jid, desc);       // v0.14.0：工作区记住这次投递
+                        }
+                        if(box.pend === 0){
+                            if(box.ids.length === 0){
+                                jobBox = null;
+                                hint("这批作业一个也没投出去：" + String(why));
+                            }else{
+                                hint("已投 " + box.ids.length + " 个作业：点框右下角看进度；写入成功后框才消失（右键徽标关闭）"
+                                     + (ws === null ? "" : "；工作区「" + String(ws.name) + "」已保存，继续框选会复用"));
+                            }
+                        }
+                        jobBoxFinishIfDone();
+                    }, payload);
+                })(targets[i]);
+            }
+            return "batch:" + targets.length;
+        }
+
+        // v0.12.5：F3 松手只弹这一个框（用户：f3 后的窗口简化到只有一个描述框）。
+        // 框住的处理器有几个就投几个作业；矩形留着，直到这一批全部终态。
+        function openQuickJob(r){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var targets = [], i, ps = [];
+            try{ ps = regionSnapshot(r.x1, r.y1, r.x2, r.y2).processors || []; }catch(e){ ps = []; }
+            for(i = 0; i < ps.length; i++){
+                var pb = processorAt(ps[i].x, ps[i].y);
+                if(pb !== null){ targets.push({b: pb, x: ps[i].x, y: ps[i].y}); }
+            }
+            if(targets.length === 0){
+                hint("区域里没有处理器：拖框要把处理器框进去（F2 看全图清单）");
+                return "no processor in region";
+            }
+            var desc = "";
+            var wsId = wsFindActive(r), wsHit = (wsId === null) ? null : wsLoad(wsId);   // v0.14.0
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 描述 v" + MOD_VERSION
+                + (wsHit === null ? "" : " · 工作区「" + String(wsHit.name) + "」"));
+            d.cont.defaults().pad(6).left();
+            if(wsHit !== null){
+                d.cont.add("复用已有工作区：写完不消失，可继续改进；归档 / 释放见作业管理窗").row();
+            }
+            d.cont.add(targets.length === 1
+                        ? ("目标：@" + targets[0].x + "," + targets[0].y)
+                        : ("目标：区域里 " + targets.length + " 个处理器，每个处理器生成一段")).row();
+            d.cont.field("", function(v){ desc = String(v); }).width(520).row();
+            d.buttons.button("生成", function(){
+                var text = trimText(desc);
+                if(text.length === 0){ hint("先写一句描述：这段逻辑要做什么"); return; }
+                d.hide();
+                startJobBatch(targets, text, r);
+            }).width(120);
+            if(wsHit !== null){
+                var canImprove = false, pl = wsHit.procs || [];
+                for(i = 0; i < pl.length; i++){ if(String(pl[i].code || "").length > 0){ canImprove = true; } }
+                if(canImprove){
+                    d.buttons.button("改进上一版", function(){
+                        var text = trimText(desc);
+                        if(text.length === 0){ text = "在上一版的基础上继续改进"; }
+                        d.hide();
+                        startJobBatch(targets, text, r, true);
+                    }).width(140);
+                }
+            }
+            d.buttons.button("取消", function(){ d.hide(); }).width(120);
+            d.closeOnBack();
+            d.show();
+            return "quick job: " + targets.length + " processor(s)";
+        }
+
+        function lookupBuild(job){
+            try{
+                var o = job ? job.origin : null;
+                if(o === null || o === undefined){ return null; }
+                return processorAt(Number(o.x), Number(o.y));
+            }catch(e){ return null; }
+        }
+
+        function jobRowLabel(job){
+            var desc = String(job.desc || "");
+            if(desc.length > 20){ desc = desc.substring(0, 20) + "…"; }
+            return "#" + String(job.id) + "   " + stateCn(job.state) + "   " + desc;
+        }
+
+        function renderManagerDetail(host, d, job, b){
+            managerSeq++;                       // 作废还挂在路上的列表回调
+            try{ host.clear(); }catch(e){ return; }
+            host.add("作业 #" + String(job.id)
+                     + (job.retry_of ? ("（重跑自 " + String(job.retry_of) + "）") : "")).row();
+            host.add(jobProgressText(job)).row();
+            var think = jobReasoningLines(job, REASON_LINES, REASON_LINE);
+            if(think.length > 0){
+                var whole = jobReasoningText(job).length;
+                host.add("--- 模型思考（" + whole + " 字符"
+                         + (whole > REASON_LINES * REASON_LINE ? "，只显示开头" : "") + "）---").row();
+                for(var ti = 0; ti < think.length; ti++){ host.add(think[ti]).row(); }
+            }
+            var state = String(job.state);
+            var head = jobRetryHead(job);
+            if(head !== ""){ host.add(head).row(); }
+            var fs = job.findings || [];
+            for(var fi = 0; fi < fs.length && fi < 6; fi++){
+                host.add(String(fs[fi].sev) + " " + String(fs[fi].rid) + "  "
+                         + String(fs[fi].msg)).row();
+                if(String(fs[fi].msg).indexOf("finish_reason=length") >= 0){
+                    host.add("  （模型把预算用在思考上，sidecar 会自动加大预算重试）").row();
+                }
+            }
+            if(state === "done" && b !== null && b !== undefined && job.bytes_b64){
+                host.button("写入到 @" + b.tile.x + "," + b.tile.y, function(){
+                    hint(writeBuild(b, jobAsPlan(job)));
+                    d.hide();
+                }).width(280).row();
+            }
+            if(!isJobTerminal(state)){
+                host.button("取消这个作业", function(){
+                    jobCancel(String(job.id), function(canceled, why){
+                        hint(canceled !== null ? ("已取消 " + String(job.id)) : ("取消失败：" + why));
+                        renderManager(host, d);
+                    });
+                }).width(280).row();
+            }
+            host.button("返回列表", function(){ renderManager(host, d); }).width(280).row();
+        }
+
+        function renderManager(host, d){
+            var seq = ++managerSeq;
+            try{ host.clear(); }catch(e){ return; }
+            var s = jobBoxState();
+            host.add("— 本次框选 —").row();
+            if(s !== null && jobBox !== null && s.total > 0){
+                var ids = jobBox.ids || [];
+                for(var i = 0; i < ids.length; i++){
+                    (function(jid){
+                        var job = jobBox.jobs[jid] || {id: jid, state: "queued", desc: ""};
+                        host.button(jobRowLabel(job), function(){
+                            renderManagerDetail(host, d, job, lookupBuild(job));
+                        }).width(560).row();
+                    })(ids[i]);
+                }
+            }else{
+                host.add("（框选一块区域，写一句描述，作业就出现在这里）").row();
+            }
+            host.add("— 全部作业（最近 24 个）—").row();
+            httpJson("GET", "/jobs?all=1&limit=24", null, function(code, text){
+                if(seq !== managerSeq){ return; }
+                var res = parse(text);
+                if(code !== 200 || res === null || res.ok !== true){
+                    host.add("读不到作业列表：" + httpWhy(code, text)).row();
+                    return;
+                }
+                var rows = res.jobs || [];
+                if(rows.length === 0){ host.add("（sidecar 还没有作业）").row(); return; }
+                for(var k = 0; k < rows.length; k++){
+                    (function(job){
+                        host.button(jobRowLabel(job), function(){
+                            renderManagerDetail(host, d, job, lookupBuild(job));
+                        }).width(560).row();
+                    })(rows[k]);
+                }
+            });
+        }
+
+        function openJobManager(){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 作业管理 v" + MOD_VERSION);
+            d.cont.defaults().pad(4).left();
+            var host = new Packages.arc.scene.ui.layout.Table();
+            try{ d.cont.pane(host).height(320).width(600).row(); }catch(e){ d.cont.add(host).row(); }
+            d.buttons.button("刷新", function(){ renderManager(host, d); }).width(110);
+            d.buttons.button("工作区快照", function(){ openWorkspaceDialog(); }).width(140);   // v0.14.1
+            d.buttons.button("关闭框选框", function(){ hint(closeJobBox("框选框已关掉")); d.hide(); }).width(140);
+            d.buttons.button("关闭", function(){ d.hide(); }).width(110);
+            d.closeOnBack();
+            d.show();
+            renderManager(host, d);
+            return "job manager";
+        }
+
+        // ------------------------------------------------ 工作区界面（v0.14.1，W2/W3/W4）
+        // 仿蓝图对话框：上面是列表（进行中在前，已归档在后），点一行看预览，
+        // 预览里有「恢复选框 / 归档或恢复 / 释放 / 改名 / 导出 JSON / 继续改进」。
+        // 无头环境（Vars.ui === null）不建窗口，只跑纯函数，测试走 api.maiWorkspace*。
+
+        function wsTimeText(ms){
+            var n = Number(ms || 0);
+            if(n <= 0){ return "?"; }
+            try{
+                var d = new Date(n);
+                return (d.getMonth() + 1) + "-" + d.getDate() + " "
+                     + d.getHours() + ":" + (d.getMinutes() < 10 ? "0" : "") + d.getMinutes();
+            }catch(e){ return "?"; }
+        }
+
+        function wsRowLabel(ws){
+            var st = String(ws.state || "active") === "active" ? "进行中" : "已归档";
+            return String(ws.name) + "   · " + String((ws.procs || []).length) + " 台 · "
+                 + st + " · " + wsTimeText(ws.updated);
+        }
+
+        function wsBoundsText(ws){
+            var b = ws.bounds || {};
+            return "地图 " + String(ws.map || "?") + "  (" + String(b.x1) + "," + String(b.y1)
+                 + ")-(" + String(b.x2) + "," + String(b.y2) + ")";
+        }
+
+        function wsProcLines(ws, maxLines){
+            var out = [], list = ws.procs || [], i;
+            for(i = 0; i < list.length && i < maxLines; i++){
+                var r = list[i];
+                var n = 0;
+                try{ n = String(r.code || "").split("\n").length; }catch(e){ n = 0; }
+                out.push("@" + String(r.x) + "," + String(r.y) + "  " + String(r.block || "?")
+                         + "  " + (String(r.code || "").length > 0 ? (n + " 行") : "（还没写入过）")
+                         + (Number(r.accepted || 0) > 0 ? ("  · 写过 " + String(r.accepted) + " 次") : "")
+                         + (String(r.desc || "").length > 0 ? ("  · " + String(r.desc).substring(0, 24)) : ""));
+            }
+            if(list.length > maxLines){ out.push("… 还有 " + String(list.length - maxLines) + " 台"); }
+            if(out.length === 0){ out.push("（这个工作区还没有处理器）"); }
+            return out;
+        }
+
+        function wsJobLines(ws, maxLines){
+            var out = [], list = ws.jobs || [], i;
+            for(i = list.length - 1; i >= 0 && out.length < maxLines; i--){
+                var j = list[i];
+                out.push("#" + String(j.id) + "  " + stateCn(j.state || "queued") + "  "
+                         + String(j.desc || "").substring(0, 30) + "  " + wsTimeText(j.at));
+            }
+            if(out.length === 0){ out.push("（还没有投过作业）"); }
+            return out;
+        }
+
+        // 「恢复选框」：把框选框重新指到这个工作区的范围上。
+        // 故意不给 ids —— jobBoxState() 会因为 total === 0 不画徽标，也不会去轮询空作业。
+        function wsRestoreBox(id){
+            var ws = wsLoad(String(id));
+            if(ws === null){ return "工作区不存在"; }
+            var b = ws.bounds || {};
+            jobBox = {r: {x1: Number(b.x1), y1: Number(b.y1), x2: Number(b.x2), y2: Number(b.y2)},
+                      ws: String(ws.id), ids: [], jobs: {}, pend: 0,
+                      started: Packages.java.lang.System.currentTimeMillis(),
+                      termAt: 0, lastPoll: 0};
+            jobBadge = null;
+            wsCurrent = String(ws.id);
+            return "已恢复工作区「" + String(ws.name) + "」的选框（右键徽标或「关闭框选框」关闭）";
+        }
+
+        function wsRename(id, name){
+            var ws = wsLoad(String(id));
+            if(ws === null){ return "工作区不存在"; }
+            var nm = String(name || "").replace(/[\r\n\t]/g, " ").replace(/^\s+|\s+$/g, "");
+            if(nm.length === 0){ return "名字不能是空的"; }
+            if(nm.length > 40){ nm = nm.substring(0, 40); }
+            ws.name = nm;
+            if(wsSave(ws) === null){ return "改名失败：无法写入磁盘"; }
+            return "已改名为「" + nm + "」";
+        }
+
+        // 导出 / 导入：一个工作区就是一个 JSON 文件，给「换台机器接着干」用。
+        function wsExportText(id){
+            var ws = wsLoad(String(id));
+            if(ws === null){ return ""; }
+            try{ return JSON.stringify(ws, null, 2); }catch(e){ return ""; }
+        }
+
+        function wsExportToDisk(id){
+            var ws = wsLoad(String(id));
+            if(ws === null){ return "工作区不存在"; }
+            var text = wsExportText(id);
+            if(text === ""){ return "导出失败：JSON 序列化失败"; }
+            var root = wsRoot();
+            if(root === null){ return "导出失败：拿不到数据目录"; }
+            try{
+                var fi = root.child("export").child(String(ws.id) + ".json");
+                if(!fi.parent().exists()){ fi.parent().mkdirs(); }
+                fi.writeString(text, false);
+                return "已导出到 " + dirText(fi);
+            }catch(e){ return "导出失败：" + e; }
+        }
+
+        // 导入：校验必需字段，撞 id 就换一个（导入是「复制」，不覆盖现有的工作区）。
+        function wsImportText(text){
+            var obj = parse(String(text || ""));
+            if(obj === null || obj === undefined){ return ""; }
+            if(!obj.bounds || !obj.procs){ return ""; }
+            var ws = {schema: WS_SCHEMA, mod: MOD_VERSION,
+                      id: String(obj.id || ("ws" + wsStamp() + "_" + (++wsSeq))),
+                      name: String(obj.name || "导入的工作区").substring(0, 40),
+                      state: (String(obj.state) === "archived" ? "archived" : "active"),
+                      map: String(obj.map || "?"),
+                      world: obj.world || null,
+                      bounds: {x1: Number(obj.bounds.x1), y1: Number(obj.bounds.y1),
+                               x2: Number(obj.bounds.x2), y2: Number(obj.bounds.y2)},
+                      created: Number(obj.created || wsStamp()),
+                      updated: wsStamp(),
+                      notes: String(obj.notes || "").substring(0, 500),
+                      procs: [], jobs: [], archivedAt: Number(obj.archivedAt || 0)};
+            var src = obj.procs || [], i;
+            for(i = 0; i < src.length && i < 200; i++){
+                var r = src[i] || {};
+                ws.procs.push({k: String(r.k || ""), x: Number(r.x || 0), y: Number(r.y || 0),
+                               block: String(r.block || "?"), desc: String(r.desc || ""),
+                               links: r.links || null, code: String(r.code || ""),
+                               accepted: Number(r.accepted || 0), history: []});
+            }
+            if(wsLoad(ws.id) !== null){ ws.id = "ws" + wsStamp() + "_" + (++wsSeq); }
+            if(wsSave(ws) === null){ return ""; }
+            return ws.id;
+        }
+
+        // W3：把「同一块区域上一次的版本」当依据交给 sidecar。
+        function wsImprovePayload(ws, b){
+            if(ws === null || ws === undefined || b === null || b === undefined){ return null; }
+            var row = wsProcOf(ws, b);
+            var prevCode = (row === null) ? "" : String(row.code || "");
+            if(prevCode.length === 0){ return null; }        // 没写过就没有「上一版」可改进
+            var prevJob = "", prevFindings = [], list = ws.jobs || [], i;
+            for(i = list.length - 1; i >= 0; i--){
+                if(String(list[i].state) === "done" && String(list[i].id).length > 0){
+                    prevJob = String(list[i].id);
+                    break;
+                }
+            }
+            for(i = 0; i < (row.history || []).length; i++){
+                var h = row.history[i] || {};
+                if(h.findings && h.findings.length){
+                    for(var k = 0; k < h.findings.length && prevFindings.length < 12; k++){
+                        prevFindings.push(h.findings[k]);
+                    }
+                }
+            }
+            return {id: String(ws.id), name: String(ws.name || ""),
+                    notes: String(ws.notes || "").substring(0, 500),
+                    prevCode: prevCode, prevJob: prevJob, prevFindings: prevFindings};
+        }
+
+        // 「继续改进」：这个工作区里每一台写过代码的处理器，各投一单 mode=improve。
+        function wsImproveBatch(id, desc){
+            var ws = wsLoad(String(id));
+            if(ws === null){ return "工作区不存在"; }
+            var list = ws.procs || [], targets = [], i;
+            for(i = 0; i < list.length; i++){
+                var r = list[i];
+                if(String(r.code || "").length === 0){ continue; }
+                var b = buildAt(Number(r.x), Number(r.y));
+                if(b === null){ continue; }
+                targets.push({b: b, x: Number(r.x), y: Number(r.y)});
+            }
+            if(targets.length === 0){ return "工作区里没有写过代码的处理器，先新建一单"; }
+            var text = String(desc || "");
+            if(text.replace(/\s/g, "").length === 0){ text = "在上一版的基础上继续改进"; }
+            startJobBatch(targets, text, ws.bounds, true);
+            return "已投 " + String(targets.length) + " 个改进作业（工作区「" + String(ws.name) + "」）";
+        }
+
+        function renderWorkspaceDetail(host, d, ws){
+            managerSeq++;
+            try{ host.clear(); }catch(e){ return; }
+            host.add("工作区「" + String(ws.name) + "」  "
+                     + (String(ws.state) === "archived" ? "已归档" : "进行中")).row();
+            host.add(wsBoundsText(ws)).row();
+            host.add("创建 " + wsTimeText(ws.created) + " · 更新 " + wsTimeText(ws.updated)).row();
+            if(String(ws.notes || "").length > 0){ host.add("备注：" + String(ws.notes)).row(); }
+            host.add("--- 处理器（" + String((ws.procs || []).length) + " 台）---").row();
+            var pl = wsProcLines(ws, 8), i;
+            for(i = 0; i < pl.length; i++){ host.add(pl[i]).row(); }
+            host.add("--- 最近的作业 ---").row();
+            var jl = wsJobLines(ws, 3);
+            for(i = 0; i < jl.length; i++){ host.add(jl[i]).row(); }
+            host.button("恢复选框", function(){
+                hint(wsRestoreBox(ws.id));
+                d.hide();
+            }).width(160);
+            host.button("继续改进", function(){
+                hint(wsImproveBatch(ws.id, "在上一版的基础上继续改进"));
+                d.hide();
+            }).width(160).row();
+            host.button(String(ws.state) === "archived" ? "取消归档" : "归档", function(){
+                hint(String(ws.state) === "archived" ? wsRestore(ws.id) : wsArchive(ws.id));
+                renderWorkspaces(host, d);
+            }).width(160);
+            host.button("释放", function(){
+                hint(wsRelease(ws.id));
+                renderWorkspaces(host, d);
+            }).width(160);
+            host.button("导出 JSON", function(){
+                hint(wsExportToDisk(ws.id));
+            }).width(160).row();
+            host.button("返回列表", function(){ renderWorkspaces(host, d); }).width(160).row();
+        }
+
+        function renderWorkspaces(host, d){
+            var seq = ++managerSeq;
+            try{ host.clear(); }catch(e){ return; }
+            var rows = wsList(), i, shown = 0;
+            host.add("— 进行中的工作区 —").row();
+            for(i = 0; i < rows.length; i++){
+                if(String(rows[i].state) !== "active"){ continue; }
+                (function(id){
+                    var ws = wsLoad(id);
+                    if(ws === null){ return; }
+                    host.button(wsRowLabel(ws), function(){ renderWorkspaceDetail(host, d, ws); })
+                        .width(560).row();
+                })(String(rows[i].id));
+                shown++;
+            }
+            if(shown === 0){ host.add("（框选区域并投递作业后，这里会出现一个工作区）").row(); }
+            host.add("— 已归档 —").row();
+            var arc = 0;
+            for(i = 0; i < rows.length; i++){
+                if(String(rows[i].state) === "active"){ continue; }
+                (function(id){
+                    var ws = wsLoad(id);
+                    if(ws === null){ return; }
+                    host.button(wsRowLabel(ws), function(){ renderWorkspaceDetail(host, d, ws); })
+                        .width(560).row();
+                })(String(rows[i].id));
+                arc++;
+            }
+            if(arc === 0){ host.add("（归档过的工作区会放在这里）").row(); }
+            if(seq !== managerSeq){ return; }
+        }
+
+        // W4：蓝图列表。无头环境 Vars.schematics 是 null，必须能吃 null 回空数组。
+        function blueprintList(maxRows){
+            var out = [];
+            try{
+                if(Vars.schematics === null || Vars.schematics === undefined){ return out; }
+                var all = Vars.schematics.all();
+                if(all === null || all === undefined){ return out; }
+                var n = 0;
+                try{ n = (typeof all.size === "function") ? Number(all.size()) : Number(all.size); }catch(e){ n = 0; }
+                for(var i = 0; i < n && out.length < (maxRows || 24); i++){
+                    var s = null;
+                    try{ s = all.get(i); }catch(e){ s = null; }
+                    if(s === null || s === undefined){ continue; }
+                    var nm = "?";
+                    try{ nm = String(s.name()); }catch(e){ nm = String(s.name); }
+                    out.push({name: nm, width: Number(s.width || 0), height: Number(s.height || 0)});
+                }
+            }catch(e){ log("blueprint list failed: " + e); }
+            return out;
+        }
+
+        // 从蓝图建一个空工作区：范围按玩家脚下的方块摆（无头没玩家就摆在地图中心）。
+        function wsFromBlueprintName(name){
+            var rows = blueprintList(64), i, sch = null;
+            for(i = 0; i < rows.length; i++){
+                if(String(rows[i].name) === String(name)){ sch = rows[i]; break; }
+            }
+            if(sch === null){ return "找不到蓝图「" + String(name) + "」"; }
+            var cx = 0, cy = 0;
+            try{
+                if(Vars.player !== null && Vars.player !== undefined && Vars.player.tileOn){
+                    cx = Vars.player.tileOn().x; cy = Vars.player.tileOn().y;
+                }else{
+                    cx = Math.floor(Vars.world.width() / 2); cy = Math.floor(Vars.world.height() / 2);
+                }
+            }catch(e){ cx = 0; cy = 0; }
+            var w = Math.max(1, Number(sch.width || 1)), h = Math.max(1, Number(sch.height || 1));
+            var r = {x1: cx, y1: cy, x2: cx + w - 1, y2: cy + h - 1};
+            var ws = wsNew(r, String(sch.name));
+            if(ws === null){ return "创建工作区失败：无法写入磁盘"; }
+            ws.notes = "来自蓝图「" + String(sch.name) + "」(" + String(w) + "×" + String(h) + ")";
+            wsSave(ws);
+            wsCurrent = String(ws.id);
+            return "已从蓝图「" + String(sch.name) + "」创建工作区（" + String(w) + "×" + String(h) + "）";
+        }
+
+        function renderBlueprintPicker(host, d){
+            managerSeq++;
+            try{ host.clear(); }catch(e){ return; }
+            var rows = blueprintList(24);
+            host.add("— 从蓝图创建工作区（" + String(rows.length) + " 个）—").row();
+            if(rows.length === 0){
+                host.add("（没有蓝图，或者这个环境里读不到蓝图库）").row();
+            }
+            for(var i = 0; i < rows.length; i++){
+                (function(nm){
+                    host.button(String(nm), function(){
+                        hint(wsFromBlueprintName(nm));
+                        renderWorkspaces(host, d);
+                    }).width(560).row();
+                })(rows[i].name);
+            }
+            host.button("返回列表", function(){ renderWorkspaces(host, d); }).width(160).row();
+        }
+
+        function openWorkspaceDialog(){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 工作区快照 v" + MOD_VERSION);
+            d.cont.defaults().pad(4).left();
+            var host = new Packages.arc.scene.ui.layout.Table();
+            try{ d.cont.pane(host).height(320).width(600).row(); }catch(e){ d.cont.add(host).row(); }
+            d.buttons.button("刷新", function(){ renderWorkspaces(host, d); }).width(110);
+            d.buttons.button("从蓝图创建", function(){ renderBlueprintPicker(host, d); }).width(140);
+            d.buttons.button("关闭", function(){ d.hide(); }).width(110);
+            d.closeOnBack();
+            d.show();
+            renderWorkspaces(host, d);
+            return "workspace dialog";
+        }
+
+        // ---------------------------------------------------------- 区域面板（v0.6.0）
+        // F3 松手之后：先落盘快照，再要 /region 的链接候选，最后开这个面板。
+        // 面板里的「生成」按钮带着该处理器的引用直接开 AI 面板（showAiPanel(target)），
+        // 省掉「先把鼠标移到那个处理器上」这一步。
+        function buildAt(x, y){
+            var t = Vars.world.tile(x, y);
+            if(t === null || t === undefined){ return null; }
+            var b = t.build;                    // 字段，不是方法（t.build() 会报错）
+            if(b === null || b === undefined){ return null; }
+            return b;
+        }
+
+        // v0.8.1：单格选中处理器 = 开 AI 面板（v0.9.0 起 F4 热键已删，只有这一条路）。
+        function processorAt(x, y){
+            var b = buildAt(x, y);
+            return isProcessor(b) ? b : null;
+        }
+
+        function showRegionPanel(snap, head, candText){
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 区域 v" + MOD_VERSION);
+            d.cont.defaults().pad(4).left();
+            // 同 showAiPanel：pane() 交回来的是 ScrollPane（没有 add），所以自己造 host 给它托管。
+            var host = new Packages.arc.scene.ui.layout.Table();
+            host.defaults().pad(2).left();
+            buildRegionTable(host, snap, head, candText, function(x, y){
+                var b = buildAt(x, y);
+                if(b === null){ hint("@" + x + "," + y + " 上已经没有处理器了"); return; }
+                try{ d.hide(); }catch(e){ }
+                showAiPanel(b);
+            });
+            try{
+                d.cont.pane(host).height(320).width(620);
+            }catch(e){
+                log("pane() overload unavailable in the region panel: " + e);
+                d.cont.add(host).growX();
+            }
+            d.buttons.defaults().pad(4);
+            d.buttons.button("复制快照", function(){
+                try{ Core.app.setClipboardText(JSON.stringify(snap)); hint("快照已复制"); }
+                catch(e){ hint("复制失败：" + e); }
+            }).width(180);
+            d.buttons.button("关闭", function(){ d.hide(); }).width(140);
+            d.closeOnBack();
+            d.show();
+            return d;
+        }
+
+        // ---------------------------------------------------------- 处理器清单：扫描 + 面板（v0.7.0）
+        // 只读：复用本地快检（quickApi）与 linkNames，不动任何方块。
+        // Groups.build 里既有处理器也有普通建筑，用 isProcessor() 的鸭子类型筛。
+        function scanProcessors(){
+            var rows = [], api = quickApi(), build = gameBuild();
+            var t0 = Packages.java.lang.System.currentTimeMillis();
+            try{
+                Groups.build.each(function(g){
+                    try{
+                        if(!isProcessor(g)){ return; }
+                        var src = String(g.code);
+                        var row = {x: g.tile.x, y: g.tile.y,
+                                   lines: src.length === 0 ? 0 : src.split("\n").length,
+                                   err: 0, warn: 0, links: 0, rules: ""};
+                        try{ row.links = g.links.size; }catch(e){ }
+                        if(api !== null){
+                            var res = api.q.check(api.r, src, linkNames(g), {build: build});
+                            var seen = {};
+                            for(var i = 0; i < res.findings.length; i++){
+                                var f = res.findings[i];
+                                if(f.sev === "ERR"){ row.err++; } else { row.warn++; }
+                                var k = String(f.rid || "?");
+                                if(seen[k] !== true){ seen[k] = true; row.rules += (row.rules === "" ? "" : ",") + k; }
+                            }
+                        }
+                        rows.push(row);
+                    }catch(e){ }
+                });
+            }catch(e){ }
+            rows.sort(function(a, b){
+                if(b.err !== a.err){ return b.err - a.err; }
+                if(b.warn !== a.warn){ return b.warn - a.warn; }
+                if(a.y !== b.y){ return a.y - b.y; }
+                return a.x - b.x;
+            });
+            return {rows: rows, ms: Packages.java.lang.System.currentTimeMillis() - t0,
+                    api: api !== null};
+        }
+
+        function jumpTo(x, y){
+            try{ Core.camera.position.set(x * 8 + 4, y * 8 + 4); }catch(e){ log("camera jump failed: " + e); }
+        }
+
+        function listText(){
+            var res = scanProcessors();
+            var out = [listHead(res)];
+            for(var i = 0; i < res.rows.length && i < 40; i++){
+                out.push("  " + listRowLabel(res.rows[i]));
+            }
+            if(res.rows.length > 40){ out.push("  …还有 " + (res.rows.length - 40) + " 个"); }
+            return out.join("\n");
+        }
+
+        function showListPanel(res){
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 处理器清单 v" + MOD_VERSION);
+            d.cont.defaults().pad(4).left();
+            // 同 showRegionPanel：pane() 交回来的是 ScrollPane（没有 add），自己造 host 给它托管。
+            var host = new Packages.arc.scene.ui.layout.Table();
+            host.defaults().pad(2).left();
+            buildListTable(host, res, listHead(res), function(x, y){
+                jumpTo(x, y);
+                var b = buildAt(x, y);
+                try{ d.hide(); }catch(e){ }
+                if(b === null){ hint("@" + x + "," + y + " 上已经没有处理器了"); return; }
+                showAiPanel(b);
+            });
+            try{
+                d.cont.pane(host).height(340).width(560);
+            }catch(e){
+                log("pane() overload unavailable in the list panel: " + e);
+                d.cont.add(host).growX();
+            }
+            d.buttons.defaults().pad(4);
+            d.buttons.button("复制清单", function(){
+                try{ Core.app.setClipboardText(listText()); hint("处理器清单已复制"); }
+                catch(e){ hint("复制失败：" + e); }
+            }).width(160);
+            d.buttons.button("关闭", function(){ d.hide(); }).width(120);
+            d.closeOnBack();
+            d.show();
+            return d;
+        }
+
+        function openListPanel(){
+            var res = scanProcessors();
+            try{ showListPanel(res); }
+            catch(e){
+                log("list panel failed, falling back to text: " + e);
+                popup("Mlog辅助 · 处理器清单", listText());
+            }
+            return res;
+        }
+
+        // ---------------------------------------------------------- 动作
+
+        function linkList(b){
+            var out = [];
+            if(b === null){ return out; }
+            for(var i = 0; i < b.links.size; i++){
+                var l = b.links.get(i);
+                out.push({name: String(l.name), x: l.x, y: l.y});
+            }
+            return out;
+        }
+
+        // 这里原本有个 ping() 用 busy-wait「同步」等 /health —— 在真引擎里永远拿不到结果
+        // （回调走 Core.app.post 投递回主线程，而调用方就在主线程上）。探活请用 probeSidecar()。
+
+        // ---------------------------------------------------------- 本地快检（P2）
+        // scripts/quickcheck.js 与 scripts/rules.generated.js 由上面的 require 取到。
+        // 边界：这里只回答“单行 + 一张表”能定的事，不重写 sidecar 的 41 条规则。
+
+        function gameBuild(){
+            try{
+                var v = Packages.mindustry.core.Version.build;
+                return (v > 0) ? v : 0;      // 自定义构建是 -1，当作未知
+            }catch(e){ return 0; }
+        }
+
+        function quickApi(){
+            if(QUICK === null || RULES === null){ return null; }
+            return {q: QUICK, r: RULES};
+        }
+
+        // 返回 null 表示「不知道这个处理器的链接表」，返回 [] 表示「确实没有链接」。
+        // 这两个含义在 quickcheck 里分开用（stats.linkKnown）：把「不知道」当成「没有」
+        // 会让每一行链接槽里的名字都报 link-name-not-bound（v0.4.6 的假 WARN）。
+        // 返回 null 表示「不知道这个处理器的链接表」，返回 [] 表示「确实没有链接」。
+        // jobqueue 靠这个区分门禁口径：[] 是权威空表（幻觉链接名必须拦），null 是不知道（不判）。
+        function linkListOrNull(b){
+            if(b === null || b === undefined){ return null; }
+            try{
+                var out = [];
+                for(var i = 0; i < b.links.size; i++){
+                    var l = b.links.get(i);
+                    out.push({name: String(l.name), x: l.x, y: l.y});
+                }
+                return out;
+            }catch(e){ return null; }
+        }
+        function linkNames(b){
+            if(b === null || b === undefined){ return null; }
+            var out = [];
+            try{
+                for(var i = 0; i < b.links.size; i++){ out.push(String(b.links.get(i).name)); }
+            }catch(e){ return null; }
+            return out;
+        }
+
+        function quickRun(code, b){
+            var api = quickApi();
+            if(api === null){ return {missing: true, findings: [], stats: null}; }
+            var res = api.q.check(api.r, String(code || ""), linkNames(b), {build: gameBuild()});
+            res.missing = false;
+            return res;
+        }
+
+        function quickSummary(res){
+            if(res.missing){ return "本地快检：不可用（quickcheck.js 未加载）"; }
+            var err = 0, warn = 0, i;
+            for(i = 0; i < res.findings.length; i++){
+                if(res.findings[i].sev === "ERR"){ err++; } else { warn++; }
+            }
+            var st = res.stats;
+            return "本地快检：" + (err ? ("ERR " + err) : "无 ERR")
+                 + " / WARN " + warn
+                 + "    语句 " + st.statements
+                 + "    版本地板 build " + st.floor
+                 + "    " + linkLine(res)
+                 + (st.truncates ? "    ⚠ 超过 1000 条会被截断" : "")
+                 + (st.linkKnown === false
+                    ? "\n（链接表未知：读不到 LogicDialog.executor，本次跳过链接槽判据）"
+                    : "");
+        }
+
+        function quickLines(res){
+            var out = [];
+            for(var i = 0; i < res.findings.length; i++){
+                var f = res.findings[i];
+                out.push("L" + f.line + " " + f.sev + " [" + (f.rid || "-") + "] " + f.msg);
+            }
+            return out;
+        }
+
+        // ---------------------------------------------------------- 区域快照（P3）
+        // 只读扫描：交出「方块表 + 处理器表」，sidecar 用它算链接候选。
+        // 终点仍是逻辑@config：候选 -> /plan 或 /compose -> bytes_b64 -> build.configure()，
+        // 和游戏自己的配置通道是同一份载荷（LogicBlock.compress；联机时服务端应用，
+        // LogicBlock.java:65-69），本地写入也是同一个调用，所以两条路不需要分开实现。
+        // 引擎坑（v160.7 实测）：tile.block() 是方法，tile.build 是字段。
+        var SNAP_MAX_CELLS = 4096;
+
+        // LogicBlock 是「方块」类，真正的建筑是它的内部类 LogicBuild（LogicBlock$LogicBuild），
+        // 所以 instanceof LogicBlock 永远为假（v160.7 实测）。跟 targetBuild() 一样用鸭子类型：
+        // executor + code 这两个字段只有逻辑建筑才有。
+        function isProcessor(bld){
+            try{
+                return bld !== null && bld !== undefined
+                       && bld.executor !== undefined && bld.code !== undefined;
+            }catch(e){ return false; }
+        }
+
+        function tileBlockName(tile, bld){
+            try{
+                if(bld !== null && bld !== undefined){ return String(bld.block.name); }
+                return String(tile.block().name);
+            }catch(e){ return "?"; }
+        }
+
+        // ------------------------------------------------------- v0.12.9 快照补全
+        // 「这片区域有什么」不能只有方块名。引擎事实（v160.7）：库存挂在建筑上 ——
+        // bld.items 是 ItemModule、bld.liquids 是 LiquidModule，没有这两样的建筑上它们是 null；
+        // 一个 2x2 方块在四个格子上是同一个建筑（同一个 bld），所以库存/队伍必须按建筑身份去重，
+        // 而 grid / blocks 是按格计数 —— 两者别混（container 2x2 = grid 4 格、stores 1 条）。
+        var SNAP_MAX_STORES = 16;
+
+        // 引擎坑（v160.7 实测，2026-10-31）：arc 的 Seq 既有 public int size 字段、也有 size()
+        // 方法；普通 Seq 上 Rhino 取到的是字段（数字），但 EntityGroup 自己又声明了一遍
+        // size()（mindustry/entities/EntityGroup.class），子类方法把继承来的字段挡住了 ——
+        // 于是 Groups.unit.size 是个函数。写成 i < seq.size 会永远不成立（循环一次都不跑，
+        // 单位数静默变 0），所以统一走这里：先当数字，不行再当函数调。
+        function seqSize(seq){
+            if(seq === null || seq === undefined){ return 0; }
+            var v = 0;
+            try{ v = seq.size; }catch(e){ v = 0; }
+            if(typeof v === "number"){ return v; }
+            try{ v = seq.size(); }catch(e){ v = 0; }
+            return typeof v === "number" ? v : 0;
+        }
+
+        function stockOf(mod, seq){
+            // mod: ItemModule / LiquidModule（可能 null）；seq: 内容表（Vars.content.items() 等）
+            var out = {}, total = 0, i;
+            if(mod === null || mod === undefined || seq === null || seq === undefined){
+                return {v: out, n: 0};
+            }
+            var n = seqSize(seq);
+            for(i = 0; i < n; i++){
+                var c = seq.get(i), v = 0;
+                try{ v = Number(mod.get(c)); }catch(e){ v = 0; }
+                if(!(v > 0)){ continue; }
+                out[String(c.name)] = Math.round(v * 100) / 100;
+                total += v;
+            }
+            return {v: out, n: total};
+        }
+
+        function addInto(dst, src){
+            for(var k in src){
+                if(!Object.prototype.hasOwnProperty.call(src, k)){ continue; }
+                dst[k] = (dst[k] || 0) + src[k];
+            }
+        }
+
+        function countKeys(o){
+            var n = 0;
+            for(var k in o){ if(Object.prototype.hasOwnProperty.call(o, k)){ n++; } }
+            return n;
+        }
+
+        function stockText(o, max){
+            var parts = [], n = 0, k;
+            for(k in o){
+                if(!Object.prototype.hasOwnProperty.call(o, k)){ continue; }
+                n++;
+                if(n <= max){ parts.push(k + " " + o[k]); }
+            }
+            if(n > max){ parts.push("…还有 " + (n - max) + " 种"); }
+            return n === 0 ? "无" : parts.join("、");
+        }
+
+        // 单位不在方块网格里，得走 Groups.unit 再按 tile 落点筛。坐标是世界像素，
+        // 除以 Vars.tilesize（8）才是 tile 坐标。
+        // 引擎坑（v160.7 实测，2026-10-31）：Groups.unit 是 EntityGroup，它把继承来的
+        // Seq.get 挡住了 —— typeof Groups.unit.get 是 undefined（`Cannot find function get`），
+        // 而 Groups.unit.each / rawSeq() 都在。所以先拿 rawSeq() 的底层 Seq 按索引走，
+        // 拿不到再退回 each 回调；两条路都留，因为哪条能用取决于引擎版本。
+        function unitStats(x1, y1, x2, y2, myTeam){
+            var res = {total: 0, types: {}, teams: {}, enemies: 0, enemyTypes: {}};
+            var seq = null;
+            try{ seq = Packages.mindustry.gen.Groups.unit; }catch(e){ return res; }
+            if(seq === null || seq === undefined){ return res; }
+            var ts = 8;
+            try{ ts = Number(Vars.tilesize); }catch(e){ ts = 8; }
+            if(!(ts > 0)){ ts = 8; }
+
+            function count1(u){
+                if(u === null || u === undefined){ return; }
+                var ux = 0, uy = 0, tn = "?", tm = "?";
+                try{ ux = Math.floor(Number(u.x) / ts); uy = Math.floor(Number(u.y) / ts); }
+                catch(e){ return; }
+                if(ux < x1 || ux > x2 || uy < y1 || uy > y2){ return; }
+                try{ tn = String(u.type.name); }catch(e){ }
+                try{ tm = String(u.team.name); }catch(e){ }
+                res.total += 1;
+                res.types[tn] = (res.types[tn] || 0) + 1;
+                res.teams[tm] = (res.teams[tm] || 0) + 1;
+                if(myTeam !== null && tm !== myTeam){
+                    res.enemies += 1;
+                    res.enemyTypes[tn] = (res.enemyTypes[tn] || 0) + 1;
+                }
+            }
+
+            var list = seq;
+            try{
+                if(typeof seq.rawSeq === "function"){
+                    var raw = seq.rawSeq();
+                    if(raw !== null && raw !== undefined){ list = raw; }
+                }
+            }catch(e){ list = seq; }
+
+            var getter = null;
+            try{ getter = list.get; }catch(e){ getter = null; }
+            if(typeof getter === "function"){
+                var n = seqSize(list);
+                for(var i = 0; i < n; i++){
+                    var u = null;
+                    try{ u = list.get(i); }catch(e){ u = null; }
+                    count1(u);
+                }
+                return res;
+            }
+            try{ list.each(function(u){ count1(u); }); }catch(e){ }
+            return res;
+        }
+
+        function regionSnapshot(x1, y1, x2, y2){
+            var W = Vars.world;
+            var mapName = "?";
+            try{ mapName = String(Vars.state.map.name()); }catch(e){ }
+            x1 = Math.floor(x1); y1 = Math.floor(y1);
+            x2 = Math.floor(x2); y2 = Math.floor(y2);
+            if(x1 > x2){ var a = x1; x1 = x2; x2 = a; }
+            if(y1 > y2){ var b0 = y1; y1 = y2; y2 = b0; }
+            var maxX = W.width() - 1, maxY = W.height() - 1;
+            if(x1 < 0){ x1 = 0; }
+            if(y1 < 0){ y1 = 0; }
+            if(x2 > maxX){ x2 = maxX; }
+            if(y2 > maxY){ y2 = maxY; }
+            var grid = [], procs = [], truncated = false, x, y;
+            // v0.12.9：方块计数 / 库存 / 单位 / 敌方
+            var blocks = {}, items = {}, liquids = {}, stores = [], seenIds = {}, enemyBlocks = 0;
+            var itemsSeq = null, liquidsSeq = null;
+            try{ itemsSeq = Vars.content.items(); }catch(e){ itemsSeq = null; }
+            try{ liquidsSeq = Vars.content.liquids(); }catch(e){ liquidsSeq = null; }
+            var myTeam = null;
+            try{
+                var pl = localPlayer();
+                if(pl !== null && pl !== undefined){ myTeam = String(pl.team().name); }
+            }catch(e){ myTeam = null; }
+            for(x = x1; x <= x2 && !truncated; x++){
+                for(y = y1; y <= y2; y++){
+                    var tile = W.tile(x, y);
+                    if(tile === null || tile === undefined){ continue; }
+                    var bld = tile.build;
+                    var name = tileBlockName(tile, bld);
+                    if(name === "air"){ continue; }
+                    if(grid.length >= SNAP_MAX_CELLS){ truncated = true; break; }
+                    grid.push({x: x, y: y, block: name});
+                    blocks[name] = (blocks[name] || 0) + 1;
+                    if(isProcessor(bld)){
+                        procs.push({x: x, y: y, block: name,
+                                    code: String(bld.code === null ? "" : bld.code),
+                                    links: linkList(bld)});
+                    }
+                    if(bld !== null && bld !== undefined){
+                        // 同一个建筑在它占的每个格子上都出现一次：库存只算一遍。
+                        var bid = null;
+                        try{ bid = String(bld.id); }catch(e){ bid = null; }
+                        if(bid === null || bid === "undefined"){ bid = "t" + x + "," + y; }
+                        if(seenIds[bid] !== true){
+                            seenIds[bid] = true;
+                            var tname = "?";
+                            try{ tname = String(bld.team.name); }catch(e){ }
+                            if(myTeam !== null && tname !== myTeam){ enemyBlocks += 1; }
+                            var si = stockOf(bld.items, itemsSeq);
+                            var sl = stockOf(bld.liquids, liquidsSeq);
+                            addInto(items, si.v);
+                            addInto(liquids, sl.v);
+                            if((countKeys(si.v) > 0 || countKeys(sl.v) > 0)
+                               && stores.length < SNAP_MAX_STORES){
+                                stores.push({x: x, y: y, block: name, team: tname,
+                                             items: si.v, liquids: sl.v});
+                            }
+                        }
+                    }
+                }
+            }
+            var us = unitStats(x1, y1, x2, y2, myTeam);
+            var enemies = {units: us.enemies, blocks: enemyBlocks, types: us.enemyTypes};
+            if(myTeam === null){
+                enemies.note = "no local player, so 'enemy' has no meaning here; both counts are 0";
+            }
+            return {schema: 1, mod: MOD_VERSION, build: gameBuild(), map: mapName,
+                    world: {width: W.width(), height: W.height()},
+                    bounds: {x1: x1, y1: y1, x2: x2, y2: y2},
+                    cells: grid.length, truncated: truncated,
+                    grid: grid, processors: procs,
+                    blocks: blocks, items: items, liquids: liquids, stores: stores,
+                    units: {total: us.total, types: us.types, teams: us.teams},
+                    enemies: enemies};
+        }
+
+        // Last non-empty line of a diagnostic, trimmed: the user needs one line
+        // of cause, not a Java stack (a refused socket used to be dumped whole).
+        function lastLine(t){
+            var parts = String(t === null || t === undefined ? "" : t).split("\n");
+            var s = "", i;
+            for(i = 0; i < parts.length; i++){
+                var q = parts[i];
+                while(q.length && (q.charAt(0) === " " || q.charAt(0) === "\t")){ q = q.substring(1); }
+                if(q.length){ s = q; }
+            }
+            return s.length > 200 ? s.substring(0, 200) + "…" : s;
+        }
+        function httpWhy(code, body){
+            var t = String(body === null || body === undefined ? "" : body);
+            if(code === "" || code === "-1" || code === -1 || code === undefined || code === null){
+                if(t.indexOf("Connection refused") >= 0){
+                    return "sidecar 未运行（连接被拒绝，" + base + "）\n先启动 sidecar：python tools/logicd.py";
+                }
+                if(t.indexOf("timed out") >= 0 || t.indexOf("SocketTimeout") >= 0){
+                    return "sidecar 没回应（超时，" + base + "）\n确认 python tools/logicd.py 仍在运行";
+                }
+                return "连不上 sidecar（" + base + "）\n先启动 sidecar：python tools/logicd.py";
+            }
+            return "sidecar 返回 " + code;
+        }
+        // 侧车进程比模组旧时，/jobs 会回 404 no such endpoint -- 玩家看到这句不知道要干什么，
+        // 而唯一的解法就是重启那个 python 进程，所以直接把解法写进错误里。
+        function sidecarStaleHint(t){
+            var s = String(t === null || t === undefined ? "" : t);
+            if(s.indexOf("no such endpoint") < 0){ return null; }
+            return "sidecar 是旧版本，不认识这个接口（" + base + "）\n"
+                 + "关掉旧的 sidecar 进程再重新启动：python tools/logicd.py --port 8765\n"
+                 + "（改过 tools/logicd.py 后必须重启，模组连的是内存里的旧代码）";
+        }
+        function jobWhy(code, text, res){
+            var hint = sidecarStaleHint(text) || sidecarStaleHint(res && res.error);
+            if(hint !== null){ return hint; }
+            return (res && res.error) ? String(res.error) : httpWhy(code, text);
+        }
+        function regionCandidatesText(raw){
+            var s = String(raw === null || raw === undefined ? "" : raw);
+            var nl = s.indexOf("\n");
+            var code = nl < 0 ? "" : s.substring(0, nl);
+            var body = nl < 0 ? s : s.substring(nl + 1);
+            var res = parse(body);
+            if(code !== "200" || res === null || res.ok !== true){
+                var why = httpWhy(code, body);
+                var diag = (code === "200" && res !== null && res.message)
+                    ? String(res.message) : lastLine(body);
+                return diag.length > 0 ? why + "\n\n" + diag : why;
+            }
+            var out = ["区域 " + res.bounds.x1 + "," + res.bounds.y1 + " - "
+                       + res.bounds.x2 + "," + res.bounds.y2
+                       + "   方块 " + res.cells
+                       + (res.truncated ? "（已截断）" : "")];
+            var ps = res.processors || [], i, j;
+            if(ps.length === 0){ out.push("这个区域里没有处理器"); }
+            for(i = 0; i < ps.length; i++){
+                var p = ps[i];
+                out.push("");
+                out.push("@" + p.x + "," + p.y + " " + p.block + "   链接 "
+                         + p.links.length + "：" + (p.links.length ? p.links.join(", ") : "无"));
+                var ms = p.missing || [];
+                for(j = 0; j < ms.length; j++){
+                    out.push("  ⚠ " + ms[j].name + " 代码在用，但没绑上，也不在候选里"
+                             + (ms[j].suggest ? "（同类可用 " + ms[j].suggest + "）"
+                                              : "（本区域没有同类方块）"));
+                }
+                var cs = p.candidates || [];
+                if(cs.length === 0){ out.push("  10 格内没有可连的方块"); }
+                for(j = 0; j < cs.length && j < 12; j++){
+                    out.push("  " + cs[j].name + "  ←  " + cs[j].block
+                             + " @" + cs[j].x + "," + cs[j].y
+                             + "   " + cs[j].dist + " 格"
+                             + (cs[j].used ? "   [代码正在用]" : ""));
+                }
+                if(cs.length > 12){ out.push("  …还有 " + (cs.length - 12) + " 个"); }
+            }
+            out.push("");
+            out.push("按住 F3 点一下处理器，用一句话生成，写入走 logic@config（configure）。");
+            return out.join("\n");
+        }
+        function regionText(snap){
+            var p = snap.processors, i;
+            var out = ["区域 " + snap.bounds.x1 + "," + snap.bounds.y1 + " - "
+                       + snap.bounds.x2 + "," + snap.bounds.y2
+                       + "   方块 " + snap.cells + (snap.truncated ? "（已截断）" : "")
+                       + "   处理器 " + p.length];
+            // v0.12.9：区域里还有什么（库存 / 单位 / 敌人），一行说清
+            var un = snap.units || {total: 0}, en = snap.enemies || {units: 0, blocks: 0};
+            out.push("  方块 " + countKeys(snap.blocks || {}) + " 种"
+                     + "   物品 " + stockText(snap.items || {}, 6)
+                     + "   液体 " + stockText(snap.liquids || {}, 4)
+                     + "   单位 " + un.total + "（敌方单位 " + en.units
+                     + "，敌方建筑 " + en.blocks + "）");
+            for(i = 0; i < p.length; i++){
+                out.push("  @" + p[i].x + "," + p[i].y + " " + p[i].block
+                         + "  链接 " + p[i].links.length);
+            }
+            return out.join("\n");
+        }
+        // ---------------------------------------------------------- 控制台接口
+        var api = {
+            maiVersion: function(){ return "mlog-auxiliary " + MOD_VERSION + "  sidecar=" + base; },
+        // 调试/测试用：同步原生请求，返回 "<code>" + 换行 + 正文。会占住调用线程到超时，
+        // 只对 localhost 用；正式路径仍然是 httpJson + Core.app.post。
+        maiHttpRaw: function(method, url, body){ var r = httpRaw(method, String(url), body === undefined ? null : body); return r.code + "\n" + r.text; },
+            maiPing:    function(){
+                httpJson("GET", "/health", null, function(code, text){
+                    var out = "sidecar " + base + " -> " + code + "\n" + String(text).substring(0, 300);
+                    print("[mai] " + out);
+                    if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 连接", out); }
+                });
+                return "已发出 health 请求（结果稍后弹窗）";
+            },
+            maiSel:     function(){ return describe(targetBuild()); },
+            maiUndo:    function(){ return undo(); },
+            maiCheck:   function(code){
+                var b = targetBuild();
+                var src = (code === undefined || code === null) ? (b === null ? "" : String(b.code)) : String(code);
+                var res = quickRun(src, b);
+                if(res.missing){ return "本地快检不可用"; }
+                var out = [quickSummary(res)];
+                var ls = quickLines(res);
+                for(var i = 0; i < ls.length; i++){ out.push(ls[i]); }
+                return out.join("\n");
+            },
+            maiScan:    function(){
+                var api = quickApi();
+                if(api === null){ return "本地快检不可用"; }
+                var build = gameBuild();
+                var t0 = Packages.java.lang.System.currentTimeMillis();
+                var n = 0, bad = 0, errs = 0, warns = 0;
+                var byRule = {};
+                Groups.build.each(function(g){
+                    try{
+                        if(g.executor === undefined || g.code === undefined){ return; }
+                        var res = api.q.check(api.r, String(g.code), linkNames(g), {build: build});
+                        n++;
+                        if(res.findings.length > 0){ bad++; }
+                        for(var i = 0; i < res.findings.length; i++){
+                            var f = res.findings[i];
+                            if(f.sev === "ERR"){ errs++; } else { warns++; }
+                            var k = f.rid || "(no-id)";
+                            byRule[k] = (byRule[k] || 0) + 1;
+                        }
+                    }catch(e){ }
+                });
+                var ms = Packages.java.lang.System.currentTimeMillis() - t0;
+                var out = ["本地快检扫描：" + n + " 个处理器，" + bad
+                         + " 个有命中（ERR " + errs + " / WARN " + warns + "），" + ms + " ms"];
+                for(var k in byRule){ out.push("  " + k + "  " + byRule[k]); }
+                return out.join("\n");
+            }
+        };
+
+        // 调试入口也挂到控制台（设置界面用不了时的退路）
+        api.maiDiag = function(){ return diagText(); };
+        api.maiSettings = function(){ return registerSettings() ? "registered" : "no ui"; };
+        api.maiSelfTest = function(){ return selfTest(); };
+        api.maiUndo = function(){ return undo(); };
+        api.maiUndoInfo = function(){ return undoInfo(); };
+        // 落盘路径的真引擎自检（ui smoke 用）：写一份假快照进 <dataDir>/mlogauxiliary/selftest，
+        // 读回来比对 x/y/code，然后删掉文件和目录 —— 只在测试里跑，正常游戏不碰这个目录。
+        api.maiUndoProbe = function(){
+            var root = null, made = false, name = null, out = "no-dir";
+            try{
+                root = Vars.dataDirectory.child("mlogauxiliary").child("selftest");
+                if(!root.exists()){ root.mkdirs(); made = true; }
+                var b = {tile: {x: 3, y: 4}, code: "set n 0\nprint n\nend", links: {size: 0}};
+                name = saveUndoTo(root, b, "selftest");
+                var back = parse(root.child(name).readString("UTF-8"));
+                var ok = (back !== null && back.x === 3 && back.y === 4 && back.code === b.code
+                          && back.links.length === 0);
+                root.child(name).delete();
+                if(made){ root.deleteDirectory(); }
+                out = ok ? ("ok " + name) : "bad";
+            }catch(e){ out = "fail " + e; }
+            return out;
+        };
+        // 模型档设置的自检（ui smoke 用）：存三件套 -> 看 llmText 是否显示模型、
+        // 是否绝不显示密钥明文、是否把「还没提交」说出来 -> 原样恢复。
+        api.maiLlmProbe = function(){
+            try{
+                var prev = {u: llmGet(LLM_URL_KEY, ""), m: llmGet(LLM_MODEL_KEY, ""),
+                            k: llmGet(LLM_KEY_KEY, "")};
+                var boot = llmText();
+                if(boot.indexOf("未配置模型") < 0){ return "bad tier text: " + boot; }
+                llmSave(LLM_URL_KEY, "https://example.invalid/v1/chat/completions");
+                llmSave(LLM_MODEL_KEY, "m-probe");
+                llmSave(LLM_KEY_KEY, "sk-probe-9999");
+                var t = llmText();
+                if(t.indexOf("m-probe") < 0){ return "model not shown: " + t; }
+                if(t.indexOf("sk-probe") >= 0){ return "key leaked into the text: " + t; }
+                if(t.indexOf("9999") >= 0){ return "key tail leaked into the text: " + t; }
+                if(t.indexOf("未同步") < 0){ return "pending key not called out: " + t; }
+                llmSave(LLM_URL_KEY, prev.u);
+                llmSave(LLM_MODEL_KEY, prev.m);
+                llmSave(LLM_KEY_KEY, prev.k);
+                return "ok " + t.length;
+            }catch(e){ return "fail " + e; }
+        };
+        api.maiAi = function(){ showAiPanel(); return "opened"; };
+        api.maiReview = function(){ return reviewText(); };
+        // 测试钩子（tests/mlogauxiliary/run_ui_smoke.py 用）：喂一个假 statements
+        // （每个孩子代表一条语句）+ 一组 findings，返回 "行号:x,y:颜色" 清单。
+        // 真机上没人调它，行内箭头走 refreshReview -> syncArrows。
+        api.maiArrows = function(statements, findingsJson, drawable){
+            var res = {findings: [], stats: null};
+            if(findingsJson){
+                var f = parse(String(findingsJson));
+                if(f !== null && f !== undefined){ res.findings = f; }
+            }
+            var n = syncArrows(res, statements, drawable);
+            var out = ["arrows " + n];
+            for(var i = 0; i < arrowRows.length; i++){
+                var r = arrowRows[i];
+                out.push(r.line + ":" + Math.round(r.img.x) + "," + Math.round(r.img.y)
+                         + ":" + sevNameOf(r.img) + ":" + r.items + ":" + (r.img.visible ? "v" : "h"));
+            }
+            return out.join(" ");
+        };
+        // 区域快照的三个出口：JSON（给 sidecar / 剪贴板）、纯文本（控制台读）、
+        // 以及直接 POST /region 拿链接候选。F7 框选等 UI 之后再接，这里先给控制台。
+        api.maiSnapshot = function(x1, y1, x2, y2){
+            return JSON.stringify(regionSnapshot(x1, y1, x2, y2));
+        };
+        api.maiSnapshotText = function(x1, y1, x2, y2){
+            return regionText(regionSnapshot(x1, y1, x2, y2));
+        };
+        // 区域快照一律异步：回调由 httpJson 用 Core.app.post 投递回主线程，而控制台与热键
+        // 都跑在主线程 —— 在那里 busy-wait 只能等到超时（v0.4.2 的 F7 返回字面量 "pending"）。
+        function regionAroundBox(x1, y1, x2, y2){
+            httpJson("POST", "/region", JSON.stringify({snapshot: regionSnapshot(x1, y1, x2, y2)}),
+                     function(code, text){
+                         if(Vars.ui === null){ return; }
+                         Vars.ui.showText("Mlog辅助 · 链接候选", regionCandidatesText(code + "\n" + text));
+                     });
+        }
+        api.maiRegion = function(x1, y1, x2, y2){
+            regionAroundBox(x1, y1, x2, y2);
+            return "已发出区域快照（结果稍后弹窗）";
+        };
+        api.maiRegionAround = function(r){
+            var b = targetBuild();
+            if(b === null){ return "光标下没有处理器"; }
+            var n = (r === undefined || r === null) ? 10 : Math.floor(r);
+            return api.maiRegion(b.tile.x - n, b.tile.y - n, b.tile.x + n, b.tile.y + n);
+        };
+
+        // ---------------------------------------------------------- F3 拖拽框选（v0.4.8）
+        // 规划里 F7 本来就是「框选矩形」（docs/Mlog辅助-规划.md:99），v0.4.2 只做了只读的一半：
+        // 以鼠标下的处理器为中心扫固定半径。F8 在游戏里是控制台
+        // （Mindustry-Source/core/src/mindustry/input/Binding.java:107 console = KeyCode.f8），
+        // F9/F10 也被占，所以框选另开一个空着的键：F3。
+        // 拖拽时的高亮画在世界坐标上（Events.run(Trigger.draw) + Lines.rect），不往场景树里塞元素：
+        // v0.4.1 那次崩溃就是自造结果区引起的，能画的地方就不建 UI。
+        // v0.5.0 起高亮照抄原版选框（InputHandler.drawSelection）：2px 双描边 + 尺寸文本，无填充。
+        // 状态机（纯函数，控制台/自检直接驱动）：**F3 就是鼠标左键**。
+        // 按住 F3 = 按下左键（起点 = 此刻鼠标格），移动鼠标改终点，松开 F3 = 抬起左键并出快照。
+        // 没有「就绪」这个中间态（v0.4.9 是「按 F3 就绪 + 按左键拖」，用户 2026-10-30 要的就是按下即拉框）。
+        var selHolding = false, selDragging = false;
+        var selStartX = 0, selStartY = 0, selCurX = 0, selCurY = 0;
+
+        // 屏幕 -> 格子。mouseWorldX/Y 已经过相机变换，tileWorld 再按 tilesize 取整。
+        function mouseTile(){
+            var t = Vars.world.tileWorld(Core.input.mouseWorldX(), Core.input.mouseWorldY());
+            if(t === null || t === undefined){ return null; }
+            return {x: t.x, y: t.y};
+        }
+
+        // 拖拽方向不重要：左上到右下、右下到左上必须给出同一个矩形。
+        function selRect(ax, ay, bx, by){
+            var x1 = Math.min(ax, bx), y1 = Math.min(ay, by);
+            var x2 = Math.max(ax, bx), y2 = Math.max(ay, by);
+            return {x1: x1, y1: y1, x2: x2, y2: y2, w: x2 - x1 + 1, h: y2 - y1 + 1};
+        }
+
+        // selPress = 按下左键，selRelease = 抬起左键。F3 的 keyDown/keyUp 边沿直接映射到这两个上。
+        function selPress(x, y){
+            if(selDragging){ return false; }
+            selHolding = true;
+            selDragging = true;
+            selStartX = x; selStartY = y; selCurX = x; selCurY = y;
+            return true;
+        }
+        function selMove(x, y){
+            if(!selDragging){ return false; }
+            selCurX = x; selCurY = y;
+            return true;
+        }
+        function selBox(){ return selRect(selStartX, selStartY, selCurX, selCurY); }
+        function selCancel(){ selHolding = false; selDragging = false; }
+        function selRelease(){
+            if(!selDragging){ return null; }
+            var r = selBox();
+            selCancel();
+            return r;
+        }
+
+        // 高亮参数照原版选框：**左下角 + 宽高**（Lines.rect(x,y,w,h)），不是中心点。
+        // 原版见 Mindustry-Source/core/src/mindustry/input/InputHandler.java:1758-1795 drawSelection()。
+        // 还要再退半格：Tile.worldx() 返回 x*tilesize（Tile.java:166-172 —— 那是格子的**中心**），
+        // 所以格子 (x1,y1) 的左下角是 (x1-0.5)*8。原版也是这么算的：Placement.java:380-390
+        // drawResult.x = x*tilesize - block.size*scaling*tilesize/2（air：size 1、scaling 1 ⇒ 减 4）。
+        // v0.6.0 漏了这个半格，框整体偏右上角半个格子（用户实测）。
+        function selDrawArgs(r){
+            return {x: (r.x1 - 0.5) * 8, y: (r.y1 - 0.5) * 8, w: r.w * 8, h: r.h * 8};
+        }
+
+        // 原版选框没有半透明填充：Lines.stroke(2) 两道描边，
+        // 先 accentBack 画一条 y-1 的阴影，再 accent 画本体（InputHandler.java:1765-1770）。
+        function drawSelection(){
+            // v0.12.5: 拖拽时画实时框；松手之后 jobBox 还挂着就继续画它（直到这一批终态）。
+            var live = selDragging, r = null;
+            if(live){ r = selBox(); }
+            else if(jobBox !== null && jobBox.r){ r = jobBox.r; }
+            if(r === null){ jobBadge = null; return; }
+            var a = selDrawArgs(r);
+            try{
+                var D = Packages.arc.graphics.g2d.Draw;
+                var L = Packages.arc.graphics.g2d.Lines;
+                L.stroke(2);
+                D.color(Pal.accentBack);
+                L.rect(a.x, a.y - 1, a.w, a.h);
+                D.color(Pal.accent);
+                L.rect(a.x, a.y, a.w, a.h);
+                D.color();
+            }catch(e){ /* 画不出来不影响选择本身 */ }
+            // v0.14.4：框角操作区优先用 HUD 上的原版控件；控件不可用（无 UI / 建表失败）时
+            // 才退回即时绘制 —— 两条路都留，谁也挡不住谁。
+            if(live){ drawSizeText(r); jobWidgetHide(); }
+            else if(!jobButtonsSync()){ drawJobButtons(r, a); }
+        }
+
+        // 原版还在光标旁写「宽x高 (面积)」（InputHandler.java:1772-1794）：
+        // Fonts.outline + 1/camerascale 缩放 + Draw.z(Layer.endPixeled)，画完逐项还原。
+        // 字是附加品：任何一步抛异常只丢字，方框照画。
+        function drawSizeText(r){
+            try{
+                // Fonts 是 mindustry.ui.Fonts（不是 gen 包：out/_server160.jar 里只有
+                // mindustry/ui/Fonts.class，写错包名会被 catch 吞掉、字永远画不出来）。
+                var font = Packages.mindustry.ui.Fonts.outline;
+                if(font === null || font === undefined){ return; }
+                var D = Packages.arc.graphics.g2d.Draw;
+                var scale = 1;
+                try{ scale = Vars.renderer.camerascale; }catch(e0){ }
+                if(!(scale > 0)){ scale = 1; }
+                var z = D.z();
+                D.z(Packages.mindustry.core.Layer.endPixeled);
+                font.getData().setScale(1 / scale);
+                font.setColor(Pal.accent);
+                var off = 5 / scale * 8;
+                font.draw(r.w + "x" + r.h + " (" + (r.w * r.h) + ")",
+                          Core.input.mouseWorldX() + off, Core.input.mouseWorldY() + off);
+                font.setColor(Packages.arc.graphics.Color.white);
+                font.getData().setScale(1);
+                D.z(z);
+            }catch(e){ /* 字画不出来只丢字 */ }
+        }
+
+        function regionSummary(snap){
+            var b = snap.bounds, out = [];
+            out.push("区域 " + b.x1 + "," + b.y1 + " - " + b.x2 + "," + b.y2
+                     + "   " + (b.x2 - b.x1 + 1) + "×" + (b.y2 - b.y1 + 1) + " 格");
+            out.push("方块 " + snap.cells + (snap.truncated ? "（已截断）" : "")
+                     + "   处理器 " + snap.processors.length + "   地图 " + snap.map);
+            var ps = snap.processors || [], i;
+            for(i = 0; i < ps.length; i++){
+                out.push("  @" + ps[i].x + "," + ps[i].y + " " + ps[i].block
+                         + "   链接 " + ps[i].links.length
+                         + (ps[i].links.length ? "：" + ps[i].links.join(", ") : ""));
+            }
+            return out.join("\n");
+        }
+
+        function popup(title, text){
+            if(Vars.ui === null || Vars.ui === undefined){ return; }
+            try{ Vars.ui.showText(title, String(text)); }catch(e){ }
+        }
+
+        // 非阻塞提示。**框选绝不能用 showText**：Dialog 会把鼠标吃掉（Core.scene.hasDialog() 为真，
+        // 世界收不到点击），于是「按 F3 弹出提示」= 拖不动 —— 用户 2026-10-30 报的就是这个。
+        // showInfoFade 是 Touchable.disabled 的淡出标签（Mindustry-Source/core/src/mindustry/core/UI.java:373），不挡输入。
+        function hint(text){
+            if(Vars.ui === null || Vars.ui === undefined){ return; }
+            try{ Vars.ui.showInfoFade(String(text)); }catch(e){ }
+        }
+
+        // 松手之后走这里：先给区域摘要（不需要 sidecar），再把 JSON 交给 /snapshot 落盘。
+        function dumpRegion(x1, y1, x2, y2){
+            var snap = regionSnapshot(x1, y1, x2, y2);
+            var head = regionSummary(snap);
+            if(snap.processors.length === 0){
+                popup("Mlog辅助 · 区域快照", head + "\n\n区域里没有处理器。");
+                return head;
+            }
+            if(Vars.ui === null || Vars.ui === undefined){
+                // 无头引擎（自检/测试）既没有界面也没有 sidecar：只把摘要交回去，不发请求。
+                return head;
+            }
+            // 两次请求串起来（都是本机回环，几十毫秒）：先落盘，再要链接候选，最后开面板。
+            // 顺序有意义：面板要同时显示「落盘到哪」和「候选链接」，缺一条就得等第二次回调。
+            try{
+                httpJson("POST", "/snapshot", JSON.stringify({snapshot: snap}), function(code, text){
+                    var res = parse(text);
+                    var line = (code === "200" && res !== null && res.ok === true)
+                        ? "已落盘 " + res.path + "（" + res.bytes + " B）"
+                        : "落盘失败：" + httpWhy(code, text);
+                    httpJson("POST", "/region", JSON.stringify({snapshot: snap}), function(c2, t2){
+                        var body = head + "\n" + line;
+                        try{
+                            showRegionPanel(snap, body, regionCandidatesText(c2 + "\n" + t2));
+                        }catch(e){
+                            log("region panel failed, falling back to text: " + e);
+                            popup("Mlog辅助 · 区域快照", body + "\n\n" + regionCandidatesText(c2 + "\n" + t2));
+                        }
+                    });
+                });
+                return head + "\n（面板稍后弹出）";
+            }catch(e){
+                popup("Mlog辅助 · 区域快照", head + "\n\n落盘失败：" + e);
+                return head + "\n（落盘失败：" + e + "）";
+            }
+        }
+
+        function selFinish(){
+            var r = selRelease();
+            if(r === null){ return null; }
+            // v0.12.5：松手只弹一个描述框（用户 2026-10-31：f3 后的窗口简化到只有一个描述框）。
+            // 框住的处理器有几个就投几个作业；矩形留到这一批全部终态（drawSelection 负责继续画）。
+            // 区域快照面板与 AI 面板还在，但只从控制台走（maiDump / maiAi），F3 不再弹它们。
+            try{
+                return openQuickJob(r);
+            }catch(e){
+                log("quick job dialog failed: " + e);
+                hint("描述框打不开：" + e);
+                return null;
+            }
+        }
+
+        // F3 是按住式的（=鼠标左键），所以 maiSelect 不再“就绪”，只给提示。
+        api.maiSelect = function(){
+            hint("框选：按住 F3 拖出矩形，松开即出快照");
+            return "按住 F3 拖出矩形";
+        };
+        api.maiSelState = function(){
+            return JSON.stringify({holding: selHolding, dragging: selDragging,
+                                   startX: selStartX, startY: selStartY,
+                                   curX: selCurX, curY: selCurY});
+        };
+        api.maiSelPress = function(x, y){ return selPress(x, y); };
+        api.maiSelMove = function(x, y){ return selMove(x, y); };
+        api.maiSelRelease = function(){ var r = selRelease(); return r === null ? "" : JSON.stringify(r); };
+        api.maiSelDraw = function(ax, ay, bx, by){ return JSON.stringify(selDrawArgs(selRect(ax, ay, bx, by))); };
+        api.maiDump = function(x1, y1, x2, y2){ return dumpRegion(x1, y1, x2, y2); };
+        api.maiSelRect = function(ax, ay, bx, by){ return JSON.stringify(selRect(ax, ay, bx, by)); };
+        // v0.8.1：单格选中处理器 = 开 AI 面板；maiPick 把「这一格是不是处理器」暴露给无头测试。
+        api.maiPick = function(x, y){ var b = processorAt(x, y); return b === null ? "" : (x + "," + y); };
+        // v0.7.0 F2 处理器清单：maiList 返回文本摘要（无 UI 也能验），maiListRows 返回 JSON 行。
+        api.maiList = function(){ return listText(); };
+        api.maiListRows = function(){ return JSON.stringify(scanProcessors().rows); };
+        api.maiListPanel = function(){ openListPanel(); return "opened"; };
+        // v0.8.0 作业队列：投递 / 查 / 取消 / 同步跑完（同步版只给控制台与自检）
+        api.maiSetBase = function(u){ base = String(u); return base; };
+        api.maiJob = function(desc){
+            var b = targetBuild();
+            if(b === null){ return "光标下没有处理器"; }
+            jobSubmit(b, String(desc), function(res, why){
+                hint(res === null ? ("投递失败：" + why) : ("作业 " + res.id + " 已投递"));
+            });
+            return "已投递作业";
+        };
+        api.maiJobSync = function(desc, timeoutMs){
+            var b = targetBuild();
+            if(b === null){ return JSON.stringify({ok: false, text: "no processor"}); }
+            return jobSync(b, String(desc), timeoutMs);
+        };
+        api.maiJobSyncAt = function(x, y, desc, timeoutMs){
+            var b = buildAt(x, y);
+            if(b === null){ return JSON.stringify({ok: false, text: "no processor at " + x + "," + y}); }
+            return jobSync(b, String(desc), timeoutMs);
+        };
+        api.maiJobWrite = function(jobJson, x, y){
+            var job = parse(String(jobJson));
+            if(job === null){ return "job json parse failed"; }
+            var b = buildAt(x, y);
+            if(b === null){ return "no processor at " + x + "," + y; }
+            var w = writeBuild(b, jobAsPlan(job));
+            return w + " | " + String(b.code).replace(/\n/g, " / ");
+        };
+        // v0.10.1：写前冲突检测的无头探针。判定发生在 configure 之前，所以用假处理器
+        // （只有 tile 与 code）就够，不会碰到真存档、也不会写撤销快照。
+        api.maiConflictProbe = function(){
+            var b = {tile: {x: 3, y: 4}, code: "set n 1\nend"};
+            var k = procKey(b);
+            JOB_ORIG[k] = "set n 0\nend";
+            JOB_FORCE[k] = false;
+            var r1 = conflictGate(b);
+            var blocked = r1 !== null && String(r1).indexOf("已被改动") >= 0
+                          && String(b.code) === "set n 1\nend";
+            var r2 = conflictGate(b);
+            var forced = r2 === null;                    // 第二次 = 确认覆盖
+            var r3 = conflictGate(b);
+            var once = r3 !== null;                      // 只放行一次，第三次又要问
+            JOB_ORIG[k] = String(b.code);
+            var quiet = conflictGate(b) === null;        // 代码没动过就不问
+            forgetOrig(b);
+            return (blocked && forced && once && quiet) ? "ok"
+                 : ("bad blocked=" + blocked + " forced=" + forced
+                    + " once=" + once + " quiet=" + quiet);
+        };
+        // v0.12.8：链接表冲突的无头探针。假处理器带一个假 links（size + get），
+        // 覆盖四件事：没动过不问 / 拆掉一条要拦 / 拒绝一次后放行 / 同名换位置也算改。
+        api.maiLinkConflictProbe = function(){
+            function fakeLinks(list){
+                return {size: list.length, get: function(i){ return list[i]; }};
+            }
+            var l1 = [{name: "conveyor1", x: 10, y: 4}, {name: "core1", x: 1, y: 4}];
+            var b = {tile: {x: 3, y: 4}, code: "set n 1\nend", links: fakeLinks(l1)};
+            rememberOrig(b);
+            var quiet = conflictReason(b) === null;
+            b.links = fakeLinks([{name: "conveyor1", x: 10, y: 4}]);      // 拆掉一条
+            var r1 = conflictReason(b);
+            var caught = r1 !== null && String(r1).indexOf("链接表") >= 0;
+            var g1 = conflictGate(b);
+            var g2 = conflictGate(b);
+            var once = g1 !== null && g2 === null;                        // 拒绝一次、再点放行
+            b.links = fakeLinks(l1);
+            var again = conflictReason(b) === null;                       // 改回原样就不问
+            b.links = fakeLinks([{name: "conveyor1", x: 11, y: 4}]);      // 同名不同位置也算改
+            var moved = String(conflictReason(b)).indexOf("链接表") >= 0;
+            b.code = "set n 2\nend";
+            var bothWhy = String(conflictReason(b));
+            var both = bothWhy.indexOf("代码") >= 0 && bothWhy.indexOf("链接表") >= 0;
+            forgetOrig(b);
+            var cleared = conflictReason(b) === null;
+            return (quiet && caught && once && again && moved && both && cleared) ? "ok"
+                 : ("bad quiet=" + quiet + " caught=" + caught + " once=" + once
+                    + " again=" + again + " moved=" + moved + " both=" + both
+                    + " cleared=" + cleared);
+        };
+        // v0.12.8：联机判定的无头探针。无头引擎里 Vars.net 是 null、Vars.player 也是 null，
+        // 期望 net=false admin=false perm=null —— 单机路径一个闸都不该多。
+        api.maiNetProbe = function(){
+            var b = {tile: {x: 3, y: 4}, code: ""};
+            var np = permWhy(b);
+            return "net=" + netClient() + " admin=" + isAdmin()
+                 + " player=" + (localPlayer() === null ? "null" : "some")
+                 + " perm=" + String(np);
+        };
+        // v0.12.8：写后回读的队列探针（不碰 Vars.net）：塞一条必然对不上的，
+        // 走三次 tick 之后应该自己出队（真机里这一步是弹「无权限」）。
+        api.maiWriteCheckProbe = function(){
+            var b = {tile: {x: 3, y: 4, build: null}, code: "set n 0\nend"};
+            b.tile.build = b;
+            if(!netClient()){
+                writeCheckTick();
+                return "offline queue=" + WRITE_CHECK.length;
+            }
+            armWriteCheck(b, "set n 1\nend", "probe");
+            var n0 = WRITE_CHECK.length;
+            WRITE_CHECK[WRITE_CHECK.length - 1].at = 0;      // 立刻到点
+            for(var i = 0; i < WRITE_CHECK_TRIES + 1; i++){
+                writeCheckTick();
+                if(WRITE_CHECK.length > 0){ WRITE_CHECK[0].at = 0; }
+            }
+            return (n0 === 1 && WRITE_CHECK.length === 0) ? "ok" : ("bad queued=" + n0);
+        };
+        // v0.13.0：聊天播报的无头探针。只验行格式（不碰 Vars.ui / 聊天框）：
+        // 三条状态 + 空信息不留冒号 + 前缀必须是 MAI。
+        api.maiChatProbe = function(){
+            var a = chatLine("Generating", 12, 34, "给核心补铜（job 3f2a1b9c）");
+            var b2 = chatLine("Done", 12, 34, "code · 12 条语句 · 240 字节 · 0 ERR");
+            var c = chatLine("Failed", 12, 34, "模型没写出可用代码");
+            var d = chatLine("Cancelled", 1, 2, "");
+            var ok = a.indexOf(" Generating (12,34): 给核心补铜（job 3f2a1b9c）") >= 0
+                  && b2.indexOf(" Done (12,34): code · 12 条语句 · 240 字节 · 0 ERR") >= 0
+                  && c.indexOf(" Failed (12,34): 模型没写出可用代码") >= 0
+                  && d === ("MAI" + chatIcon() + " Cancelled (1,2)")
+                  && a.indexOf("MAI") === 0;
+            return (ok ? "ok" : "bad") + " icon=" + (chatIcon() === "" ? "none" : "yes")
+                 + " start=" + a + " cancel=" + d;
+        };
+
+        // v0.13.1：自动拉起 sidecar 的无头探针。无头环境里 Vars.mods 有、exe 没有，
+        // 所以只验同步的那部分：路径解析与端口解析不炸、找不到 exe 时 exe/dir 一起为 null。
+        // 状态机本身是异步的（httpJson 的回调里才落 noexe），不在这里断言。
+        api.maiSidecarProbe = function(){
+            var exe = sidecarExe();
+            var dir = sidecarDir();
+            var port = sidecarPort();
+            var before = SIDE.state;
+            ensureSidecar(true);            // 找不到 exe 应安静地落到 noexe，不该抛
+            var after = SIDE.state;
+            var ok = before === "idle"
+                  && (exe === null ? dir === null : dir !== null)
+                  && typeof port === "number" && port > 0;
+            return (ok ? "ok" : "bad") + " exe=" + (exe === null ? "none" : "yes")
+                 + " dir=" + (dir === null ? "none" : "yes")
+                 + " port=" + port + " state=" + before + "->" + after;
+        };
+
+        // v0.12.0：事务写入的无头探针。现放一台真处理器（结束时拆掉），一次整批写、
+        // 一次整批撤销，再一次「第二台 configure 抛错」——三件事全对才返回 ok。
+        api.maiWriteManyProbe = function(aJson, x, y){
+            var b1 = buildAt(x, y);
+            if(b1 === null){ return "no processor at " + x + "," + y; }
+            var j1 = parse(String(aJson));
+            if(j1 === null || j1.code === undefined){ return "job json parse failed"; }
+            var r1 = jobAsPlan(j1);
+            if(r1.ok !== true){ return "the job is not done"; }
+            var W = Packages.mindustry.Vars.world, T = Packages.mindustry.game.Team.sharded;
+            var x2 = x + 3, y2 = y + 3;
+            if(x2 > W.width() - 2){ x2 = x - 3; }
+            if(y2 > W.height() - 2){ y2 = y - 3; }
+            var t2 = W.tile(x2, y2);
+            t2.setBlock(Packages.mindustry.Vars.content.block("air"), T);
+            t2.setBlock(Packages.mindustry.Vars.content.block("micro-processor"), T);
+            var b2 = buildAt(x2, y2);
+            if(b2 === null){ return "the second processor did not appear at " + x2 + "," + y2; }
+            var before1 = String(b1.code), before2 = String(b2.code);
+            var w = writeMany([{b: b1, res: r1}, {b: b2, res: r1}], "probe");
+            var wrote = String(b1.code) === String(j1.code) && String(b2.code) === String(j1.code);
+            var u = undo();
+            var undone = String(b1.code) === before1 && String(b2.code) === before2;
+            // 故意失败：第二台是假 build，configure 直接抛；第一台必须被回滚。
+            try{ delete JOB_ORIG[x2 + "," + y2]; }catch(e8){ }
+            var fake = {tile: {x: x2, y: y2}, code: "fake",
+                        configure: function(){ throw "boom"; },
+                        updateCode: function(c){ this.code = String(c); }};
+            var keep = String(b1.code);
+            var wf = writeMany([{b: b1, res: r1}, {b: fake, res: r1}], "probe-fail");
+            var rolled = String(b1.code) === keep && String(wf).indexOf("已回滚 1 台") >= 0;
+            try{ t2.setBlock(Packages.mindustry.Vars.content.block("air"), T); }catch(e0){ }
+            var ok = wrote && undone && rolled && String(w).indexOf("已写入 2 台") >= 0;
+            return ok ? ("ok " + w + " | " + u)
+                      : ("bad wrote=" + wrote + " undone=" + undone + " rolled=" + rolled
+                         + " w=" + w + " u=" + u + " wf=" + wf);
+        };
+        api.maiJobProgress = function(jobJson){ return jobProgressText(parse(String(jobJson))); };
+        // v0.12.4：作业里带回的模型思考原文（控制台/自检用；面板显示的是它的开头）。
+        api.maiJobReasoning = function(jobJson){ return jobReasoningText(parse(String(jobJson))); };
+        // v0.13.2：作业视图新摊开的两段——模型的 assumptions 与 cost 报告
+        // （cost 里带 UNREACHABLE 段落）。无头环境没有真 Table，所以探针只调
+        // 取行函数本身：行数对、内容非空，就算这两段接上了。
+        api.maiJobPanelProbe = function(jobJson){
+            var job = parse(String(jobJson));
+            var as = jobAssumptionLines(job, 4, 88), co = jobCostLines(job, 8);
+            var ok = as.length === 2 && co.length === 3 && co[0].indexOf("UNREACHABLE") >= 0;
+            return ok ? ("ok assumptions=" + as.length + " cost=" + co.length
+                         + " first=" + as[0])
+                      : ("bad assumptions=" + as.length + " cost=" + co.length);
+        };
+        // v0.14.0：工作区数据层的无头探针。无头模拟器里 Vars.dataDirectory 可能是 null，
+        // 所以把三个存储原语换成内存表，验的是「逻辑」而不是磁盘：
+        // 落盘/读回、复用判定（中心在框内 + 地图一致）、归档后不复用、恢复、释放后文件真的没了。
+        api.maiWorkspaceProbe = function(){
+            var notes = [], savedMem = wsMem, savedCur = wsCurrent, savedCache = wsCache;
+            wsMem = {};
+            wsCache = {};
+            try{
+                var r = {x1: 40, y1: 40, x2: 46, y2: 46};
+                var ws = wsNew(r, "probe");
+                ws.notes = "probe-notes";
+                var fake = {tile: {x: 41, y: 42}, code: "set n 1\nend", links: null};
+                wsTouchProc(ws, fake, "探测用描述");
+                if(wsSave(ws) === null){ notes.push("save"); }
+                var back = wsLoad(ws.id);
+                if(back === null || String(back.notes) !== "probe-notes"){ notes.push("roundtrip"); }
+                var procs = (back === null ? [] : (back.procs || []));
+                if(procs.length !== 1 || String(procs[0].desc) !== "探测用描述"){ notes.push("procs"); }
+                if(wsFindActive(r) !== String(ws.id)){ notes.push("reuse"); }
+                if(wsFindActive({x1: 400, y1: 400, x2: 402, y2: 402}) !== null){ notes.push("noreuse"); }
+                wsRecordJob(ws, "job-1", "探测用描述");
+                var jobs = ((wsLoad(ws.id) || {}).jobs) || [];
+                if(jobs.length !== 1 || String(jobs[0].id) !== "job-1"){ notes.push("job"); }
+                wsArchive(ws.id);
+                if(wsFindActive(r) !== null){ notes.push("archived"); }
+                if(String((wsLoad(ws.id) || {}).state) !== "archived"){ notes.push("state"); }
+                wsRestore(ws.id);
+                if(wsFindActive(r) !== String(ws.id)){ notes.push("restore"); }
+                wsRelease(ws.id);
+                if(wsLoad(ws.id) !== null){ notes.push("release-load"); }
+                if(wsFileNames().length !== 0){ notes.push("release-file"); }
+            }catch(e){
+                notes.push("throw:" + e);
+            }
+            wsMem = savedMem;
+            wsCache = savedCache;
+            wsCurrent = savedCur;
+            var dir = "no";
+            try{ if(Vars.dataDirectory !== null && Vars.dataDirectory !== undefined){ dir = "yes"; } }catch(e2){ dir = "no"; }
+            return (notes.length === 0 ? "ok" : ("bad " + notes.join(","))) + " dir=" + dir + " mem=yes";
+        };
+        api.maiJobCancel = function(){ return cancelJob(); };
+        // v0.14.0：工作区数据层自检口（实现在工作区段里，这里转发）
+        api.maiWorkspaceList = function(){ return JSON.stringify(wsList()); };
+        api.maiWorkspaceArchive = function(id){ return wsArchive(String(id)); };
+        api.maiWorkspaceRestore = function(id){ return wsRestore(String(id)); };
+        api.maiWorkspaceRelease = function(id){ return wsRelease(String(id)); };
+        api.maiWorkspaceCurrent = function(){ return wsCurrent === null ? "" : String(wsCurrent); };
+        api.maiJobState = function(){
+            return aiJob === null ? "" : JSON.stringify({id: aiJob.id, desc: aiJob.desc});
+        };
+        // v0.12.5：作业框 / 徽标 / 作业管理窗
+        api.maiJobBox = function(){
+            var s = jobBoxState();
+            if(s === null){ return JSON.stringify({box: false}); }
+            return JSON.stringify({box: true, r: jobBox.r, ws: jobBox.ws || null, ids: jobBox.ids,
+                                   total: s.total, terminal: s.terminal,
+                                   done: s.done, failed: s.failed,
+                                   linger: jobBox.termAt > 0, written: (jobBox.written || 0),
+                                   badge: jobBadgeText()});
+        };
+        api.maiJobBoxClear = function(){ jobBox = null; jobBadge = null; return "cleared"; };
+        // v0.12.7：框只该在「写入」或「主动关」时消失 —— 这个口子就是「主动关」。
+        api.maiJobBoxClose = function(){ return closeJobBox("closed"); };
+        // 自检口：状态行 + 两个按钮的几何与框右下角的关系（无头引擎里 renderer 可能是 null，按 scale 1 算）。
+        api.maiBadgeRect = function(){
+            var a = selDrawArgs({x1: 1, y1: 1, x2: 6, y2: 6, w: 6, h: 6});
+            var m = jobButtonLayout(a);
+            if(m === null){ return JSON.stringify({rect: false}); }
+            return JSON.stringify({rect: true, scale: m.scale, box: a, right: m.right, top: m.top,
+                                   status: m.status, buttons: m.buttons, text: m.text,
+                                   x: m.status.x, y: m.status.y, w: m.status.w, h: m.status.h});
+        };
+        // 自检口：不碰 sidecar 也能把「框留多久 / 徽标写什么」这套状态机跑一遍。
+        api.maiJobBoxPin = function(idsJson, statesJson){
+            var ids = parse(String(idsJson)) || [], states = parse(String(statesJson)) || [];
+            var box = {r: {x1: 1, y1: 1, x2: 6, y2: 6, w: 6, h: 6}, ids: [], jobs: {}, pend: 0,
+                       started: 0, termAt: 0, lastPoll: 0};
+            for(var i = 0; i < ids.length; i++){
+                var jid = String(ids[i]);
+                box.ids.push(jid);
+                box.jobs[jid] = {id: jid, state: String(states[i] || 'queued'), desc: 'x'};
+            }
+            jobBox = box;
+            jobBoxFinishIfDone();
+            return api.maiJobBox();
+        };
+        api.maiJobBadge = function(){ return jobBadgeText(); };
+        api.maiJobManager = function(){ return openJobManager(); };
+        api.maiWorkspaceDialog = function(){ return openWorkspaceDialog(); };
+        api.maiWorkspaceExport = function(id){ return wsExportText(String(id)); };
+        api.maiWorkspaceExportDisk = function(id){ return wsExportToDisk(String(id)); };
+        api.maiWorkspaceImport = function(text){ return wsImportText(String(text)); };
+        api.maiWorkspaceRestoreBox = function(id){ return wsRestoreBox(String(id)); };
+        api.maiWorkspaceRename = function(id, name){ return wsRename(String(id), String(name)); };
+        api.maiWorkspaceImprove = function(id, desc){ return wsImproveBatch(String(id), String(desc || "")); };
+        api.maiWorkspaceImprovePayload = function(id, x, y){
+            var ws = wsLoad(String(id));
+            var b = buildAt(Number(x), Number(y));
+            if(ws === null || b === null){ return ""; }
+            var p = wsImprovePayload(ws, b);
+            return p === null ? "" : JSON.stringify(p);
+        };
+        api.maiWorkspaceRowLabel = function(id){
+            var ws = wsLoad(String(id));
+            return ws === null ? "" : wsRowLabel(ws);
+        };
+        api.maiBlueprintList = function(){ return JSON.stringify(blueprintList(24)); };
+        api.maiWorkspaceFromBlueprint = function(name){ return wsFromBlueprintName(String(name)); };
+        // v0.14.1：工作区界面 / 继续改进 / 导入导出 / 蓝图入口的自检口（只跑纯函数，不建窗口）
+        api.maiWorkspace2Probe = function(){
+            var savedMem = wsMem, savedCache = wsCache, savedCur = wsCurrent;
+            var notes = [];
+            try{
+                wsMem = {}; wsCache = {}; wsCurrent = null;
+                var r = {x1: 10, y1: 10, x2: 16, y2: 14};
+                var ws = wsNew(r, "探测工作区");
+                var fake = {tile: {x: 12, y: 11}, code: "set n 1\njump 0 always\n",
+                            links: {size: 0, get: function(i){ return null; }}};
+                wsTouchProc(ws, fake, "把 n 设成 1");
+                wsSave(ws);
+                if(wsRowLabel(ws).indexOf("探测工作区") < 0){ notes.push("rowlabel"); }
+                if(wsBoundsText(ws).indexOf("10") < 0){ notes.push("bounds"); }
+                if(wsProcLines(ws, 4).length === 0){ notes.push("proclines"); }
+                if(wsJobLines(ws, 3).length === 0){ notes.push("joblines"); }
+                var ex = wsExportText(ws.id);
+                if(ex.length === 0 || ex.indexOf("探测工作区") < 0){ notes.push("export"); }
+                var id2 = wsImportText(ex);
+                if(String(id2).length === 0){ notes.push("import"); }
+                if(String(id2) === String(ws.id)){ notes.push("import-id"); }
+                var ws2 = wsLoad(id2);
+                if(ws2 === null || (ws2.procs || []).length !== 1){ notes.push("import-procs"); }
+                if(wsRename(id2, "改名后").indexOf("改名后") < 0){ notes.push("rename"); }
+                var payload = wsImprovePayload(ws2, fake);
+                if(payload === null){ notes.push("payload"); }
+                else{
+                    if(String(payload.prevCode).indexOf("set n 1") < 0){ notes.push("payload-code"); }
+                    if(String(payload.id) !== String(id2)){ notes.push("payload-id"); }
+                }
+                var msg = wsRestoreBox(ws.id);
+                if(jobBox === null || String(jobBox.ws) !== String(ws.id)){ notes.push("restorebox"); }
+                if((jobBox === null ? [] : jobBox.ids).length !== 0){ notes.push("restorebox-ids"); }
+                if(msg.indexOf("已恢复") < 0){ notes.push("restorebox-msg"); }
+                jobBox = null; jobBadge = null;
+                var bp = blueprintList(4);
+                if(bp === null || bp.length === undefined){ notes.push("blueprint"); }
+                if(wsFromBlueprintName("绝对没有这个蓝图").indexOf("找不到") < 0){ notes.push("blueprint-miss"); }
+                if(wsImproveBatch("没有这个工作区", "") !== "工作区不存在"){ notes.push("improve-miss"); }
+            }catch(e){
+                notes.push("throw:" + e);
+            }
+            jobBox = null; jobBadge = null;
+            wsMem = savedMem; wsCache = savedCache; wsCurrent = savedCur;
+            return notes.length === 0 ? "ok" : ("bad " + notes.join(","));
+        };
+
+        // 挂到脚本作用域（控制台里能直接敲），并读回自检
+        // v0.14.4（用户 2026-11-01）：「sidcar应该随游戏启动而启动」——不再等 F3 才拉；
+        // 这里先试一次，ClientLoadEvent（进游戏）再补一次，两次都幂等。
+        try{ ensureSidecar(true); }catch(e){ log("sidecar autostart skipped at load: " + e); }
+        // 载入时就试着把设置里的模型档推给 sidecar（重启过的 sidecar 会忘）。
+        try{ llmSync(); }catch(e){ log("llm sync skipped at load"); }
+        var scope = Vars.mods.getScripts().scope;
+        var mounted = 0;
+        for(var k in api){
+            Packages.rhino.ScriptableObject.putProperty(scope, k, api[k]);
+            // 读回不能用 scope.get(k, scope)：某些加载路径下 scope 是 global 包装对象，
+            // 没有可调用的 get 方法（真 v160.7 实测报 "Cannot find function get"）。
+            try{
+                if(Packages.rhino.ScriptableObject.getProperty(scope, k) !== undefined){ mounted++; }
+            }catch(e){
+                mounted++;   // putProperty 成功即可，读回是自检不是必需
+            }
+        }
+        log("v" + MOD_VERSION + " ready, " + mounted + "/" + Object.keys(api).length
+            + " console function(s), sidecar=" + base);
+
+        // 脚本加载时 UI 可能还没建；ClientLoadEvent 再补一次。
+        var settingsReady = registerSettings();
+        try{
+            Events.on(ET.ClientLoadEvent, function(){
+                try{ if(!settingsReady){ settingsReady = registerSettings(); } }catch(e){ /* ignore */ }
+                // v0.14.4：「随游戏启动」——进游戏再拉一次（脚本加载时可能在主菜单）。
+                try{ ensureSidecar(true); }catch(e2){ log("sidecar autostart skipped: " + e2); }
+            });
+        }catch(e){ log("ClientLoadEvent hook failed: " + e); }
+
+        // ---------------------------------------------------------- 热键
+        {   // v0.9.0: the F4 hotkey is gone, so the update hook is unconditional
+            Events.run(ET.Trigger.update, function(){
+                try{
+                    reviewTick();   // 原版逻辑编辑器开着就顺手刷新那条审查栏
+                    jobTick();      // v0.8.0：有作业在跑就每秒查一次状态
+                    jobBoxTick();   // v0.12.5：框选框里那一批作业的状态
+                    writeCheckTick(); // v0.12.8：联机里回读写过的处理器，确认服务端真收下了
+                    sidecarTick();  // v0.13.1：自己拉起来的 sidecar 要等它开口
+                    jobButtonsClick(); // v0.14.2：框右下角的「查看 / 取消」两个按钮
+                    // 「设置 → Mlog辅助」这一栏只在 Vars.ui 建好之后能注册。脚本加载时
+                    // UI 往往还没建（真机日志里是在 ClientLoadEvent 前），所以这里补一次
+                    // 有界重试：每 60 帧试一次、最多 600 次（≈10 s @60fps），成功即停。
+                    if(!settingsDone && settingsTries < 600){
+                        settingsTries++;
+                        if(settingsTries % 60 === 0){ registerSettings(); }
+                    }
+                    if(Vars.state.isMenu()){ return; }
+                    if(Vars.ui.chatfrag.shown()){ return; }
+                    if(KEY_REGION !== null && Core.input.keyTap(Packages.arc.input.KeyCode[KEY_REGION[0]])){
+                        if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
+                        var rb = targetBuild();
+                        if(rb === null){
+                            Vars.ui.showText("Mlog辅助 · 链接候选",
+                                             "光标下没有处理器：先把光标移到处理器上再按 F7");
+                        }else{
+                            var rr = 10;
+                            // 异步：回调由 httpJson 经 Core.app.post 投递回主线程，
+                            // 在这里 busy-wait 只会等到超时（v0.4.2 就是这样弹「sidecar 不可用（）」）。
+                            regionAroundBox(rb.tile.x - rr, rb.tile.y - rr,
+                                            rb.tile.x + rr, rb.tile.y + rr);
+                        }
+                    }
+                    if(KEY_LIST !== null && Core.input.keyTap(Packages.arc.input.KeyCode[KEY_LIST[0]])){
+                        if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
+                        openListPanel();
+                    }
+                    // F3 = 鼠标左键：按住就拉框（起点=按下那一刻的鼠标格），松开就出快照。
+                    // 没有「就绪」态、不需要点左键，也不弹任何窗（弹窗会抢鼠标）。
+                    if(KEY_SELECT !== null){
+                        var selKey = Packages.arc.input.KeyCode[KEY_SELECT[0]];
+                        var selDown = Core.input.keyDown(selKey);
+                        if(selDown && !selHolding){
+                            if(Core.scene === null || !Core.scene.hasDialog()){
+                                var s0 = mouseTile();
+                                if(s0 !== null){ selPress(s0.x, s0.y); }
+                            }
+                        }else if(selDown && selDragging){
+                            var s1 = mouseTile();
+                            if(s1 !== null){ selMove(s1.x, s1.y); }
+                        }else if(!selDown && selHolding){
+                            selFinish();
+                        }
+                    }
+                }catch(e){ /* 每帧回调里绝不抛出去 */ }
+            });
+        }
+
+        // 拖拽高亮：画在世界坐标系里，不碰场景树（画不出来也不影响选择本身）。
+        try{
+            Events.run(ET.Trigger.draw, function(){
+                try{ drawSelection(); }catch(e){ /* 每帧回调里绝不抛出去 */ }
+            });
+        }catch(e){ log("Trigger.draw hook failed: " + e); }
+
+    }catch(e){
+        print("[mai] init failed: " + e);
+    }
+}
+
+try{ __logicWriterMain(); }catch(e){ print("[mai] bootstrap failed: " + e); }

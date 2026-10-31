@@ -1,0 +1,26 @@
+{
+  "id": "impact-reactor-cap-is-not-protection",
+  "kind": "semantics",
+  "severity": "WARN",
+  "claim": "Cutting an impact reactor at a heat threshold protects nothing: on an impact reactor `@heat` is warmup and power output, not a countdown to a meltdown.",
+  "why": "Only NuclearReactor heats toward 0.999 and kills itself. A template reused for both reactor types produces a loop that looks protective and does not protect.",
+  "source": "source",
+  "ref": "m13856",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-slow.mlog",
+  "match": {
+    "sevs": [
+      "WARN"
+    ],
+    "msg_any": [
+      "capping an impact reactor"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 0,
+    "programs": 0,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

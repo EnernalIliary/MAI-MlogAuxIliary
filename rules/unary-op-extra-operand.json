@@ -1,0 +1,23 @@
+{
+ "id": "unary-op-extra-operand",
+ "kind": "heuristic",
+ "severity": "SUPPRESSED",
+ "state": "silent -- analyse no longer emits it (audited 29/29 as not worth reporting)",
+ "claim": "An operator handed more operands than it reads is parsed and the extra tokens are ignored. Audited 29/29 by the maintainer as 'not worth reporting', so `analyse` no longer emits it. Kept as a negative record.",
+ "why": "LogicOp.java: unary ops take one operand; LParser discards the rest. Corpus: 1,121 of these on 9 downloaded maps were 96% of all warnings, so this class must never outrank a real finding.",
+ "source": "corpus",
+ "ref": "m14600",
+ "since": "2026-10-18",
+ "counter_example": "tests/cases/reactor-guard-slow.mlog",
+ "match": {
+  "sevs": [],
+  "msg_any": []
+ },
+ "line_regex": "^op\\s+(floor|ceil|round|abs|sqrt|sin|cos|tan|asin|acos|atan|rand|logn|log10|not|flip|len)\\b",
+ "auto_downgrade": false,
+ "observed": {
+  "hits": 0,
+  "note": "dropped 2026-10-19 after the audit"
+ },
+ "state": "silent -- no longer reported"
+}

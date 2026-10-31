@@ -1,0 +1,3648 @@
+{
+ "_note": "recipes and capacities as written in the source; a block absent here sets none of the captured fields",
+ "_source": "Mindustry-Source/core/src/mindustry/content/Blocks.java",
+ "blocks": {
+  "additive-reconstructor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "copper:200",
+     "lead:120",
+     "silicon:90"
+    ]
+   },
+   "inputs": [
+    "silicon:40",
+    "graphite:40"
+   ],
+   "power": "3",
+   "size": "3"
+  },
+  "advanced-launch-pad": {
+   "accepts": "custom",
+   "hasPower": true,
+   "itemCapacity": "100",
+   "liquidCapacity": "40",
+   "liquids": [
+    "oil:9/s"
+   ],
+   "power": "8",
+   "size": "4"
+  },
+  "afflict": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "surge-alloy:100",
+     "silicon:200",
+     "graphite:250",
+     "oxide:40"
+    ]
+   },
+   "power": "5",
+   "size": "4"
+  },
+  "air-factory": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "copper:60",
+     "lead:70",
+     "silicon:60"
+    ]
+   },
+   "power": "1.2",
+   "size": "3"
+  },
+  "arc": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:50",
+     "lead:50"
+    ]
+   },
+   "power": "3.3",
+   "size": "1"
+  },
+  "armored-conveyor": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "plastanium:1",
+     "thorium:1",
+     "metaglass:1"
+    ]
+   }
+  },
+  "armored-duct": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "beryllium:2",
+     "tungsten:1"
+    ]
+   }
+  },
+  "atmospheric-concentrator": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "oxide:60",
+     "beryllium:180",
+     "silicon:150"
+    ]
+   },
+   "hasLiquids": true,
+   "itemCapacity": "0",
+   "liquidCapacity": "60",
+   "outputLiquids": [
+    "nitrogen:16/s"
+   ],
+   "power": "2",
+   "size": "3"
+  },
+  "basic-assembler-module": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "carbide:300",
+     "thorium:500",
+     "oxide:250",
+     "phase-fabric:400"
+    ]
+   },
+   "power": "3.5",
+   "size": "5"
+  },
+  "battery": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "copper:5",
+     "lead:20"
+    ]
+   }
+  },
+  "battery-large": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "titanium:20",
+     "lead:50",
+     "silicon:30"
+    ]
+   },
+   "size": "3"
+  },
+  "beam-link": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "beryllium:250",
+     "silicon:250",
+     "oxide:150",
+     "carbide:75",
+     "surge-alloy:75",
+     "phase-fabric:75"
+    ]
+   },
+   "size": "3"
+  },
+  "beam-node": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "beryllium:8"
+    ]
+   }
+  },
+  "beam-tower": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "beryllium:30",
+     "oxide:10",
+     "silicon:10"
+    ]
+   },
+   "size": "3"
+  },
+  "beryllium-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "beryllium:6"
+    ]
+   }
+  },
+  "beryllium-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "blast-door": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "tungsten:24",
+     "silicon:24"
+    ]
+   },
+   "size": "2"
+  },
+  "blast-drill": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "copper:65",
+     "silicon:60",
+     "titanium:50",
+     "thorium:75"
+    ]
+   },
+   "hasPower": true,
+   "itemCapacity": "20",
+   "liquids": [
+    "water:6/s"
+   ],
+   "power": "3",
+   "size": "4"
+  },
+  "blast-mixer": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "lead:30",
+     "titanium:20"
+    ]
+   },
+   "hasItems": true,
+   "hasPower": true,
+   "inputs": [
+    "pyratite:1",
+    "spore-pod:1"
+   ],
+   "outputItem": "blast-compound:1",
+   "power": "0.40",
+   "size": "2"
+  },
+  "breach": {
+   "accepts": "ammo",
+   "ammo": [
+    "beryllium",
+    "tungsten",
+    "carbide"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "beryllium:150",
+     "silicon:150",
+     "graphite:125"
+    ]
+   },
+   "size": "3"
+  },
+  "bridge-conduit": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "graphite:4",
+     "metaglass:8"
+    ]
+   },
+   "liquidCapacity": "100"
+  },
+  "bridge-conveyor": {
+   "accepts": "none",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "lead:6",
+     "copper:6"
+    ]
+   }
+  },
+  "build-tower": {
+   "accepts": "none",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "silicon:150",
+     "oxide:40",
+     "thorium:60"
+    ]
+   },
+   "liquids": [
+    "nitrogen:3/s"
+   ],
+   "power": "3",
+   "size": "3"
+  },
+  "canvas": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "carbide-crucible": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "tungsten:110",
+     "thorium:150",
+     "oxide:60"
+    ]
+   },
+   "inputs": [
+    "tungsten:2",
+    "graphite:3"
+   ],
+   "itemCapacity": "20",
+   "outputItem": "carbide:1",
+   "power": "2",
+   "size": "3"
+  },
+  "carbide-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "thorium:6",
+     "carbide:6"
+    ]
+   }
+  },
+  "carbide-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "chemical-combustion-chamber": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "graphite:40",
+     "tungsten:20",
+     "silicon:30"
+    ]
+   },
+   "liquids": [
+    "ozone:2/s",
+    "arkycite:40/s"
+   ],
+   "size": "3"
+  },
+  "cliff-crusher": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "graphite:25",
+     "beryllium:20"
+    ]
+   },
+   "size": "2"
+  },
+  "coal-centrifuge": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "titanium:20",
+     "graphite:40",
+     "lead:30"
+    ]
+   },
+   "craftTime": "30",
+   "liquids": [
+    "oil:6/s"
+   ],
+   "outputItem": "coal:1",
+   "power": "0.7",
+   "size": "2"
+  },
+  "combustion-generator": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "copper:25",
+     "lead:15"
+    ]
+   },
+   "explodes": true,
+   "flammable": true
+  },
+  "conduit": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "metaglass:1"
+    ]
+   },
+   "liquidCapacity": "20"
+  },
+  "constructor": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "silicon:50",
+     "beryllium:75",
+     "tungsten:40"
+    ]
+   },
+   "hasPower": true,
+   "power": "2.5",
+   "size": "3"
+  },
+  "container": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "titanium:100"
+    ]
+   },
+   "itemCapacity": "300",
+   "size": "2"
+  },
+  "conveyor": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "copper:1"
+    ]
+   }
+  },
+  "copper-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "copper:6"
+    ]
+   }
+  },
+  "copper-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "core-acropolis": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "beryllium:6000",
+     "silicon:5000",
+     "tungsten:5000",
+     "carbide:3000",
+     "oxide:3000"
+    ]
+   },
+   "itemCapacity": "4000",
+   "size": "6"
+  },
+  "core-bastion": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "graphite:1000",
+     "silicon:1000",
+     "beryllium:800"
+    ]
+   },
+   "itemCapacity": "2000",
+   "size": "4"
+  },
+  "core-citadel": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "silicon:4000",
+     "beryllium:4000",
+     "tungsten:3000",
+     "oxide:1000"
+    ]
+   },
+   "itemCapacity": "3000",
+   "size": "5"
+  },
+  "core-foundation": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "copper:3000",
+     "lead:3000",
+     "silicon:2000"
+    ]
+   },
+   "itemCapacity": "9000",
+   "size": "4"
+  },
+  "core-nucleus": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "copper:8000",
+     "lead:8000",
+     "silicon:5000",
+     "thorium:4000"
+    ]
+   },
+   "itemCapacity": "13000",
+   "size": "5"
+  },
+  "core-shard": {
+   "accepts": "any",
+   "itemCapacity": "4000",
+   "size": "3"
+  },
+  "cryofluid-mixer": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "lead:65",
+     "silicon:40",
+     "titanium:60"
+    ]
+   },
+   "craftTime": "120",
+   "hasItems": true,
+   "hasLiquids": true,
+   "hasPower": true,
+   "inputs": [
+    "titanium:1"
+   ],
+   "liquidCapacity": "36",
+   "liquids": [
+    "water:12/s"
+   ],
+   "outputLiquids": [
+    "cryofluid:12/s"
+   ],
+   "power": "1",
+   "size": "2",
+   "solid": true
+  },
+  "cultivator": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "copper:25",
+     "lead:25",
+     "silicon:10"
+    ]
+   },
+   "craftTime": "100",
+   "hasItems": true,
+   "hasLiquids": true,
+   "hasPower": true,
+   "liquidCapacity": "80",
+   "liquids": [
+    "water:18/s"
+   ],
+   "outputItem": "spore-pod:1",
+   "size": "2"
+  },
+  "cyanogen-synthesizer": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "carbide:80",
+     "silicon:120",
+     "beryllium:140",
+     "oxide:40"
+    ]
+   },
+   "inputs": [
+    "graphite:1"
+   ],
+   "liquidCapacity": "80",
+   "liquids": [
+    "arkycite:160/s"
+   ],
+   "outputLiquids": [
+    "cyanogen:12/s"
+   ],
+   "power": "2",
+   "size": "3"
+  },
+  "cyclone": {
+   "accepts": "ammo",
+   "ammo": [
+    "metaglass",
+    "blast-compound",
+    "plastanium",
+    "surge-alloy"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:200",
+     "titanium:125",
+     "plastanium:80"
+    ]
+   },
+   "size": "3"
+  },
+  "deconstructor": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "beryllium:250",
+     "oxide:100",
+     "silicon:250",
+     "carbide:50"
+    ]
+   },
+   "itemCapacity": "250",
+   "power": "3",
+   "size": "5"
+  },
+  "differential-generator": {
+   "accepts": "recipe",
+   "build": {
+    "category": "power",
+    "cost": [
+     "copper:70",
+     "titanium:50",
+     "lead:100",
+     "silicon:65",
+     "metaglass:50"
+    ]
+   },
+   "hasItems": true,
+   "hasLiquids": true,
+   "inputs": [
+    "pyratite:1"
+   ],
+   "liquids": [
+    "cryofluid:6/s"
+   ],
+   "size": "3"
+  },
+  "diffuse": {
+   "accepts": "ammo",
+   "ammo": [
+    "graphite",
+    "oxide",
+    "silicon"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "beryllium:150",
+     "silicon:200",
+     "graphite:200",
+     "tungsten:50"
+    ]
+   },
+   "size": "3"
+  },
+  "diode": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "silicon:10",
+     "plastanium:5",
+     "metaglass:10"
+    ]
+   }
+  },
+  "disassembler": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "plastanium:40",
+     "titanium:100",
+     "silicon:150",
+     "thorium:80"
+    ]
+   },
+   "craftTime": "15",
+   "hasPower": true,
+   "inputs": [
+    "scrap:1"
+   ],
+   "itemCapacity": "20",
+   "liquids": [
+    "slag:7.2/s"
+   ],
+   "power": "4",
+   "size": "3"
+  },
+  "disperse": {
+   "accepts": "ammo",
+   "ammo": [
+    "tungsten",
+    "thorium",
+    "silicon",
+    "surge-alloy"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "thorium:50",
+     "oxide:50",
+     "silicon:200",
+     "beryllium:350"
+    ]
+   },
+   "size": "4"
+  },
+  "distributor": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "lead:4",
+     "copper:4"
+    ]
+   },
+   "size": "2"
+  },
+  "door": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "titanium:6",
+     "silicon:4"
+    ]
+   }
+  },
+  "door-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "duct": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "beryllium:1"
+    ]
+   }
+  },
+  "duct-bridge": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "beryllium:15"
+    ]
+   }
+  },
+  "duct-router": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "beryllium:10"
+    ]
+   }
+  },
+  "duct-unloader": {
+   "accepts": "none",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "graphite:20",
+     "silicon:20",
+     "tungsten:10"
+    ]
+   }
+  },
+  "duo": {
+   "accepts": "ammo",
+   "ammo": [
+    "copper",
+    "graphite",
+    "silicon"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:35"
+    ]
+   }
+  },
+  "electric-heater": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "tungsten:30",
+     "oxide:30",
+     "beryllium:30"
+    ]
+   },
+   "itemCapacity": "0",
+   "size": "2"
+  },
+  "electrolyzer": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "silicon:50",
+     "graphite:40",
+     "beryllium:130",
+     "tungsten:80"
+    ]
+   },
+   "craftTime": "10",
+   "itemCapacity": "0",
+   "liquidCapacity": "50",
+   "liquids": [
+    "water:10/s"
+   ],
+   "outputLiquids": [
+    "ozone:4/s",
+    "hydrogen:6/s"
+   ],
+   "power": "1",
+   "size": "3"
+  },
+  "eruption-drill": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "silicon:300",
+     "oxide:20",
+     "tungsten:250",
+     "thorium:150"
+    ]
+   },
+   "hasPower": true,
+   "itemCapacity": "60",
+   "liquids": [
+    "hydrogen:4/s",
+    "cyanogen:0.75/s"
+   ],
+   "power": "6",
+   "size": "5"
+  },
+  "exponential-reconstructor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "lead:2000",
+     "silicon:1000",
+     "titanium:2000",
+     "thorium:750",
+     "plastanium:450",
+     "phase-fabric:600"
+    ]
+   },
+   "inputs": [
+    "silicon:850",
+    "titanium:750",
+    "plastanium:650"
+   ],
+   "liquids": [
+    "cryofluid:60/s"
+   ],
+   "power": "13",
+   "size": "7"
+  },
+  "flux-reactor": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "graphite:240",
+     "carbide:60",
+     "oxide:80",
+     "silicon:480",
+     "surge-alloy:120"
+    ]
+   },
+   "liquidCapacity": "30",
+   "liquids": [
+    "cyanogen:9/s"
+   ],
+   "size": "5"
+  },
+  "force-projector": {
+   "accepts": "none",
+   "booster": [
+    "phase-fabric:1"
+   ],
+   "build": {
+    "category": "effect",
+    "cost": [
+     "lead:100",
+     "titanium:75",
+     "silicon:125"
+    ]
+   },
+   "power": "4",
+   "size": "3"
+  },
+  "foreshadow": {
+   "accepts": "ammo",
+   "ammo": [
+    "surge-alloy"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:1000",
+     "metaglass:600",
+     "surge-alloy:300",
+     "plastanium:200",
+     "silicon:600"
+    ]
+   },
+   "liquidCapacity": "60",
+   "power": "10",
+   "size": "4"
+  },
+  "fuse": {
+   "accepts": "ammo",
+   "ammo": [
+    "titanium",
+    "thorium"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:225",
+     "graphite:225",
+     "thorium:100"
+    ]
+   },
+   "size": "3"
+  },
+  "graphite-press": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "copper:75",
+     "lead:30"
+    ]
+   },
+   "craftTime": "90",
+   "hasItems": true,
+   "inputs": [
+    "coal:2"
+   ],
+   "outputItem": "graphite:1",
+   "size": "2"
+  },
+  "ground-factory": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "copper:50",
+     "lead:120",
+     "silicon:80"
+    ]
+   },
+   "power": "1.2",
+   "size": "3"
+  },
+  "hail": {
+   "accepts": "ammo",
+   "ammo": [
+    "graphite",
+    "silicon",
+    "pyratite"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:40",
+     "graphite:17"
+    ]
+   }
+  },
+  "heat-reactor": {
+   "accepts": "recipe",
+   "inputs": [
+    "thorium:3"
+   ],
+   "itemCapacity": "20",
+   "liquids": [
+    "nitrogen:1/s"
+   ],
+   "outputItem": "fissile-matter:1",
+   "size": "3"
+  },
+  "heat-redirector": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "tungsten:10",
+     "graphite:10"
+    ]
+   },
+   "size": "3"
+  },
+  "heat-router": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "tungsten:15",
+     "graphite:10"
+    ]
+   },
+   "size": "3"
+  },
+  "heat-source": {
+   "accepts": "none",
+   "itemCapacity": "0",
+   "size": "1"
+  },
+  "hyper-processor": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "lead:450",
+     "silicon:150",
+     "thorium:75",
+     "surge-alloy:50"
+    ]
+   },
+   "hasLiquids": true,
+   "liquids": [
+    "cryofluid:4.8/s"
+   ],
+   "size": "3"
+  },
+  "illuminator": {
+   "accepts": "none",
+   "power": "0.05"
+  },
+  "impact-drill": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "silicon:70",
+     "beryllium:90",
+     "graphite:60"
+    ]
+   },
+   "hasPower": true,
+   "itemCapacity": "40",
+   "liquids": [
+    "water:10/s",
+    "ozone:3/s"
+   ],
+   "size": "4"
+  },
+  "impact-reactor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "power",
+    "cost": [
+     "lead:500",
+     "silicon:300",
+     "graphite:400",
+     "thorium:100",
+     "surge-alloy:250",
+     "metaglass:250"
+    ]
+   },
+   "inputs": [
+    "blast-compound:1"
+   ],
+   "liquidCapacity": "80",
+   "liquids": [
+    "cryofluid:15/s"
+   ],
+   "power": "25",
+   "size": "4"
+  },
+  "impulse-pump": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "copper:80",
+     "metaglass:90",
+     "silicon:30",
+     "titanium:40",
+     "thorium:35"
+    ]
+   },
+   "hasPower": true,
+   "liquidCapacity": "200",
+   "power": "1.3",
+   "size": "3"
+  },
+  "incinerator": {
+   "accepts": "custom",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "graphite:5",
+     "lead:15"
+    ]
+   },
+   "power": "0.50"
+  },
+  "interplanetary-accelerator": {
+   "accepts": "custom",
+   "hasPower": true,
+   "power": "10",
+   "size": "7"
+  },
+  "inverted-sorter": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "lead:2",
+     "copper:2"
+    ]
+   }
+  },
+  "item-void": {
+   "accepts": "custom"
+  },
+  "junction": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "copper:3"
+    ]
+   }
+  },
+  "kiln": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "copper:60",
+     "graphite:30",
+     "lead:30"
+    ]
+   },
+   "craftTime": "30",
+   "inputs": [
+    "lead:1",
+    "sand:1"
+   ],
+   "outputItem": "metaglass:1",
+   "power": "0.60",
+   "size": "2"
+  },
+  "lancer": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:60",
+     "lead:70",
+     "silicon:60",
+     "titanium:30"
+    ]
+   },
+   "power": "6",
+   "size": "2"
+  },
+  "landing-pad": {
+   "accepts": "none",
+   "itemCapacity": "100",
+   "liquidCapacity": "3000",
+   "size": "4"
+  },
+  "large-canvas": {
+   "accepts": "none",
+   "size": "3"
+  },
+  "large-cliff-crusher": {
+   "accepts": "none",
+   "booster": [
+    "graphite:1"
+   ],
+   "build": {
+    "category": "production",
+    "cost": [
+     "silicon:80",
+     "surge-alloy:15",
+     "beryllium:100",
+     "tungsten:50"
+    ]
+   },
+   "itemCapacity": "20",
+   "liquids": [
+    "hydrogen:1/s",
+    "nitrogen:3/s"
+   ],
+   "power": "1",
+   "size": "3"
+  },
+  "large-constructor": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "silicon:150",
+     "oxide:100",
+     "tungsten:200",
+     "thorium:80"
+    ]
+   },
+   "hasPower": true,
+   "power": "3",
+   "size": "5"
+  },
+  "large-logic-display": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "lead:200",
+     "silicon:150",
+     "metaglass:100",
+     "phase-fabric:75"
+    ]
+   },
+   "size": "6"
+  },
+  "large-payload-mass-driver": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "phase-fabric:20",
+     "tungsten:200",
+     "silicon:200",
+     "graphite:100",
+     "oxide:30"
+    ]
+   },
+   "power": "3",
+   "size": "5"
+  },
+  "large-plasma-bore": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "silicon:100",
+     "oxide:25",
+     "beryllium:100",
+     "tungsten:70"
+    ]
+   },
+   "itemCapacity": "20",
+   "liquids": [
+    "hydrogen:0.5/s",
+    "nitrogen:3/s"
+   ],
+   "power": "0.8",
+   "size": "3"
+  },
+  "large-shield-projector": {
+   "accepts": "none",
+   "power": "5",
+   "size": "4"
+  },
+  "laser-drill": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "copper:35",
+     "graphite:30",
+     "silicon:30",
+     "titanium:20"
+    ]
+   },
+   "hasPower": true,
+   "liquids": [
+    "water:4.8/s"
+   ],
+   "power": "1.10",
+   "size": "3"
+  },
+  "launch-pad": {
+   "accepts": "custom",
+   "hasPower": true,
+   "itemCapacity": "100",
+   "power": "4",
+   "size": "3"
+  },
+  "liquid-container": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "titanium:10",
+     "metaglass:15"
+    ]
+   },
+   "liquidCapacity": "700",
+   "size": "2",
+   "solid": true
+  },
+  "liquid-junction": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "graphite:4",
+     "metaglass:8"
+    ]
+   }
+  },
+  "liquid-router": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "graphite:4",
+     "metaglass:2"
+    ]
+   },
+   "liquidCapacity": "120"
+  },
+  "liquid-tank": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "titanium:30",
+     "metaglass:40"
+    ]
+   },
+   "liquidCapacity": "1800",
+   "size": "3",
+   "solid": true
+  },
+  "logic-display": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "lead:100",
+     "silicon:50",
+     "metaglass:50"
+    ]
+   },
+   "size": "3"
+  },
+  "logic-processor": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "lead:320",
+     "silicon:80",
+     "graphite:60",
+     "thorium:50"
+    ]
+   },
+   "size": "2"
+  },
+  "lustre": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "silicon:250",
+     "graphite:200",
+     "oxide:50",
+     "carbide:90"
+    ]
+   },
+   "liquids": [
+    "nitrogen:6/s"
+   ],
+   "size": "4"
+  },
+  "malign": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "carbide:200",
+     "beryllium:1000",
+     "silicon:500",
+     "graphite:500",
+     "phase-fabric:200"
+    ]
+   },
+   "power": "40",
+   "size": "5"
+  },
+  "mass-driver": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "titanium:125",
+     "silicon:75",
+     "lead:125",
+     "thorium:50"
+    ]
+   },
+   "itemCapacity": "120",
+   "power": "1.75",
+   "size": "3"
+  },
+  "mech-assembler": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "carbide:200",
+     "thorium:600",
+     "oxide:200",
+     "tungsten:550",
+     "silicon:1000"
+    ]
+   },
+   "liquids": [
+    "cyanogen:12/s"
+   ],
+   "power": "3",
+   "size": "5"
+  },
+  "mech-fabricator": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "silicon:200",
+     "beryllium:250",
+     "tungsten:10"
+    ]
+   },
+   "power": "1.5",
+   "size": "3"
+  },
+  "mech-refabricator": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "beryllium:250",
+     "tungsten:175",
+     "silicon:150"
+    ]
+   },
+   "inputs": [
+    "silicon:50",
+    "tungsten:40"
+   ],
+   "liquids": [
+    "hydrogen:3/s"
+   ],
+   "power": "2.5",
+   "size": "3"
+  },
+  "mechanical-drill": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "copper:12"
+    ]
+   },
+   "liquids": [
+    "water:3/s"
+   ],
+   "size": "2"
+  },
+  "mechanical-pump": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "copper:15",
+     "metaglass:10"
+    ]
+   },
+   "liquidCapacity": "20"
+  },
+  "meltdown": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:1200",
+     "lead:350",
+     "graphite:300",
+     "surge-alloy:325",
+     "silicon:325"
+    ]
+   },
+   "liquidCapacity": "60",
+   "power": "17",
+   "size": "4"
+  },
+  "melter": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "copper:30",
+     "lead:35",
+     "graphite:45"
+    ]
+   },
+   "craftTime": "10",
+   "inputs": [
+    "scrap:1"
+   ],
+   "outputLiquids": [
+    "slag:12/s"
+   ],
+   "power": "1"
+  },
+  "memory-bank": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "graphite:80",
+     "silicon:80",
+     "phase-fabric:30",
+     "copper:30"
+    ]
+   },
+   "size": "2"
+  },
+  "memory-cell": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "graphite:30",
+     "silicon:30",
+     "copper:30"
+    ]
+   }
+  },
+  "mend-projector": {
+   "accepts": "none",
+   "booster": [
+    "phase-fabric:1"
+   ],
+   "build": {
+    "category": "effect",
+    "cost": [
+     "lead:100",
+     "titanium:25",
+     "silicon:40",
+     "copper:50"
+    ]
+   },
+   "power": "1.5",
+   "size": "2"
+  },
+  "mender": {
+   "accepts": "none",
+   "booster": [
+    "silicon:1"
+   ],
+   "build": {
+    "category": "effect",
+    "cost": [
+     "lead:30",
+     "copper:25"
+    ]
+   },
+   "power": "0.3",
+   "size": "1"
+  },
+  "message": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "graphite:5",
+     "copper:5"
+    ]
+   }
+  },
+  "micro-processor": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "copper:90",
+     "lead:50",
+     "silicon:50"
+    ]
+   },
+   "size": "1"
+  },
+  "multi-press": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "titanium:100",
+     "silicon:25",
+     "lead:100",
+     "graphite:50"
+    ]
+   },
+   "craftTime": "30",
+   "hasItems": true,
+   "hasLiquids": true,
+   "hasPower": true,
+   "inputs": [
+    "coal:3"
+   ],
+   "itemCapacity": "20",
+   "liquids": [
+    "water:6/s"
+   ],
+   "outputItem": "graphite:2",
+   "power": "1.8",
+   "size": "3"
+  },
+  "multiplicative-reconstructor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "lead:650",
+     "silicon:450",
+     "titanium:350",
+     "thorium:650"
+    ]
+   },
+   "inputs": [
+    "silicon:130",
+    "titanium:80",
+    "metaglass:40"
+   ],
+   "power": "6",
+   "size": "5"
+  },
+  "naval-factory": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "copper:150",
+     "lead:130",
+     "metaglass:120"
+    ]
+   },
+   "power": "1.2",
+   "size": "3"
+  },
+  "neoplasia-reactor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "power",
+    "cost": [
+     "tungsten:750",
+     "carbide:300",
+     "oxide:150",
+     "silicon:500",
+     "phase-fabric:150",
+     "surge-alloy:200"
+    ]
+   },
+   "inputs": [
+    "phase-fabric:1"
+   ],
+   "itemCapacity": "10",
+   "liquidCapacity": "80",
+   "liquids": [
+    "arkycite:80/s",
+    "water:10/s"
+   ],
+   "outputLiquids": [
+    "neoplasm:20/s"
+   ],
+   "size": "5"
+  },
+  "oil-extractor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "production",
+    "cost": [
+     "copper:150",
+     "graphite:175",
+     "lead:115",
+     "thorium:115",
+     "silicon:75"
+    ]
+   },
+   "inputs": [
+    "sand:1"
+   ],
+   "liquidCapacity": "40",
+   "liquids": [
+    "water:9/s"
+   ],
+   "power": "3",
+   "size": "3"
+  },
+  "overdrive-dome": {
+   "accepts": "recipe",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "lead:200",
+     "titanium:130",
+     "silicon:130",
+     "plastanium:80",
+     "surge-alloy:120"
+    ]
+   },
+   "inputs": [
+    "phase-fabric:1",
+    "silicon:1"
+   ],
+   "power": "10",
+   "size": "3"
+  },
+  "overdrive-projector": {
+   "accepts": "none",
+   "booster": [
+    "phase-fabric:1"
+   ],
+   "build": {
+    "category": "effect",
+    "cost": [
+     "lead:100",
+     "titanium:75",
+     "silicon:75",
+     "plastanium:30"
+    ]
+   },
+   "power": "3.50",
+   "size": "2"
+  },
+  "overflow-duct": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "graphite:8",
+     "beryllium:8"
+    ]
+   }
+  },
+  "overflow-gate": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "lead:2",
+     "copper:4"
+    ]
+   }
+  },
+  "oxidation-chamber": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "tungsten:120",
+     "graphite:80",
+     "silicon:100",
+     "beryllium:120"
+    ]
+   },
+   "inputs": [
+    "beryllium:1"
+   ],
+   "liquidCapacity": "30",
+   "liquids": [
+    "ozone:2/s"
+   ],
+   "outputItem": "oxide:1",
+   "power": "0.5",
+   "size": "3"
+  },
+  "parallax": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "silicon:160",
+     "titanium:110",
+     "graphite:50"
+    ]
+   },
+   "hasPower": true,
+   "power": "3.3",
+   "size": "2"
+  },
+  "payload-conveyor": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "graphite:10",
+     "copper:10"
+    ]
+   }
+  },
+  "payload-loader": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "graphite:80",
+     "silicon:160",
+     "tungsten:90"
+    ]
+   },
+   "hasPower": true,
+   "power": "2",
+   "size": "3"
+  },
+  "payload-mass-driver": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "tungsten:40",
+     "silicon:50",
+     "graphite:20"
+    ]
+   },
+   "power": "0.5",
+   "size": "3"
+  },
+  "payload-router": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "graphite:15",
+     "copper:10"
+    ]
+   }
+  },
+  "payload-source": {
+   "accepts": "none",
+   "size": "5"
+  },
+  "payload-unloader": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "graphite:140",
+     "silicon:220",
+     "tungsten:180"
+    ]
+   },
+   "hasPower": true,
+   "power": "2",
+   "size": "3"
+  },
+  "payload-void": {
+   "accepts": "none",
+   "size": "5"
+  },
+  "phase-conduit": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "phase-fabric:5",
+     "silicon:7",
+     "metaglass:20",
+     "titanium:10"
+    ]
+   },
+   "hasPower": true,
+   "liquidCapacity": "100",
+   "power": "0.30"
+  },
+  "phase-conveyor": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "phase-fabric:5",
+     "silicon:7",
+     "lead:10",
+     "graphite:10"
+    ]
+   },
+   "hasPower": true,
+   "power": "0.30"
+  },
+  "phase-heater": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "oxide:30",
+     "carbide:30",
+     "beryllium:30"
+    ]
+   },
+   "inputs": [
+    "phase-fabric:1"
+   ],
+   "size": "2"
+  },
+  "phase-synthesizer": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "carbide:90",
+     "silicon:100",
+     "thorium:100",
+     "tungsten:200"
+    ]
+   },
+   "inputs": [
+    "thorium:2",
+    "sand:6"
+   ],
+   "itemCapacity": "40",
+   "liquids": [
+    "ozone:8/s"
+   ],
+   "outputItem": "phase-fabric:1",
+   "power": "8",
+   "size": "3"
+  },
+  "phase-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "phase-fabric:6"
+    ]
+   }
+  },
+  "phase-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "phase-weaver": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "silicon:130",
+     "lead:120",
+     "thorium:75"
+    ]
+   },
+   "craftTime": "120",
+   "hasPower": true,
+   "inputs": [
+    "thorium:4",
+    "sand:10"
+   ],
+   "itemCapacity": "30",
+   "outputItem": "phase-fabric:1",
+   "power": "5",
+   "size": "2"
+  },
+  "plasma-bore": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "beryllium:40"
+    ]
+   },
+   "liquids": [
+    "hydrogen:0.25/s"
+   ],
+   "power": "0.15",
+   "size": "2"
+  },
+  "plastanium-compressor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "silicon:80",
+     "lead:115",
+     "graphite:60",
+     "titanium:80"
+    ]
+   },
+   "craftTime": "60",
+   "hasItems": true,
+   "inputs": [
+    "titanium:2"
+   ],
+   "liquidCapacity": "60",
+   "liquids": [
+    "oil:15/s"
+   ],
+   "outputItem": "plastanium:1",
+   "power": "3",
+   "size": "2"
+  },
+  "plastanium-conveyor": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "plastanium:1",
+     "silicon:1",
+     "graphite:1"
+    ]
+   },
+   "itemCapacity": "10"
+  },
+  "plastanium-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "plastanium:5",
+     "metaglass:2"
+    ]
+   }
+  },
+  "plastanium-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "plated-conduit": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "thorium:2",
+     "metaglass:1",
+     "plastanium:1"
+    ]
+   },
+   "liquidCapacity": "50"
+  },
+  "pneumatic-drill": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "copper:18",
+     "graphite:10"
+    ]
+   },
+   "liquids": [
+    "water:3.5/s"
+   ],
+   "size": "2"
+  },
+  "power-node": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "copper:2",
+     "lead:6"
+    ]
+   }
+  },
+  "power-node-large": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "titanium:5",
+     "lead:10",
+     "silicon:3"
+    ]
+   },
+   "size": "2"
+  },
+  "prime-refabricator": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "thorium:250",
+     "oxide:200",
+     "tungsten:200",
+     "silicon:400"
+    ]
+   },
+   "inputs": [
+    "thorium:80",
+    "silicon:100"
+   ],
+   "liquids": [
+    "nitrogen:10/s"
+   ],
+   "power": "4.5",
+   "size": "5"
+  },
+  "pulse-conduit": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "titanium:2",
+     "metaglass:1"
+    ]
+   },
+   "liquidCapacity": "40"
+  },
+  "pulverizer": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "copper:30",
+     "lead:25"
+    ]
+   },
+   "craftTime": "40",
+   "inputs": [
+    "scrap:1"
+   ],
+   "outputItem": "sand:1",
+   "power": "0.50"
+  },
+  "pyratite-mixer": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "copper:50",
+     "lead:25"
+    ]
+   },
+   "hasItems": true,
+   "hasPower": true,
+   "inputs": [
+    "coal:1",
+    "lead:2",
+    "sand:2"
+   ],
+   "outputItem": "pyratite:1",
+   "power": "0.20",
+   "size": "2"
+  },
+  "pyrolysis-generator": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "graphite:100",
+     "carbide:60",
+     "silicon:100"
+    ]
+   },
+   "liquids": [
+    "slag:20/s",
+    "arkycite:40/s"
+   ],
+   "outputLiquids": [
+    "water:20/s"
+   ],
+   "size": "3"
+  },
+  "radar": {
+   "accepts": "none",
+   "power": "0.6"
+  },
+  "regen-projector": {
+   "accepts": "none",
+   "booster": [
+    "phase-fabric:1"
+   ],
+   "build": {
+    "category": "effect",
+    "cost": [
+     "silicon:80",
+     "tungsten:60",
+     "oxide:40",
+     "beryllium:80"
+    ]
+   },
+   "liquids": [
+    "hydrogen:1/s"
+   ],
+   "power": "1",
+   "size": "3"
+  },
+  "reinforced-bridge-conduit": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "graphite:8",
+     "beryllium:20"
+    ]
+   },
+   "liquidCapacity": "120"
+  },
+  "reinforced-conduit": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "beryllium:2"
+    ]
+   },
+   "liquidCapacity": "50"
+  },
+  "reinforced-container": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "tungsten:30",
+     "graphite:40"
+    ]
+   },
+   "itemCapacity": "160",
+   "size": "2"
+  },
+  "reinforced-liquid-container": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "tungsten:10",
+     "beryllium:16"
+    ]
+   },
+   "liquidCapacity": "1000",
+   "size": "2",
+   "solid": true
+  },
+  "reinforced-liquid-junction": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "graphite:4",
+     "beryllium:8"
+    ]
+   }
+  },
+  "reinforced-liquid-router": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "graphite:8",
+     "beryllium:4"
+    ]
+   },
+   "liquidCapacity": "150"
+  },
+  "reinforced-liquid-tank": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "tungsten:40",
+     "beryllium:50"
+    ]
+   },
+   "liquidCapacity": "2700",
+   "size": "3",
+   "solid": true
+  },
+  "reinforced-message": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "graphite:10",
+     "beryllium:5"
+    ]
+   }
+  },
+  "reinforced-payload-conveyor": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "tungsten:10"
+    ]
+   }
+  },
+  "reinforced-payload-router": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "tungsten:15"
+    ]
+   }
+  },
+  "reinforced-pump": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "beryllium:40",
+     "tungsten:30",
+     "silicon:20"
+    ]
+   },
+   "liquidCapacity": "160",
+   "liquids": [
+    "hydrogen:1.5/s"
+   ],
+   "size": "2"
+  },
+  "reinforced-surge-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "surge-alloy:6",
+     "tungsten:2"
+    ]
+   }
+  },
+  "reinforced-surge-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "reinforced-vault": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "tungsten:125",
+     "thorium:70",
+     "beryllium:100"
+    ]
+   },
+   "itemCapacity": "900",
+   "size": "3"
+  },
+  "repair-point": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "lead:30",
+     "copper:30",
+     "silicon:20"
+    ]
+   }
+  },
+  "repair-turret": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "silicon:90",
+     "thorium:80",
+     "plastanium:60"
+    ]
+   },
+   "size": "2"
+  },
+  "ripple": {
+   "accepts": "ammo",
+   "ammo": [
+    "graphite",
+    "silicon",
+    "pyratite",
+    "blast-compound",
+    "plastanium"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:150",
+     "graphite:135",
+     "titanium:60"
+    ]
+   },
+   "size": "3"
+  },
+  "rotary-pump": {
+   "accepts": "none",
+   "build": {
+    "category": "liquid",
+    "cost": [
+     "copper:70",
+     "metaglass:50",
+     "silicon:20",
+     "titanium:35"
+    ]
+   },
+   "hasPower": true,
+   "liquidCapacity": "80",
+   "power": "0.3",
+   "size": "2"
+  },
+  "router": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "copper:3"
+    ]
+   }
+  },
+  "rtg-generator": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "lead:100",
+     "silicon:75",
+     "phase-fabric:25",
+     "plastanium:75",
+     "thorium:50"
+    ]
+   },
+   "radioactive": true,
+   "size": "2"
+  },
+  "salvo": {
+   "accepts": "ammo",
+   "ammo": [
+    "copper",
+    "graphite",
+    "pyratite",
+    "silicon",
+    "thorium"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:100",
+     "graphite:80",
+     "titanium:50"
+    ]
+   },
+   "size": "2"
+  },
+  "scathe": {
+   "accepts": "ammo",
+   "ammo": [
+    "carbide",
+    "phase-fabric",
+    "surge-alloy"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "silicon:450",
+     "graphite:400",
+     "tungsten:500",
+     "oxide:100",
+     "carbide:200"
+    ]
+   },
+   "size": "4"
+  },
+  "scatter": {
+   "accepts": "ammo",
+   "ammo": [
+    "scrap",
+    "lead",
+    "metaglass"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:85",
+     "lead:45"
+    ]
+   },
+   "size": "2"
+  },
+  "scorch": {
+   "accepts": "ammo",
+   "ammo": [
+    "coal",
+    "pyratite"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:25",
+     "graphite:22"
+    ]
+   }
+  },
+  "scrap-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "scrap:6"
+    ]
+   }
+  },
+  "scrap-wall-gigantic": {
+   "accepts": "none",
+   "size": "4"
+  },
+  "scrap-wall-huge": {
+   "accepts": "none",
+   "size": "3"
+  },
+  "scrap-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "segment": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "silicon:130",
+     "thorium:80",
+     "phase-fabric:40",
+     "titanium:40"
+    ]
+   },
+   "hasPower": true,
+   "power": "8",
+   "size": "2"
+  },
+  "separator": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "copper:30",
+     "titanium:25"
+    ]
+   },
+   "craftTime": "35",
+   "hasPower": true,
+   "liquids": [
+    "slag:4/s"
+   ],
+   "power": "1.1",
+   "size": "2"
+  },
+  "shield-projector": {
+   "accepts": "none",
+   "power": "5",
+   "size": "3"
+  },
+  "shielded-wall": {
+   "accepts": "none",
+   "hasPower": true,
+   "size": "2"
+  },
+  "ship-assembler": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "carbide:100",
+     "oxide:200",
+     "tungsten:550",
+     "silicon:900",
+     "thorium:400"
+    ]
+   },
+   "liquids": [
+    "cyanogen:12/s"
+   ],
+   "power": "2.5",
+   "size": "5"
+  },
+  "ship-fabricator": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "silicon:250",
+     "beryllium:200"
+    ]
+   },
+   "power": "1.5",
+   "size": "3"
+  },
+  "ship-refabricator": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "beryllium:250",
+     "tungsten:120",
+     "silicon:150",
+     "oxide:15"
+    ]
+   },
+   "inputs": [
+    "silicon:60",
+    "tungsten:40"
+   ],
+   "liquids": [
+    "hydrogen:3/s"
+   ],
+   "power": "2.5",
+   "size": "3"
+  },
+  "shock-mine": {
+   "accepts": "none",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "lead:25",
+     "silicon:12"
+    ]
+   }
+  },
+  "shockwave-tower": {
+   "accepts": "none",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "surge-alloy:50",
+     "silicon:150",
+     "oxide:30",
+     "tungsten:100"
+    ]
+   },
+   "liquids": [
+    "cyanogen:1.5/s"
+   ],
+   "size": "3"
+  },
+  "silicon-arc-furnace": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "beryllium:70",
+     "graphite:80"
+    ]
+   },
+   "craftTime": "50",
+   "hasPower": true,
+   "inputs": [
+    "graphite:1",
+    "sand:4"
+   ],
+   "itemCapacity": "30",
+   "outputItem": "silicon:4",
+   "power": "5",
+   "size": "3"
+  },
+  "silicon-crucible": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "titanium:120",
+     "metaglass:80",
+     "plastanium:35",
+     "silicon:60"
+    ]
+   },
+   "craftTime": "90",
+   "hasPower": true,
+   "inputs": [
+    "coal:4",
+    "sand:6",
+    "pyratite:1"
+   ],
+   "itemCapacity": "30",
+   "outputItem": "silicon:8",
+   "power": "4",
+   "size": "3"
+  },
+  "silicon-smelter": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "copper:30",
+     "lead:25"
+    ]
+   },
+   "craftTime": "40",
+   "hasPower": true,
+   "inputs": [
+    "coal:1",
+    "sand:2"
+   ],
+   "outputItem": "silicon:1",
+   "power": "0.50",
+   "size": "2"
+  },
+  "slag-centrifuge": {
+   "accepts": "recipe",
+   "inputs": [
+    "sand:1"
+   ],
+   "liquidCapacity": "80",
+   "liquids": [
+    "slag:40/s"
+   ],
+   "outputLiquids": [
+    "gallium:1/s"
+   ],
+   "size": "3"
+  },
+  "slag-heater": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "tungsten:50",
+     "oxide:20",
+     "beryllium:20"
+    ]
+   },
+   "itemCapacity": "0",
+   "liquidCapacity": "120",
+   "liquids": [
+    "slag:40/s"
+   ],
+   "size": "3"
+  },
+  "slag-incinerator": {
+   "accepts": "custom",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "tungsten:15"
+    ]
+   },
+   "liquids": [
+    "slag:0/s"
+   ],
+   "size": "1"
+  },
+  "small-deconstructor": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "beryllium:100",
+     "silicon:100",
+     "oxide:40",
+     "graphite:80"
+    ]
+   },
+   "itemCapacity": "100",
+   "power": "1",
+   "size": "3"
+  },
+  "small-heat-redirector": {
+   "accepts": "none",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "surge-alloy:3",
+     "graphite:8"
+    ]
+   },
+   "size": "2"
+  },
+  "smite": {
+   "accepts": "ammo",
+   "ammo": [
+    "surge-alloy"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "oxide:200",
+     "surge-alloy:400",
+     "silicon:800",
+     "carbide:500",
+     "phase-fabric:300"
+    ]
+   },
+   "size": "5"
+  },
+  "solar-panel": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "lead:10",
+     "silicon:8"
+    ]
+   }
+  },
+  "solar-panel-large": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "lead:60",
+     "silicon:70",
+     "phase-fabric:15"
+    ]
+   },
+   "size": "3"
+  },
+  "sorter": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "lead:2",
+     "copper:2"
+    ]
+   }
+  },
+  "space": {
+   "accepts": "none",
+   "solid": true
+  },
+  "spectre": {
+   "accepts": "ammo",
+   "ammo": [
+    "graphite",
+    "thorium",
+    "pyratite"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "copper:900",
+     "graphite:300",
+     "surge-alloy:250",
+     "plastanium:175",
+     "thorium:250"
+    ]
+   },
+   "liquidCapacity": "120",
+   "size": "4"
+  },
+  "spore-press": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "lead:35",
+     "silicon:30"
+    ]
+   },
+   "craftTime": "20",
+   "hasLiquids": true,
+   "hasPower": true,
+   "inputs": [
+    "spore-pod:1"
+   ],
+   "liquidCapacity": "60",
+   "outputLiquids": [
+    "oil:18/s"
+   ],
+   "power": "0.7",
+   "size": "2"
+  },
+  "steam-generator": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "copper:35",
+     "graphite:25",
+     "lead:40",
+     "silicon:30"
+    ]
+   },
+   "explodes": true,
+   "flammable": true,
+   "hasLiquids": true,
+   "liquids": [
+    "water:6/s"
+   ],
+   "size": "2"
+  },
+  "sublimate": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "tungsten:150",
+     "silicon:200",
+     "oxide:40",
+     "beryllium:400"
+    ]
+   },
+   "liquidCapacity": "50",
+   "size": "3"
+  },
+  "surge-conveyor": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "surge-alloy:1",
+     "tungsten:1"
+    ]
+   },
+   "hasPower": true,
+   "itemCapacity": "10"
+  },
+  "surge-crucible": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "silicon:100",
+     "graphite:80",
+     "tungsten:80",
+     "oxide:80"
+    ]
+   },
+   "inputs": [
+    "silicon:3"
+   ],
+   "itemCapacity": "20",
+   "liquids": [
+    "slag:160/s"
+   ],
+   "outputItem": "surge-alloy:1",
+   "power": "1.5",
+   "size": "3"
+  },
+  "surge-router": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "surge-alloy:5",
+     "tungsten:1"
+    ]
+   },
+   "hasPower": true
+  },
+  "surge-smelter": {
+   "accepts": "recipe",
+   "build": {
+    "category": "crafting",
+    "cost": [
+     "silicon:80",
+     "lead:80",
+     "thorium:70"
+    ]
+   },
+   "craftTime": "75",
+   "hasPower": true,
+   "inputs": [
+    "copper:3",
+    "lead:4",
+    "titanium:2",
+    "silicon:3"
+   ],
+   "itemCapacity": "20",
+   "outputItem": "surge-alloy:1",
+   "power": "4",
+   "size": "3"
+  },
+  "surge-tower": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "titanium:7",
+     "lead:10",
+     "silicon:15",
+     "surge-alloy:15"
+    ]
+   },
+   "size": "2"
+  },
+  "surge-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "surge-alloy:6"
+    ]
+   }
+  },
+  "surge-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "swarmer": {
+   "accepts": "ammo",
+   "ammo": [
+    "blast-compound",
+    "pyratite",
+    "surge-alloy"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "graphite:35",
+     "titanium:35",
+     "plastanium:45",
+     "silicon:30"
+    ]
+   },
+   "size": "2"
+  },
+  "switch": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "graphite:5",
+     "copper:5"
+    ]
+   }
+  },
+  "tank-assembler": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "thorium:500",
+     "oxide:150",
+     "carbide:80",
+     "silicon:650"
+    ]
+   },
+   "liquids": [
+    "cyanogen:9/s"
+   ],
+   "power": "2.5",
+   "size": "5"
+  },
+  "tank-fabricator": {
+   "accepts": "custom",
+   "build": {
+    "category": "units",
+    "cost": [
+     "silicon:200",
+     "beryllium:150"
+    ]
+   },
+   "power": "1.5",
+   "size": "3"
+  },
+  "tank-refabricator": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "beryllium:200",
+     "tungsten:80",
+     "silicon:100"
+    ]
+   },
+   "inputs": [
+    "silicon:40",
+    "tungsten:30"
+   ],
+   "liquids": [
+    "hydrogen:3/s"
+   ],
+   "power": "3",
+   "size": "3"
+  },
+  "tetrative-reconstructor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "units",
+    "cost": [
+     "lead:4000",
+     "silicon:3000",
+     "thorium:1000",
+     "plastanium:600",
+     "phase-fabric:600",
+     "surge-alloy:800"
+    ]
+   },
+   "inputs": [
+    "silicon:1000",
+    "plastanium:600",
+    "surge-alloy:500",
+    "phase-fabric:350"
+   ],
+   "liquids": [
+    "cryofluid:180/s"
+   ],
+   "power": "25",
+   "size": "9"
+  },
+  "thermal-generator": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "copper:40",
+     "graphite:35",
+     "lead:50",
+     "silicon:35",
+     "metaglass:40"
+    ]
+   },
+   "size": "2"
+  },
+  "thorium-reactor": {
+   "accepts": "recipe",
+   "build": {
+    "category": "power",
+    "cost": [
+     "lead:300",
+     "silicon:200",
+     "graphite:150",
+     "thorium:150",
+     "metaglass:50"
+    ]
+   },
+   "inputs": [
+    "thorium:1"
+   ],
+   "liquids": [
+    "cryofluid:heating/coolantPower"
+   ],
+   "size": "3"
+  },
+  "thorium-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "thorium:6"
+    ]
+   }
+  },
+  "thorium-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "thruster": {
+   "accepts": "none",
+   "size": "4"
+  },
+  "tile-logic-display": {
+   "accepts": "none",
+   "build": {
+    "category": "logic",
+    "cost": [
+     "lead:8",
+     "silicon:8",
+     "metaglass:8",
+     "phase-fabric:3"
+    ]
+   }
+  },
+  "titan": {
+   "accepts": "ammo",
+   "ammo": [
+    "thorium",
+    "carbide",
+    "oxide"
+   ],
+   "build": {
+    "category": "turret",
+    "cost": [
+     "tungsten:250",
+     "silicon:300",
+     "thorium:400"
+    ]
+   },
+   "liquids": [
+    "hydrogen:5/s"
+   ],
+   "size": "4"
+  },
+  "titanium-conveyor": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "copper:1",
+     "lead:1",
+     "titanium:1"
+    ]
+   }
+  },
+  "titanium-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "titanium:6"
+    ]
+   }
+  },
+  "titanium-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "tsunami": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "metaglass:100",
+     "lead:400",
+     "titanium:250",
+     "thorium:100"
+    ]
+   },
+   "liquidCapacity": "40",
+   "size": "3"
+  },
+  "tungsten-wall": {
+   "accepts": "none",
+   "build": {
+    "category": "defense",
+    "cost": [
+     "tungsten:6"
+    ]
+   }
+  },
+  "tungsten-wall-large": {
+   "accepts": "none",
+   "size": "2"
+  },
+  "turbine-condenser": {
+   "accepts": "none",
+   "build": {
+    "category": "power",
+    "cost": [
+     "beryllium:60"
+    ]
+   },
+   "hasLiquids": true,
+   "liquidCapacity": "20",
+   "outputLiquids": [
+    "water:5/60/9"
+   ],
+   "size": "3"
+  },
+  "underflow-duct": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "graphite:8",
+     "beryllium:8"
+    ]
+   }
+  },
+  "underflow-gate": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "lead:2",
+     "copper:4"
+    ]
+   }
+  },
+  "unit-cargo-loader": {
+   "accepts": "custom",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "silicon:80",
+     "surge-alloy:50",
+     "oxide:20"
+    ]
+   },
+   "itemCapacity": "200",
+   "liquids": [
+    "nitrogen:10/s"
+   ],
+   "size": "3"
+  },
+  "unit-cargo-unload-point": {
+   "accepts": "none",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "silicon:60",
+     "tungsten:60"
+    ]
+   },
+   "itemCapacity": "100",
+   "size": "2"
+  },
+  "unit-repair-tower": {
+   "accepts": "none",
+   "build": {
+    "category": "units",
+    "cost": [
+     "graphite:90",
+     "silicon:90",
+     "tungsten:80"
+    ]
+   },
+   "liquids": [
+    "ozone:3/s"
+   ],
+   "power": "1",
+   "size": "2"
+  },
+  "unloader": {
+   "accepts": "none",
+   "build": {
+    "category": "distribution",
+    "cost": [
+     "titanium:25",
+     "silicon:30"
+    ]
+   }
+  },
+  "vault": {
+   "accepts": "any",
+   "build": {
+    "category": "effect",
+    "cost": [
+     "titanium:250",
+     "thorium:125"
+    ]
+   },
+   "itemCapacity": "1000",
+   "size": "3"
+  },
+  "vent-condenser": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "graphite:20",
+     "beryllium:60"
+    ]
+   },
+   "craftTime": "120",
+   "hasLiquids": true,
+   "itemCapacity": "0",
+   "liquidCapacity": "60",
+   "outputLiquids": [
+    "water:30/s"
+   ],
+   "power": "0.5",
+   "size": "3"
+  },
+  "water-extractor": {
+   "accepts": "none",
+   "build": {
+    "category": "production",
+    "cost": [
+     "metaglass:30",
+     "graphite:30",
+     "lead:30",
+     "copper:30"
+    ]
+   },
+   "liquidCapacity": "40",
+   "power": "1.5",
+   "size": "2"
+  },
+  "wave": {
+   "accepts": "none",
+   "build": {
+    "category": "turret",
+    "cost": [
+     "metaglass:45",
+     "lead:75",
+     "copper:25"
+    ]
+   },
+   "liquidCapacity": "10",
+   "size": "2"
+  },
+  "world-processor": {
+   "accepts": "none",
+   "size": "1"
+  }
+ },
+ "classes": {
+  "additive-reconstructor": "Reconstructor",
+  "advanced-launch-pad": "LaunchPad",
+  "afflict": "PowerTurret",
+  "air-factory": "UnitFactory",
+  "arc": "PowerTurret",
+  "armored-conveyor": "ArmoredConveyor",
+  "armored-duct": "Duct",
+  "atmospheric-concentrator": "HeatCrafter",
+  "basic-assembler-module": "UnitAssemblerModule",
+  "battery": "Battery",
+  "battery-large": "Battery",
+  "beam-link": "LongPowerNode",
+  "beam-node": "BeamNode",
+  "beam-tower": "BeamNode",
+  "beryllium-wall": "Wall",
+  "beryllium-wall-large": "Wall",
+  "blast-door": "AutoDoor",
+  "blast-drill": "Drill",
+  "blast-mixer": "GenericCrafter",
+  "breach": "ItemTurret",
+  "bridge-conduit": "LiquidBridge",
+  "bridge-conveyor": "BufferedItemBridge",
+  "build-tower": "BuildTurret",
+  "canvas": "CanvasBlock",
+  "carbide-crucible": "HeatCrafter",
+  "carbide-wall": "Wall",
+  "carbide-wall-large": "Wall",
+  "chemical-combustion-chamber": "ConsumeGenerator",
+  "cliff-crusher": "WallCrafter",
+  "coal-centrifuge": "GenericCrafter",
+  "combustion-generator": "ConsumeGenerator",
+  "conduit": "Conduit",
+  "constructor": "Constructor",
+  "container": "StorageBlock",
+  "conveyor": "Conveyor",
+  "copper-wall": "Wall",
+  "copper-wall-large": "Wall",
+  "core-acropolis": "CoreBlock",
+  "core-bastion": "CoreBlock",
+  "core-citadel": "CoreBlock",
+  "core-foundation": "CoreBlock",
+  "core-nucleus": "CoreBlock",
+  "core-shard": "CoreBlock",
+  "cryofluid-mixer": "GenericCrafter",
+  "cultivator": "AttributeCrafter",
+  "cyanogen-synthesizer": "HeatCrafter",
+  "cyclone": "ItemTurret",
+  "deconstructor": "PayloadDeconstructor",
+  "differential-generator": "ConsumeGenerator",
+  "diffuse": "ItemTurret",
+  "diode": "PowerDiode",
+  "disassembler": "Separator",
+  "disperse": "ItemTurret",
+  "distributor": "Router",
+  "door": "Door",
+  "door-large": "Door",
+  "duct": "Duct",
+  "duct-bridge": "DuctBridge",
+  "duct-router": "DuctRouter",
+  "duct-unloader": "DirectionalUnloader",
+  "duo": "ItemTurret",
+  "electric-heater": "HeatProducer",
+  "electrolyzer": "GenericCrafter",
+  "eruption-drill": "BurstDrill",
+  "exponential-reconstructor": "Reconstructor",
+  "flux-reactor": "VariableReactor",
+  "force-projector": "ForceProjector",
+  "foreshadow": "ItemTurret",
+  "fuse": "ItemTurret",
+  "graphite-press": "GenericCrafter",
+  "ground-factory": "UnitFactory",
+  "hail": "ItemTurret",
+  "heat-reactor": "HeatProducer",
+  "heat-redirector": "HeatConductor",
+  "heat-router": "HeatConductor",
+  "heat-source": "HeatProducer",
+  "hyper-processor": "LogicBlock",
+  "illuminator": "LightBlock",
+  "impact-drill": "BurstDrill",
+  "impact-reactor": "ImpactReactor",
+  "impulse-pump": "Pump",
+  "incinerator": "Incinerator",
+  "interplanetary-accelerator": "Accelerator",
+  "inverted-sorter": "Sorter",
+  "item-void": "ItemVoid",
+  "junction": "Junction",
+  "kiln": "GenericCrafter",
+  "lancer": "PowerTurret",
+  "landing-pad": "LandingPad",
+  "large-canvas": "CanvasBlock",
+  "large-cliff-crusher": "WallCrafter",
+  "large-constructor": "Constructor",
+  "large-logic-display": "LogicDisplay",
+  "large-payload-mass-driver": "PayloadMassDriver",
+  "large-plasma-bore": "BeamDrill",
+  "large-shield-projector": "BaseShield",
+  "laser-drill": "Drill",
+  "launch-pad": "LaunchPad",
+  "liquid-container": "LiquidRouter",
+  "liquid-junction": "LiquidJunction",
+  "liquid-router": "LiquidRouter",
+  "liquid-tank": "LiquidRouter",
+  "logic-display": "LogicDisplay",
+  "logic-processor": "LogicBlock",
+  "lustre": "ContinuousTurret",
+  "malign": "PowerTurret",
+  "mass-driver": "MassDriver",
+  "mech-assembler": "UnitAssembler",
+  "mech-fabricator": "UnitFactory",
+  "mech-refabricator": "Reconstructor",
+  "mechanical-drill": "Drill",
+  "mechanical-pump": "Pump",
+  "meltdown": "LaserTurret",
+  "melter": "GenericCrafter",
+  "memory-bank": "MemoryBlock",
+  "memory-cell": "MemoryBlock",
+  "mend-projector": "MendProjector",
+  "mender": "MendProjector",
+  "message": "MessageBlock",
+  "micro-processor": "LogicBlock",
+  "multi-press": "GenericCrafter",
+  "multiplicative-reconstructor": "Reconstructor",
+  "naval-factory": "UnitFactory",
+  "neoplasia-reactor": "HeaterGenerator",
+  "oil-extractor": "Fracker",
+  "overdrive-dome": "OverdriveProjector",
+  "overdrive-projector": "OverdriveProjector",
+  "overflow-duct": "OverflowDuct",
+  "overflow-gate": "OverflowGate",
+  "oxidation-chamber": "HeatProducer",
+  "parallax": "TractorBeamTurret",
+  "payload-conveyor": "PayloadConveyor",
+  "payload-loader": "PayloadLoader",
+  "payload-mass-driver": "PayloadMassDriver",
+  "payload-router": "PayloadRouter",
+  "payload-source": "PayloadSource",
+  "payload-unloader": "PayloadUnloader",
+  "payload-void": "PayloadVoid",
+  "phase-conduit": "LiquidBridge",
+  "phase-conveyor": "ItemBridge",
+  "phase-heater": "HeatProducer",
+  "phase-synthesizer": "HeatCrafter",
+  "phase-wall": "Wall",
+  "phase-wall-large": "Wall",
+  "phase-weaver": "GenericCrafter",
+  "plasma-bore": "BeamDrill",
+  "plastanium-compressor": "GenericCrafter",
+  "plastanium-conveyor": "StackConveyor",
+  "plastanium-wall": "Wall",
+  "plastanium-wall-large": "Wall",
+  "plated-conduit": "ArmoredConduit",
+  "pneumatic-drill": "Drill",
+  "power-node": "PowerNode",
+  "power-node-large": "PowerNode",
+  "prime-refabricator": "Reconstructor",
+  "pulse-conduit": "Conduit",
+  "pulverizer": "GenericCrafter",
+  "pyratite-mixer": "GenericCrafter",
+  "pyrolysis-generator": "ConsumeGenerator",
+  "radar": "Radar",
+  "regen-projector": "RegenProjector",
+  "reinforced-bridge-conduit": "DirectionLiquidBridge",
+  "reinforced-conduit": "ArmoredConduit",
+  "reinforced-container": "StorageBlock",
+  "reinforced-liquid-container": "LiquidRouter",
+  "reinforced-liquid-junction": "LiquidJunction",
+  "reinforced-liquid-router": "LiquidRouter",
+  "reinforced-liquid-tank": "LiquidRouter",
+  "reinforced-message": "MessageBlock",
+  "reinforced-payload-conveyor": "PayloadConveyor",
+  "reinforced-payload-router": "PayloadRouter",
+  "reinforced-pump": "Pump",
+  "reinforced-surge-wall": "Wall",
+  "reinforced-surge-wall-large": "Wall",
+  "reinforced-vault": "StorageBlock",
+  "repair-point": "RepairTurret",
+  "repair-turret": "RepairTurret",
+  "ripple": "ItemTurret",
+  "rotary-pump": "Pump",
+  "router": "Router",
+  "rtg-generator": "ConsumeGenerator",
+  "salvo": "ItemTurret",
+  "scathe": "ItemTurret",
+  "scatter": "ItemTurret",
+  "scorch": "ItemTurret",
+  "scrap-wall": "Wall",
+  "scrap-wall-gigantic": "Wall",
+  "scrap-wall-huge": "Wall",
+  "scrap-wall-large": "Wall",
+  "segment": "PointDefenseTurret",
+  "separator": "Separator",
+  "shield-projector": "BaseShield",
+  "shielded-wall": "ShieldWall",
+  "ship-assembler": "UnitAssembler",
+  "ship-fabricator": "UnitFactory",
+  "ship-refabricator": "Reconstructor",
+  "shock-mine": "ShockMine",
+  "shockwave-tower": "ShockwaveTower",
+  "silicon-arc-furnace": "GenericCrafter",
+  "silicon-crucible": "AttributeCrafter",
+  "silicon-smelter": "GenericCrafter",
+  "slag-centrifuge": "GenericCrafter",
+  "slag-heater": "HeatProducer",
+  "slag-incinerator": "ItemIncinerator",
+  "small-deconstructor": "PayloadDeconstructor",
+  "small-heat-redirector": "HeatConductor",
+  "smite": "ItemTurret",
+  "solar-panel": "SolarGenerator",
+  "solar-panel-large": "SolarGenerator",
+  "sorter": "Sorter",
+  "space": "Floor",
+  "spectre": "ItemTurret",
+  "spore-press": "GenericCrafter",
+  "steam-generator": "ConsumeGenerator",
+  "sublimate": "ContinuousLiquidTurret",
+  "surge-conveyor": "StackConveyor",
+  "surge-crucible": "HeatCrafter",
+  "surge-router": "StackRouter",
+  "surge-smelter": "GenericCrafter",
+  "surge-tower": "PowerNode",
+  "surge-wall": "Wall",
+  "surge-wall-large": "Wall",
+  "swarmer": "ItemTurret",
+  "switch": "SwitchBlock",
+  "tank-assembler": "UnitAssembler",
+  "tank-fabricator": "UnitFactory",
+  "tank-refabricator": "Reconstructor",
+  "tetrative-reconstructor": "Reconstructor",
+  "thermal-generator": "ThermalGenerator",
+  "thorium-reactor": "NuclearReactor",
+  "thorium-wall": "Wall",
+  "thorium-wall-large": "Wall",
+  "thruster": "Thruster",
+  "tile-logic-display": "TileableLogicDisplay",
+  "titan": "ItemTurret",
+  "titanium-conveyor": "Conveyor",
+  "titanium-wall": "Wall",
+  "titanium-wall-large": "Wall",
+  "tsunami": "LiquidTurret",
+  "tungsten-wall": "Wall",
+  "tungsten-wall-large": "Wall",
+  "turbine-condenser": "ThermalGenerator",
+  "underflow-duct": "OverflowDuct",
+  "underflow-gate": "OverflowGate",
+  "unit-cargo-loader": "UnitCargoLoader",
+  "unit-cargo-unload-point": "UnitCargoUnloadPoint",
+  "unit-repair-tower": "RepairTower",
+  "unloader": "Unloader",
+  "vault": "StorageBlock",
+  "vent-condenser": "AttributeCrafter",
+  "water-extractor": "SolidPump",
+  "wave": "LiquidTurret",
+  "world-processor": "LogicBlock"
+ },
+ "count": 253
+}

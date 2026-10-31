@@ -1,0 +1,24 @@
+{
+ "id": "ulocate-outxy-discarded",
+ "kind": "semantics",
+ "severity": "ERR",
+ "claim": "`ulocate ... 0 0 ...` discards outX/outY; if a later ucontrol move/approach reads those slots the unit is ordered to (0,0).",
+ "why": "outX/outY are the only way the coordinates leave the instruction (UlocateI); a literal 0 in them that a move later consumes is a silent no-op.",
+ "source": "source",
+ "ref": "m05070",
+ "since": "2026-10-28",
+ "counter_example": "tests/cases/radar-count-ok.mlog",
+ "match": {
+  "sevs": [
+   "ERR"
+  ],
+  "msg_any": [
+   "outX/outY discarded but later used"
+  ]
+ },
+ "auto_downgrade": false,
+ "observed": {
+  "hits": 0,
+  "note": "rare in the corpora; kept because the failure is silent"
+ }
+}

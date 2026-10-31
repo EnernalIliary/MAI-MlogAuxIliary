@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: 测试（windows）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 模组脚本语法
+        run: node --check MlogAuxiliary/scripts/main.js
+
+      - name: 检查器与工具链
+        run: python tests/run_tests.py
+
+      - name: 蓝图形状
+        run: python tests/shapes/run_shapes.py
+
+      - name: 规则覆盖（规则 id 与 fixture 对账）
+        run: python tests/ruleids/run_ruleids.py
+
+      - name: 游戏内本地快检（quickcheck 与 python 检查器同规则）
+        run: python tests/mlogauxiliary/run_quickcheck_tests.py
+
+  portability:
+    name: 路径假设（linux，非阻塞）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: python tests/run_tests.py
+
+      - run: python tests/ruleids/run_ruleids.py

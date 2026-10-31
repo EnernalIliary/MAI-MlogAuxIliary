@@ -1,0 +1,18 @@
+{
+  "id": "reactor-single-threshold-is-fine",
+  "kind": "negative",
+  "severity": "SUPPRESSED",
+  "claim": "A thorium reactor guard with one threshold and no hysteresis does NOT oscillate. Do not report missing hysteresis.",
+  "why": "NuclearReactor.java:95-125 — with coolant present `heat -= heat` clears the whole heat in one tick (steady draw 0.02 liquid/tick). `control enabled` does not change coolant supply, so there is no feedback loop to oscillate: @heat is a 'starved last tick' detector, not a thermometer.",
+  "source": "user",
+  "ref": "m13630",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [],
+    "msg_any": [
+      "hysteresis"
+    ]
+  },
+  "auto_downgrade": false
+}

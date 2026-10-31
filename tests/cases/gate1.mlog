@@ -1,0 +1,5 @@
+set x 0
+select y lessThan x 1 10 20
+noop
+print y
+end

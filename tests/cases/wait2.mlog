@@ -1,0 +1,10 @@
+﻿set i 0
+outer:
+wait 0.25
+set j 0
+inner:
+op add j j 1
+jump inner lessThan j 10
+op add i i 1
+jump outer lessThan i 3
+end

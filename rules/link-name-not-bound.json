@@ -1,0 +1,26 @@
+{
+  "id": "link-name-not-bound",
+  "kind": "semantics",
+  "severity": "WARN",
+  "claim": "A name shaped like a block link (`pad1`, `reactor3`) that the processor does not actually link to resolves to a variable that is never assigned.",
+  "why": "LogicBlock binds link names from its own link table (LogicBlock.java), so a processor copied without its links keeps the code and loses the targets. Corpus: 87 blocks on my blueprint library.",
+  "source": "source",
+  "ref": "m14738",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/virus-logic-clean.mlog",
+  "match": {
+    "sevs": [
+      "WARN"
+    ],
+    "msg_any": [
+      "shaped like a block link"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 3854,
+    "programs": 350,
+    "share": 0.0194,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "spin-deadlock",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "A back edge guarded on `X @this` where the loop body binds or controls a unit AFTER reading X can never exit: the claim makes the guard true forever.",
+  "why": "UnitControlI.checkLogicAI sets `la.controller = this processor` on every `ubind`/`ucontrol`, so `@controller == @this` holds from the claim onward. Read-then-claim is the correct order (that is the anti-steal idiom) and must not be reported.",
+  "source": "source",
+  "ref": "m11039",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [
+      "ERR"
+    ],
+    "msg_any": [
+      "this loop can never leave"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 36,
+    "programs": 32,
+    "share": 0.0002,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

@@ -1,0 +1,4 @@
+# x is scanned as a message block, is not one: PrintFlushI still clears the buffer
+print x
+printflush x
+end

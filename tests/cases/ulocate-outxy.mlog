@@ -1,0 +1,5 @@
+# outX/outY at 0 and then handed to ucontrol move
+ubind @flare
+ulocate ore core true @copper 0 0 found b
+ucontrol move 0 0 0 0 0
+end

@@ -1,0 +1,8 @@
+set n 0
+loop:
+ubind @flare
+sensor c @unit @controller
+jump loop notEqual c @this
+op add n n 1
+print n
+end

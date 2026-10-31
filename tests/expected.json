@@ -1,0 +1,655 @@
+{
+  "gate/noop-drift": {
+    "kind": "gate",
+    "case": "gate1.mlog",
+    "digest": {
+      "floor": 150,
+      "users": [
+        "select"
+      ],
+      "baseline": 146,
+      "reports": true
+    }
+  },
+  "gate/baseline-silent": {
+    "kind": "gate",
+    "case": "baseline.mlog",
+    "digest": {
+      "floor": 146,
+      "users": [],
+      "baseline": 146,
+      "reports": false
+    }
+  },
+  "gate/op-emod": {
+    "kind": "gate",
+    "case": "gate-emod.mlog",
+    "digest": {
+      "floor": 150,
+      "users": [
+        "op emod"
+      ],
+      "baseline": 146,
+      "reports": true
+    }
+  },
+  "check/index-only-summary": {
+    "kind": "check_rid",
+    "case": "index-only-summary.mlog",
+    "digest": [
+      [
+        "INFO",
+        1,
+        "undefined-var-read"
+      ]
+    ]
+  },
+  "check/link-unbound-fragment": {
+    "kind": "check_nolinks",
+    "case": "link-unbound-fragment.mlog",
+    "digest": [
+      [
+        "INFO",
+        202,
+        "link-name-unbound-fragment"
+      ]
+    ]
+  },
+  "check/undefined-var-num-slot": {
+    "kind": "check_rid",
+    "case": "undefined-var-num-slot.mlog",
+    "digest": [
+      [
+        "INFO",
+        1,
+        "undefined-var-read"
+      ]
+    ]
+  },
+  "check/radar-count-misuse": {
+    "kind": "check_rid",
+    "case": "radar-count-misuse.mlog",
+    "digest": [
+      [
+        "WARN",
+        1,
+        "radar-takes-no-count"
+      ],
+      [
+        "WARN",
+        2,
+        "radar-takes-no-count"
+      ]
+    ]
+  },
+  "check/radar-count-ok": {
+    "kind": "check_rid",
+    "case": "radar-count-ok.mlog",
+    "digest": []
+  },
+  "ir/labels-resolved": {
+    "kind": "ir",
+    "case": "label.mlog",
+    "digest": {
+      "stmts": 5,
+      "dead": [],
+      "stores": [],
+      "kinds": [],
+      "labels": {
+        "loop": 1
+      },
+      "writes_counter": false
+    }
+  },
+  "ir/odd-name": {
+    "kind": "odd",
+    "case": null,
+    "digest": {
+      "odd": {
+        "cy！": [
+          2
+        ]
+      }
+    }
+  },
+  "ir/stale-write": {
+    "kind": "ir",
+    "case": "stale.mlog",
+    "digest": {
+      "stmts": 7,
+      "dead": [],
+      "stores": [
+        [
+          1,
+          "a"
+        ],
+        [
+          2,
+          "a"
+        ],
+        [
+          5,
+          "b"
+        ],
+        [
+          6,
+          "b"
+        ]
+      ],
+      "kinds": [
+        [
+          1,
+          "a",
+          "overwritten"
+        ],
+        [
+          2,
+          "a",
+          "overwritten"
+        ],
+        [
+          5,
+          "b",
+          "stale-write"
+        ],
+        [
+          6,
+          "b",
+          "stale-write"
+        ]
+      ],
+      "labels": {},
+      "writes_counter": false
+    }
+  },
+  "check/labels-blank": {
+    "kind": "check",
+    "case": "labels-check.mlog",
+    "digest": []
+  },
+  "check/reactor-slow": {
+    "kind": "check",
+    "case": "reactor-guard-slow.mlog",
+    "digest": [
+      [
+        "WARN",
+        1
+      ]
+    ]
+  },
+  "check/reactor-ok": {
+    "kind": "check",
+    "case": "reactor-guard-ok.mlog",
+    "digest": []
+  },
+  "check/reactor-unknown": {
+    "kind": "check",
+    "case": "reactor-guard-unknown.mlog",
+    "digest": [
+      [
+        "INFO",
+        0
+      ]
+    ]
+  },
+  "check/reactor-impact": {
+    "kind": "check",
+    "case": "reactor-guard-impact.mlog",
+    "digest": [
+      [
+        "WARN",
+        1
+      ]
+    ]
+  },
+  "check/reactor-impact-ok": {
+    "kind": "check",
+    "case": "reactor-guard-impact-ok.mlog",
+    "digest": []
+  },
+  "check/label-index": {
+    "kind": "check",
+    "case": "label-index.mlog",
+    "digest": [
+      [
+        "WARN",
+        2
+      ],
+      [
+        "INFO",
+        0
+      ],
+      [
+        "INFO",
+        1
+      ]
+    ]
+  },
+  "check/virus": {
+    "kind": "check",
+    "case": "virus-logic.mlog",
+    "digest": [
+      [
+        "INFO",
+        1
+      ]
+    ]
+  },
+  "check/privileged-var": {
+    "kind": "check",
+    "case": "privileged-var.mlog",
+    "digest": [
+      [
+        "INFO",
+        1
+      ],
+      [
+        "INFO",
+        2
+      ]
+    ]
+  },
+  "check/self-readwrite": {
+    "kind": "check",
+    "case": "self-readwrite.mlog",
+    "digest": [
+      [
+        "INFO",
+        4
+      ],
+      [
+        "INFO",
+        5
+      ]
+    ]
+  },
+  "check/link-hyphen": {
+    "kind": "check",
+    "case": "link-hyphen.mlog",
+    "digest": [
+      [
+        "ERR",
+        0
+      ],
+      [
+        "ERR",
+        1
+      ]
+    ]
+  },
+  "check/link-hyphen-ok": {
+    "kind": "check",
+    "case": "link-hyphen-ok.mlog",
+    "digest": []
+  },
+  "check/sensor-not-prop": {
+    "kind": "check",
+    "case": "sensor-not-prop.mlog",
+    "digest": [
+      [
+        "WARN",
+        1
+      ],
+      [
+        "WARN",
+        2
+      ],
+      [
+        "WARN",
+        3
+      ],
+      [
+        "INFO",
+        1
+      ]
+    ]
+  },
+  "check/status-effect-slot": {
+    "kind": "check",
+    "case": "status-effect-slot.mlog",
+    "digest": [
+      [
+        "INFO",
+        4
+      ],
+      [
+        "INFO",
+        5
+      ],
+      [
+        "INFO",
+        6
+      ]
+    ]
+  },
+  "check/status-bare-ok": {
+    "kind": "check",
+    "case": "status-bare-ok.mlog",
+    "digest": []
+  },
+  "check/spin-deadlock": {
+    "kind": "check",
+    "case": "spin.mlog",
+    "digest": [
+      [
+        "ERR",
+        3
+      ]
+    ]
+  },
+  "check/spin-handshake": {
+    "kind": "check",
+    "case": "spin-ok.mlog",
+    "digest": []
+  },
+  "pack/three-fields": {
+    "kind": "pack",
+    "case": "pack1.mlog",
+    "digest": {
+      "sites": [
+        {
+          "low_exp": 6,
+          "cap": 20,
+          "fields": [
+            [
+              "idiv",
+              8,
+              "status"
+            ],
+            [
+              "idiv",
+              6,
+              "outputID"
+            ],
+            [
+              "mod",
+              6,
+              "mask"
+            ]
+          ],
+          "overlaps": 1,
+          "masked": 0
+        }
+      ],
+      "peels": [
+        [
+          7,
+          "mask",
+          "lowbit"
+        ]
+      ]
+    }
+  },
+  "values/const-branch": {
+    "kind": "values",
+    "case": "val1.mlog",
+    "digest": {
+      "rounds": 3,
+      "stable": true,
+      "branches": [
+        [
+          2,
+          "always",
+          "1"
+        ]
+      ],
+      "nulls": [
+        [
+          2,
+          "r"
+        ]
+      ]
+    }
+  },
+  "values/arithmetic": {
+    "kind": "values",
+    "case": "val2.mlog",
+    "digest": {
+      "rounds": 3,
+      "stable": true,
+      "branches": [],
+      "nulls": [
+        [
+          8,
+          "q"
+        ]
+      ]
+    }
+  },
+  "values/unknown-input": {
+    "kind": "values",
+    "case": "val3.mlog",
+    "digest": {
+      "rounds": 3,
+      "stable": true,
+      "branches": [],
+      "nulls": []
+    }
+  },
+  "cost/wait-single": {
+    "kind": "cost",
+    "case": "wait1.mlog",
+    "digest": {
+      "worst": "~16 instructions per full cycle (approximate)",
+      "blocking": "2 wait statement(s), ~240 ticks (4.0 s) blocked per cycle, added above"
+    }
+  },
+  "cost/wait-nested": {
+    "kind": "cost",
+    "case": "wait2.mlog",
+    "digest": {
+      "worst": "~77 instructions per full cycle (approximate)",
+      "blocking": "1 wait statement(s), ~45 ticks (0.8 s) blocked per cycle, added above"
+    }
+  },
+  "cost/counter-op": {
+    "kind": "cost",
+    "case": "counter-op.mlog",
+    "digest": {
+      "worst": "~5 instructions per full cycle (approximate)",
+      "unreachable": [
+        2,
+        4
+      ]
+    }
+  },
+  "cost/counter-set": {
+    "kind": "cost",
+    "case": "counter-set.mlog",
+    "digest": {
+      "worst": "~3 instructions per full cycle (approximate)",
+      "unreachable": [
+        1,
+        2
+      ]
+    }
+  },
+  "cost/counter-unknown": {
+    "kind": "cost",
+    "case": "counter-unknown.mlog",
+    "digest": {
+      "worst": "~7 instructions per full cycle (approximate)"
+    }
+  },
+  "check/declared-by-mention": {
+    "kind": "check",
+    "case": "declared-by-mention.mlog",
+    "digest": [
+      [
+        "INFO",
+        4
+      ]
+    ]
+  },
+  "check/op-long-unknown": {
+    "kind": "check_msg",
+    "case": "op-long-unknown.mlog",
+    "digest": [
+      [
+        "ERR",
+        1,
+        "unknown op `select`"
+      ]
+    ]
+  },
+  "check/unreachable": {
+    "kind": "check",
+    "case": "unreachable-statement.mlog",
+    "digest": [
+      [
+        "WARN",
+        3
+      ]
+    ]
+  },
+  "check/loop-labels-ok": {
+    "kind": "check",
+    "case": "loop-labels-ok.mlog",
+    "digest": []
+  },
+  "tool/aigenerated": {
+    "kind": "aigenerated",
+    "case": null,
+    "digest": {
+      "sign": 0,
+      "verify": 0,
+      "token": true,
+      "verify_tampered": 1,
+      "resign_refused": 1,
+      "refusal_msg": true,
+      "resign_forced": 0,
+      "verify_forced": 0,
+      "strip": 2,
+      "slot_sign": 0,
+      "slot_line": "jump 27 always 0 \"aigenerated:猪猪鱼:9e47003b6c89\"",
+      "slot_end_kept": false,
+      "terminal_sign": 0,
+      "terminal_line": "jump 0 always 0 \"aigenerated:猪猪鱼:27d494c6ee39\"",
+      "comments_sign": 0,
+      "comments_body_has_none": true,
+      "comments_extract": [
+        "L1 (stmt 0): # head",
+        "L3 (stmt 1): # mid"
+      ],
+      "comments_restore": 0,
+      "comments_lines": [
+        1,
+        3
+      ],
+      "comments_verify": 0,
+      "gen_rc": 0,
+      "gen_signed": true,
+      "gen_source_signed": true,
+      "gen_nosign_rc": 0,
+      "gen_nosign_signed": false,
+      "gen_nosign_source_signed": false
+    }
+  },
+  "gen/normalized": {
+    "kind": "gen",
+    "case": null,
+    "digest": {
+      "rc": 0,
+      "size": [
+        4,
+        1
+      ],
+      "tiles": [
+        [
+          "micro-processor",
+          0,
+          0
+        ],
+        [
+          "memory-cell",
+          3,
+          0
+        ]
+      ],
+      "links": [
+        [
+          "cell1",
+          3,
+          0
+        ]
+      ],
+      "first_line": "write 42 cell1 0"
+    }
+  },
+  "tool/mcp": {
+    "kind": "mcp",
+    "case": null,
+    "digest": {
+      "server": "mlog-toolkit",
+      "tools": [
+        "mlog_doctor",
+        "mlog_check",
+        "mlog_ir",
+        "mlog_values",
+        "mlog_gen",
+        "mlog_sim"
+      ],
+      "check": {
+        "ERR": 0,
+        "SUSPECT": 0,
+        "WARN": 0,
+        "INFO": 0
+      },
+      "has_sim": true
+    }
+  },
+  "cross/unit-verdicts": {
+    "kind": "cross",
+    "case": null,
+    "digest": {
+      "cross_reads": 2,
+      "never_assigned": [
+        [
+          "ghost",
+          2
+        ]
+      ],
+      "constant": [
+        [
+          "v",
+          "42"
+        ]
+      ],
+      "dead_writes": [
+        "orphan"
+      ]
+    }
+  },
+  "values/cross-fold": {
+    "kind": "crossvalues",
+    "case": null,
+    "digest": {
+      "bare": {
+        "folded": 0,
+        "branches": [],
+        "nulls": []
+      },
+      "fed": {
+        "folded": 2,
+        "branches": [
+          [
+            5,
+            "never"
+          ]
+        ],
+        "nulls": [
+          [
+            3,
+            "y"
+          ],
+          [
+            5,
+            "y"
+          ]
+        ],
+        "x": "42",
+        "y": "null"
+      }
+    }
+  }
+}

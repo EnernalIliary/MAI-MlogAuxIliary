@@ -1,0 +1,16 @@
+{
+ "id": "fetch-count-index-is-unused",
+ "kind": "semantics",
+ "severity": "SUPPRESSED",
+ "claim": "For the counting fetch types (`unitCount`, `coreCount`, `playerCount`, `buildCount`) FetchI.run never reads `index`; it counts with `extra` as the filter. A name in the index slot is an inert parameter, not an undeclared read.",
+ "why": "LExecutor.java FetchI.run: case unitCount/coreCount/playerCount/buildCount only touch `extra` and `result`; `int i = index.numi()` is read at the top but never used by those branches.",
+ "source": "user",
+ "ref": "m15225",
+ "since": "2026-10-19",
+ "counter_example": "tests/cases/fetch-count-index.mlog",
+ "match": {
+  "sevs": [],
+  "msg_any": []
+ },
+ "note": "the fixture keeps a NAME in the index slot of a counting fetch: it must not read as a variable"
+}

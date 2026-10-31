@@ -1,0 +1,4 @@
+ubind @mega
+ucontrol build 40 40 @micro-processor 0 @this
+ucontrol build 41 41 @micro-processor 0 0
+end

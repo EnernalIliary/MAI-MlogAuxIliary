@@ -1,0 +1,184 @@
+[
+ {
+  "name": "ok-basic",
+  "code": "ubind @flare\nloop:\nucontrol move 10 10 0 0 0\njump loop always\nend",
+  "links": [],
+  "build": 160,
+  "expect": [],
+  "statements": 4
+ },
+ {
+  "name": "unknown-instr",
+  "code": "set a 1\nfoo bar\nend",
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "WARN",
+    2,
+    null
+   ]
+  ]
+ },
+ {
+  "name": "bad-subcommand",
+  "code": "ucontrol mov 1 2 3 4 5\nend",
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "WARN",
+    1,
+    null
+   ]
+  ]
+ },
+ {
+  "name": "version-gate-old-build",
+  "code": "set a 5\nset b 3\nop emod r a b\nprint r\nend",
+  "links": [],
+  "build": 146,
+  "expect": [
+   [
+    "WARN",
+    3,
+    "version-gate"
+   ]
+  ]
+ },
+ {
+  "name": "version-gate-new-build",
+  "code": "set a 5\nset b 3\nop emod r a b\nprint r\nend",
+  "links": [],
+  "build": 160,
+  "expect": []
+ },
+ {
+  "name": "broken-link-sensor",
+  "code": "sensor n vault9 @copper\nend",
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "WARN",
+    1,
+    "link-name-not-bound"
+   ]
+  ]
+ },
+ {
+  "name": "bound-link-printflush",
+  "code": "printflush message1\nend",
+  "links": [
+   "message1"
+  ],
+  "build": 160,
+  "expect": []
+ },
+ {
+  "name": "unbound-drawflush",
+  "code": "drawflush display1\nend",
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "WARN",
+    1,
+    "link-name-not-bound"
+   ]
+  ]
+ },
+ {
+  "name": "declared-variable-in-link-slot",
+  "code": "set message1 0\nprintflush message1\nend",
+  "links": [],
+  "build": 160,
+  "expect": []
+ },
+ {
+  "name": "labels-are-not-statements",
+  "code": "a:\nb:\nset x 1\nend",
+  "links": [],
+  "build": 160,
+  "expect": [],
+  "statements": 2
+ },
+ {
+  "name": "comments-and-blank-lines",
+  "code": "# hi\n\n   \nset x 1\nend",
+  "links": [],
+  "build": 160,
+  "expect": [],
+  "statements": 2
+ },
+ {
+  "name": "volume-truncation",
+  "repeat": [
+   "set a 0",
+   1001
+  ],
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "ERR",
+    1001,
+    null
+   ]
+  ],
+  "statements": 1001,
+  "ticksPerPass": 26
+ },
+ {
+  "name": "radar-link-slot",
+  "code": "radar enemy any any distance turret1 1 target\nend",
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "WARN",
+    1,
+    "link-name-not-bound"
+   ]
+  ]
+ },
+ {
+  "name": "links-unknown",
+  "code": "sensor n container1 @copper\nprint n\nprintflush message1\nend",
+  "links": null,
+  "build": 160,
+  "expect": [],
+  "statements": 4
+ },
+ {
+  "name": "links-unknown-vs-empty",
+  "code": "sensor n container1 @copper\nprintflush message1\nend",
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "WARN",
+    1,
+    "link-name-not-bound"
+   ],
+   [
+    "WARN",
+    2,
+    "link-name-not-bound"
+   ]
+  ]
+ },
+ {
+  "name": "ulocate-bad-subcommand",
+  "code": "ulocate locate core true @copper x y f b\nend",
+  "links": [],
+  "build": 160,
+  "expect": [
+   [
+    "WARN",
+    1,
+    null
+   ]
+  ]
+ }
+]

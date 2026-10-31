@@ -1,0 +1,6 @@
+ubind @mono
+sensor tmp.x @clientUnit @x
+sensor tmp.y @server @y
+print tmp.x
+print tmp.y
+end

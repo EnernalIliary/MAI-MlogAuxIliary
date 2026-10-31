@@ -1,0 +1,4 @@
+set needed-icon ""
+print "Power Gauge v0-B.2 by SBytes"
+control enabled furnace1 1
+end

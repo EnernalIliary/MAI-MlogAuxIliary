@@ -1,0 +1,20 @@
+{
+  "id": "self-read-undefined",
+  "kind": "semantics",
+  "severity": "INFO",
+  "claim": "read ... @this with a name no statement mentions always yields null, because a name becomes a variable only when some statement mentions it.",
+  "why": "LogicBlock.java:240-260 read() also returns null for a name that is not in vars. The editor's variable list is the declaration, so a slot name that appears only inside the read string never gets created.",
+  "source": "source",
+  "ref": "Mindustry-Source/core/src/mindustry/logic/LogicBlock.java:240-260",
+  "since": "2026-10-25",
+  "counter_example": "tests/cases/status-bare-ok.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "names a variable no statement in this program mentions"
+    ]
+  },
+  "auto_downgrade": false
+}

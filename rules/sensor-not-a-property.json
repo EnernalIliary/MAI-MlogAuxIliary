@@ -1,0 +1,20 @@
+{
+ "id": "sensor-not-a-property",
+ "kind": "semantics",
+ "severity": "WARN",
+ "claim": "sensor reads LAccess attributes; a third operand that is neither one of the 75 LAccess names nor a known item/liquid/block/unit/status name leaves the destination null, so every comparison against it is false, including 'equal x 0'.",
+ "why": "Measured on the real v160.7 executor (out/takeover-20261024/15-sensor-link-oracle.md, rerun with out/takeover-20261024/scenes/sensor_oracle3.py): scene vault(22,20) with copper=100, a memory cell and an unbound core. 'set d 77' followed by 'sensor d vault1 @nosuchthing' leaves d null, not 77 -- the earlier source-only reading (neither branch runs, destination untouched) is wrong, the measurement says it is written null. 'op equal r d 0' then yields 1, because null's numeric value is 0, so a guard like 'jump ... notEqual x 0' silently passes.",
+ "source": "source",
+ "ref": "m00511",
+ "since": "2026-10-24",
+ "counter_example": "tests/cases/reactor-guard-ok.mlog",
+ "match": {
+  "sevs": [
+   "WARN"
+  ],
+  "msg_any": [
+   "is not a sensor property"
+  ]
+ },
+ "auto_downgrade": false
+}

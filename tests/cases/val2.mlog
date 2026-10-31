@@ -1,0 +1,12 @@
+﻿set a 8
+op logn exact a 2
+op div q 1 0
+op idiv m 7 2
+op and low 12 8
+op sub zero 0 0
+op logn bad zero 2
+print exact
+print q
+print m
+print low
+end

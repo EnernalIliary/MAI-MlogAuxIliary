@@ -1,0 +1,9 @@
+# the counter-example for unreachable-statement: labels instead of numeric
+# targets, so the game resolves the jumps and every statement stays reachable
+loop:
+sensor n core1 @copper
+jump enough greaterThanEq n 100
+op add n n 1
+jump loop always
+enough:
+end

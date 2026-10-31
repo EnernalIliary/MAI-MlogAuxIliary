@@ -1,0 +1,13 @@
+set data 3000032
+op idiv status data 100000000
+op idiv outputID data 1000000
+op mod mask data 1000000
+op sub twosComp 0 mask
+op and lowbit mask twosComp
+op logn inputID lowbit 2
+jump skip strictEqual inputID null
+print inputID
+skip:
+op sub mask mask lowbit
+print flush
+end

@@ -1,0 +1,26 @@
+{
+  "id": "ubind-missing",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "A `ucontrol`/`ulocate` without a preceding `ubind` operates on a null unit and silently does nothing.",
+  "why": "Ubinding is what sets `exec.unit`; every unit instruction reads it. In a shared processor the loop must rebind after the unit dies.",
+  "source": "source",
+  "ref": "m14750",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [
+      "ERR"
+    ],
+    "msg_any": [
+      "used but there is no"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 4,
+    "programs": 4,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

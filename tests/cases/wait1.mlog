@@ -1,0 +1,8 @@
+﻿set n 0
+main:
+op add n n 1
+wait 0.5
+jump main lessThan n 4
+wait 2
+print n
+end

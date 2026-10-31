@@ -1,0 +1,4 @@
+set t 0
+fetch buildCount t core undefinedName @conveyor
+print t
+end

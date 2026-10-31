@@ -1,0 +1,4 @@
+# control shoot's 6th token is past the slots the instruction reads
+ubind @flare
+control shoot turret1 0 0 1 extra
+end

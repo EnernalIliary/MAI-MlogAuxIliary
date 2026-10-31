@@ -1,0 +1,26 @@
+{
+  "id": "link-shaped-variable",
+  "kind": "heuristic",
+  "severity": "INFO",
+  "claim": "A name that ends in a digit and looks like a block link, but which no statement ever uses as the target of a block instruction and which the program never assigns: here it is an ordinary variable, and every read of it is null.",
+  "why": "The public blueprint corpus (out/takeover-20261024/22-web-corpus.md, out/_crawl/check-corpus.json) gave link-name-not-bound 413 hits over 1078 programs, but only 84 of them put the name in a link slot of a real statement; 329 reads such as `jump 43 equal stop1 false` merely use a link-shaped name as a value. The consequence judgement is the same (null), but calling it a missing link over-claims -- the likely mistake is a missing assignment. Split on 2026-10-27 (user approved); the WARN variant keeps the link-slot cases.",
+  "source": "corpus",
+  "ref": "m03312",
+  "since": "2026-10-27",
+  "counter_example": "tests/cases/link-shaped-variable.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "looks like a block link"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 329,
+    "programs": 92,
+    "share": 0.0853,
+    "dir": "<corpus>"
+  }
+}

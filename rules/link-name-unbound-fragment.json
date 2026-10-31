@@ -1,0 +1,26 @@
+{
+  "id": "link-name-unbound-fragment",
+  "kind": "heuristic",
+  "severity": "INFO",
+  "claim": "A link-shaped name used by a long program whose blueprint carries no links at all: the target block was left outside the copied region, so the reference is unbound (null at runtime) but it is not an author mistake.",
+  "why": "Anon blueprint corpus (out/takeover-20261024/24-anon-corpus.md, out/_crawl/check-anon.json): 2,865 of 44,241 programs carry a zero-length link table, and they own 896 of link-name-not-bound's hits. Sample 01b2ec92f8dfaff1 is 991 statements with links=[] and 42 'drawflush display1' statements -- a fragment cropped out of a larger base, not a program that asked for a link that never existed. Downgraded from WARN to INFO on 2026-10-26 (user approved); the WARN variant stays for a missing link in a blueprint that DOES carry links.",
+  "source": "corpus",
+  "ref": "m02993",
+  "since": "2026-10-26",
+  "counter_example": "tests/cases/virus-logic-clean.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "carries no links at all"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 896,
+    "programs": 44,
+    "share": 0.0034,
+    "dir": "<corpus>/anon-corpus"
+  }
+}

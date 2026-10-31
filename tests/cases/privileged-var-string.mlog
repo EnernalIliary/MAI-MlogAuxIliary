@@ -1,0 +1,3 @@
+print "@clientUnit is only meaningful in a world processor"
+print "this line is a string, not a privileged read"
+end

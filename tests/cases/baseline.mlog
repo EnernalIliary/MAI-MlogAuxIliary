@@ -1,0 +1,5 @@
+﻿effect warn 1 1 1 1 1
+sync counter
+set counter 1
+print counter
+end

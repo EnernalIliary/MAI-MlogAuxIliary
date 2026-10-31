@@ -1,0 +1,12 @@
+# 统一换行，避免 Windows 编辑后整文件 diff
+* text=auto eol=lf
+
+# Windows 脚本要能被 PowerShell 直接跑
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# 二进制/生成物
+*.exe binary
+*.zip binary
+*.png binary
+*.jar binary

@@ -1,0 +1,30 @@
+{
+  "id": "undefined-var-read",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "Reading a variable that is never assigned (and is not a link or built-in) yields null. What happens next is decided by the SLOT: a numeric or boolean slot reads null as 0/false (INFO), any other slot (content, unit, block, link, or the payload of set/print) receives the null OBJECT (ERR).",
+  "why": "The editor lists every referenced name, so authors sign their work with a bare identifier (`print by:NOSB(hghg`); counting those as errors produced 883 hard errors on a community pack, so signature and comparison cases stay INFO (print-only, printflush without a message block, a set destination never read, punctuation-only names; a null comparison is claimed by constant-null-guard). The rest splits on the slot because LExecutor reads number slots with numi() / bool() (null -> 0, LExecutor.java:634) but hands obj() to every other slot, which then either skips itself (instanceof guard) or writes null onward.",
+  "source": "source",
+  "ref": "m07644",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [
+      "ERR",
+      "WARN",
+      "INFO"
+    ],
+    "msg_any": [
+      "is never assigned",
+      "is mentioned (so it is declared",
+      "signature only"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 18670,
+    "programs": 927,
+    "share": 0.0942,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

@@ -1,0 +1,13 @@
+# The effect slot: v159.3 takes a bare content name (exact map lookup);
+# v160.x also registers the `@status-<name>` constant and LParser normalises
+# a bare known name to it, so both spellings apply. Everything else --
+# `@<name>`, `status-<name>`, or an unknown name -- resolves to null and is a
+# silent no-op. Statement indices below are 0-based, matching `jump`.
+ubind @flare
+status false unmoving @unit 60
+status false @status-unmoving @unit 60
+status false wet @unit 60
+status false @unmoving @unit 60
+status false status-unmoving @unit 60
+status false zzz_typo @unit 60
+end

@@ -1,0 +1,20 @@
+{
+  "id": "link-name-hyphen",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "A link whose source name contains '-' cannot be bound by that name: the game derives the link name from the block name's last hyphenated segment plus its index.",
+  "why": "LogicBlock.java:123-135 getLinkName returns the text after the last '-' plus the block's index, so silicon-arc-furnace1 binds as furnace1 and every reference to silicon-arc-furnace1 resolves to a null link instead of raising. 2026-10-25 corpus sweep: 52 findings over 378 processors. This was the last live check with no rules/ file, i.e. the reason 52 sweep hits fell back to statement text.",
+  "source": "source",
+  "ref": "Mindustry-Source/core/src/mindustry/logic/LogicBlock.java:123-135",
+  "since": "2026-10-25",
+  "counter_example": "tests/cases/status-bare-ok.mlog",
+  "match": {
+    "sevs": [
+      "ERR"
+    ],
+    "msg_any": [
+      "contains '-': the game derives"
+    ]
+  },
+  "auto_downgrade": false
+}

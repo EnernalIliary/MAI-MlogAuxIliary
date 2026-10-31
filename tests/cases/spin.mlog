@@ -1,0 +1,8 @@
+set fired 0
+loop:
+ubind @flare
+sensor ctrl @unit @controller
+jump loop strictEqual ctrl @this
+op add fired fired 1
+print fired
+end

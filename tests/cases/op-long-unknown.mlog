@@ -1,0 +1,3 @@
+set cu 3
+op select k1 lessThan cu 6 @copper @dormant-cyst
+end

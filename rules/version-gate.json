@@ -1,0 +1,24 @@
+{
+ "id": "version-gate",
+ "kind": "semantics",
+ "severity": "INFO",
+ "claim": "A statement newer than the v7 baseline (146) turns into `noop` on older builds. The finding points at the line that uses the feature, not at line 0.",
+ "why": "BUILDS.md records the floors: format 147, select/emod/ushr 150, bullet/getblock 157, music 159. Silent at or below the 146 baseline by design — every program uses set/print/end and restating that is noise.",
+ "source": "source",
+ "ref": "m08356",
+ "since": "2026-10-18",
+ "counter_example": "tests/cases/labels-check.mlog",
+ "match": {
+  "sevs": [
+   "INFO"
+  ],
+  "msg_any": [
+   "version gate: uses"
+  ]
+ },
+ "auto_downgrade": false,
+ "observed": {
+  "hits": 0,
+  "note": "getblock pin removed: it exists at 146"
+ }
+}

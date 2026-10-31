@@ -1,0 +1,26 @@
+{
+  "id": "ulocate-flag-invalid",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "`ulocate`'s second argument must be a real BlockFlag; `0` makes the whole instruction invalid, including the `found` output.",
+  "why": "LAssembler resolves it through `BlockFlag.valueOf`; a miss yields InvalidStatement, so the line prints nothing and writes nothing.",
+  "source": "source",
+  "ref": "m14750",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [
+      "ERR"
+    ],
+    "msg_any": [
+      "must be a valid BlockFlag"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 0,
+    "programs": 0,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

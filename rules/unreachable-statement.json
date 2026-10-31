@@ -1,0 +1,20 @@
+{
+ "id": "unreachable-statement",
+ "kind": "semantics",
+ "severity": "WARN",
+ "claim": "A statement that no jump reaches and that is not the fall-through successor of its predecessor can never run: the program parses and passes every structural check, but part of it is dead because a jump target is off by one (or a block was left behind an unconditional branch).",
+ "why": "mlog has no scoping and no compiler: `jump N` is a raw statement index resolved by LParser (LParser.java:117-125 skips label lines, :195-198 resolves a missing label to -1). Writing the index by hand is how a generator breaks a program while keeping it legal -- measured on out/jobs/43fe34c6557e3eeb.json, where `jump 12` pointed one line past the label at 11, so the four `control shootp <turret> null 0` statements after it never ran and the turrets never stopped firing. The cost model (cost_report -> UNREACHABLE) had computed this from the start, but a cost report is not a finding: it never reached the job, the panel or the retry hint. Prefer labels (`wait:` + `jump wait always`) so the game, not the model, does the counting.",
+ "source": "source",
+ "ref": "m03631",
+ "since": "2026-10-31",
+ "counter_example": "tests/cases/loop-labels-ok.mlog",
+ "match": {
+  "sevs": [
+   "WARN"
+  ],
+  "msg_any": [
+   "can never run"
+  ]
+ },
+ "auto_downgrade": false
+}

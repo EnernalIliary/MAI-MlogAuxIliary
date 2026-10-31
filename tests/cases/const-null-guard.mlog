@@ -1,0 +1,3 @@
+# an unset variable compared to 0: the branch is a constant
+jump 1 equal zz 0
+end

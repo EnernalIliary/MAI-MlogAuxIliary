@@ -1,0 +1,29 @@
+{
+  "id": "arity-is-not-effective-params",
+  "kind": "semantics",
+  "severity": "SUPPRESSED",
+  "claim": "The parser keeps a slot count (`arity` / token count) but the game only reads a prefix of it, and a MISSING slot is filled from the statement defaults rather than rejected -- so neither `ucontrol move x y` (four fields, not six) nor a short `op` line is a defect.",
+  "why": "LExecutor.java:344-352 — `case move, stop, approach, pathfind` reads x,y and (only for `approach`) a radius. The `p1..p4` toNumber() calls happen before dispatch, so `uses` is always 1,2,3 even when nothing reads them. Reporting a missing/extra slot against `arity` flags correct community code. Same class on the `op` side (2026-10-27, user asked for the false-positive WARN to be removed): LStatement default read() leaves absent fields at their declared defaults (LStatements.java:708-711 `OperationStatement.dest = \"result\", a = \"a\", b = \"b\"`), so `op add r 1`, `op add` and `op abs` each compile to a real OpI -- v160.7 jar: `op add r 1` -> [OpI] with r=1 (the absent operand reads null and adds as 0), `op abs` -> [OpI]. The old `WARN op abs given 1 args, expects 2` was therefore a pure false positive and is gone; an unknown operator NAME is still ERR (`unknown-op`).",
+  "source": "user",
+  "ref": "m14600",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [
+      "WARN",
+      "INFO"
+    ],
+    "msg_any": [
+      "args, expects",
+      "effective arity"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 0,
+    "programs": 0,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  },
+  "state": "silent -- both slot-count reports are false positives and no checker emits them any more (ucontrol move: the executor reads a prefix of `arity`; op: absent slots fall back to the statement defaults and still build a real instruction)"
+}

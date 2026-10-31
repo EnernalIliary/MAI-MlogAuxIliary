@@ -1,0 +1,8 @@
+﻿set x 0
+op logn r x 2
+jump hit strictEqual r null
+print "no"
+end
+hit:
+print "yes"
+end

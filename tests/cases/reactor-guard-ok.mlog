@@ -1,0 +1,22 @@
+sensor h reactor1 @heat
+jump 3 greaterThan h 0
+control enabled reactor1 0
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+jump 0 always 0 0

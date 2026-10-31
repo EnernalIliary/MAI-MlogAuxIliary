@@ -1,0 +1,24 @@
+﻿sensor kind reactor1 @type
+jump 2 notEqual kind @impact-reactor
+sensor h reactor1 @heat
+jump 5 greaterThan h 0.9
+control enabled reactor1 0
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+op add x x 1
+jump 2 always 0 0

@@ -1,0 +1,5 @@
+# q is read by op add and never assigned anywhere: it reads null
+set a 1
+op add r a q
+print r
+end

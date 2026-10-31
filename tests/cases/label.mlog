@@ -1,0 +1,6 @@
+﻿set x 1
+loop:
+op add x x 1
+jump loop lessThan x 10
+print x
+end

@@ -1,0 +1,4 @@
+# payTake's second operand is read as a boolean; xx is never assigned -> always false
+ubind @flare
+ucontrol paytake xx
+end

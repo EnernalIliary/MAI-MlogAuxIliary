@@ -1,0 +1,19 @@
+{
+  "id": "true-false-are-numbers",
+  "kind": "semantics",
+  "severity": "SUPPRESSED",
+  "claim": "`true` and `false` are registered constants (1 and 0), not unassigned variables. Never report them as undefined.",
+  "why": "GlobalVars registers them via putEntry. Judging built-ins by LAssembler.var() instead of the registry produced 653 false warnings.",
+  "source": "source",
+  "ref": "m07790",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/labels-check.mlog",
+  "match": {
+    "sevs": [],
+    "msg_any": [
+      "`true`",
+      "`false`"
+    ]
+  },
+  "auto_downgrade": false
+}

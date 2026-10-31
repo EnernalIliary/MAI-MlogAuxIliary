@@ -1,0 +1,21 @@
+{
+  "id": "status-effect-slot",
+  "kind": "semantics",
+  "severity": "INFO",
+  "claim": "The status instruction's effect slot takes a bare known name, or the @status-<name> constant (v160+); @<name>, status-<name> and unknown names are silent no-ops.",
+  "why": "v160.x: LParser normalises a bare known name to the @status-<name> constant and LExecutor$ApplyEffectI carries the slot as a LVar (so a variable holding @status-wet works too); the @status- literals appear in 5 classes of the v160 jar and 0 of the v159 jar. v159.3 accepts only the bare name. Both executors measured, see out/takeover-20261024/20-status-effect-slot-forms.md. Replaces the refuted status-name-needs-at, whose inverted claim fired 3392 times in the 2026-10-25 sweep.",
+  "source": "source",
+  "ref": "docs/断言表.md L1-23 / L1-24 (E-level)",
+  "since": "2026-10-25",
+  "counter_example": "tests/cases/status-bare-ok.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "is not a status constant",
+      "is missing the leading at-sign"
+    ]
+  },
+  "auto_downgrade": false
+}

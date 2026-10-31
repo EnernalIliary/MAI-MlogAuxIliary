@@ -1,0 +1,27 @@
+{
+  "id": "noop-means-version-drift",
+  "kind": "semantics",
+  "severity": "ERR",
+  "claim": "`noop` is what a statement becomes when the parser of the installed build does not understand it. A program containing noop is usually a program from a newer build, and the parts it does not understand do nothing.",
+  "why": "InvalidStatement is produced at LParser.java:143-147 (parse error), :150-152 (privileged statement), :166-168 (mod parser), :171-173 (unknown mnemonic). Downgraded once to WARN and promoted back after the user pointed out that opening a newer map on an older client silently kills the program.",
+  "source": "user",
+  "ref": "m07961",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/gate-emod.mlog",
+  "match": {
+    "sevs": [
+      "ERR",
+      "WARN"
+    ],
+    "msg_any": [
+      "noop"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 29,
+    "programs": 7,
+    "share": 0.0001,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

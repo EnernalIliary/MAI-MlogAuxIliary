@@ -1,0 +1,6 @@
+set cy! 1
+set cy！ 2
+set 关闭时长 5
+op add x cy! 关闭时长
+print x
+end

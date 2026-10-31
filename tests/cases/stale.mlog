@@ -1,0 +1,7 @@
+﻿set a 1
+set a 2
+set a 3
+print a
+set b 1
+set b 2
+end

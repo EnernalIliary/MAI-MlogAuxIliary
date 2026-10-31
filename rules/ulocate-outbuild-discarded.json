@@ -1,0 +1,24 @@
+{
+ "id": "ulocate-outbuild-discarded",
+ "kind": "semantics",
+ "severity": "INFO",
+ "claim": "`ulocate building`/`damaged` writes the found building into its 8th operand; `0`/`null` there throws the reference away, so a later itemTake/itemDrop cannot use it.",
+ "why": "UlocateI only fills outBuild when that slot is a real variable. INFO, not an error: most programs want the coordinates, not the building.",
+ "source": "source",
+ "ref": "m05070",
+ "since": "2026-10-28",
+ "counter_example": "tests/cases/radar-count-ok.mlog",
+ "match": {
+  "sevs": [
+   "INFO"
+  ],
+  "msg_any": [
+   "outBuild discarded"
+  ]
+ },
+ "auto_downgrade": false,
+ "observed": {
+  "hits": 0,
+  "note": "not seen as a distinct class in the downloaded corpora"
+ }
+}

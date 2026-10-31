@@ -1,0 +1,3 @@
+# @commanded is not in LAccess and is not content: sensor writes null
+sensor r core @commanded
+end

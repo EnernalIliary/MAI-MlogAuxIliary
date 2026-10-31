@@ -1,0 +1,26 @@
+{
+  "id": "bool-param-constantly-zero",
+  "kind": "heuristic",
+  "severity": "INFO",
+  "claim": "An unassigned variable in a boolean parameter slot is constantly 0 (false), so the instruction never does the thing it looks like it does.",
+  "why": "mlog has no bool type: `p1.bool()` is `num() != 0`, and an unset variable is 0. Harmless when it is a signature, fatal when it was meant to be a switch. Downgraded WARN -> INFO on 2026-10-29: a boolean slot reads null as false, so nothing fails there -- same policy as undefined-var-read, which is the generic rule this one specialises.",
+  "source": "source",
+  "ref": "m14750",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "read as a boolean"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 4,
+    "programs": 2,
+    "share": 0.0,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

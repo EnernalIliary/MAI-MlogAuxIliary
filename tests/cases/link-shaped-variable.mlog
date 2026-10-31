@@ -1,0 +1,6 @@
+# counter example: the name ends in a digit and looks like a link, but this
+# program assigns it, so it is a legal variable -- never the new INFO finding
+set stop1 false
+op add stop1 stop1 1
+print stop1
+end

@@ -1,0 +1,5 @@
+set @counter 3
+print "dead0"
+print "dead1"
+print "live"
+end

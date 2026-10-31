@@ -1,0 +1,26 @@
+{
+  "id": "surplus-parameter-is-not-an-error",
+  "kind": "semantics",
+  "severity": "WARN",
+  "claim": "A token sitting past the parameters an instruction reads is ignored at runtime. Often a hidden signature — never an error.",
+  "why": "Same mechanism as unary extra operands, but generalised to every instruction: `control config unloader4 null 0 0 0sensor` is not a bug in `control`, whose only read parameters are three.",
+  "source": "user",
+  "ref": "m07332",
+  "since": "2026-10-18",
+  "counter_example": "tests/cases/reactor-guard-ok.mlog",
+  "match": {
+    "sevs": [
+      "WARN"
+    ],
+    "msg_any": [
+      "parameter slot this instruction never reads"
+    ]
+  },
+  "auto_downgrade": false,
+  "observed": {
+    "hits": 575,
+    "programs": 68,
+    "share": 0.0029,
+    "dir": "<data>/Mindustry/saves"
+  }
+}

@@ -1,0 +1,6 @@
+set x 3
+set @counter x
+print "a"
+print "b"
+print "c"
+end

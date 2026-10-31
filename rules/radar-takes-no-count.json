@@ -1,0 +1,20 @@
+{
+ "id": "radar-takes-no-count",
+ "kind": "semantics",
+ "severity": "WARN",
+ "claim": "radar/uradar have no count operand: the 6th operand is the sort direction, read as a boolean (1 ascending, anything else descending), and the statement writes exactly one unit to its single output.",
+ "why": "Source: LStatements.java:485-547 -> RadarI; LExecutor.java:753 `int sortDir = sortOrder.bool() ? 1 : -1;` and LExecutor.java:802 output.setobj(targeted) / :804 setobj(null) -- one output, no loop over N. Measured on the real v160.7 jar (out/_radar_probe.py, 2026-10-28): `radar enemy any any distance turret1 5 u` -> output u, sortOrder ___5.0, i.e. 5 is just a truthy direction; `uradar enemy any any distance 1 target` (the 6-operand shape the old doc showed) puts `target` in the direction slot and writes the result to the default `result`. The old 蓝图逻辑模式库.md taught a count of 1..10 and 'it is really the Nth one'; that page is fixed and tests/docsig/ now checks its signature against tools/instr_semantics.json. Corpus says players never wrote a count: 44,241 programs contain 1,275 radar + 740 uradar statements, all 8 tokens, the direction operand is 1/0/true or a variable, never a number > 1.",
+ "source": "source",
+ "ref": "m04508",
+ "since": "2026-10-28",
+ "counter_example": "tests/cases/radar-count-ok.mlog",
+ "match": {
+  "sevs": [
+   "WARN"
+  ],
+  "msg_any": [
+   "there is no count operand"
+  ]
+ },
+ "auto_downgrade": false
+}

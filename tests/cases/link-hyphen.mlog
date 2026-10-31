@@ -1,0 +1,3 @@
+﻿control enabled silicon-arc-furnace1 1
+read x silicon-arc-furnace1 0
+end

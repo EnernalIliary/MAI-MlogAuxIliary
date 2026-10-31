@@ -1,0 +1,4 @@
+set m -7
+op emod m -7 3
+print m
+end

@@ -1,0 +1,22 @@
+{
+ "id": "status-name-needs-at",
+ "kind": "semantics",
+ "severity": "SUPPRESSED",
+ "claim": "REFUTED as a requirement. The effect slot is NOT bare-name-only as the old claim asserted, and the at-sign form is not silently useless either: v159.3 takes a bare content name (status false unmoving @unit 60), while v160.x accepts both the bare name and the canonical @status-<name> constant (LParser normalises a known bare name to it). Wrong in both builds: @<name> and status-<name>. The old claim (bare name reads null, needs @unmoving) was backwards, and the follow-up claim that every at-sign form is dead was wrong for v160.x.",
+ "why": "v159.3: ApplyEffectI stores the effect as a plain java String (LStatements.java:1618 passes only unit and duration through builder.var) and LExecutor.java:1743 resolves it with content.statusEffect(effect) = ContentLoader.getByName (ContentLoader.java:228-240), an exact map lookup with no at-sign stripping. v160.x: the field becomes an LVar (v160.7 jar descriptor Lmindustry/logic/LVar;) and LParser rewrites a bare known status name to the @status-<name> constant (constant pools carry the @status- prefix plus a prefix+suffix format template), so bare, @status-<name> and a variable holding @status-<name> all apply; the != null guard makes everything else a silent no-op. E-level dual-jar measurement: out/_bench/_e_status12.py, _e_status13.py, log out/_bench/probe/status-effect-elevel.log. Root cause of the old rule was a bad data row: tools/instr_semantics.json listed status uses=[1,2], i.e. it modelled the effect slot as a variable read; corrected to uses=[2,3] on 2026-10-25 because the general variable analysis must not treat the slot as a read (that produced 3168 INFO hits over ~1400 saves, ~19% of all findings in the 1421-save sweep). The slot is validated by a dedicated check in tools/mlogcheck.py now.",
+ "source": "corpus",
+ "ref": "out/_bench/sweep-full.md; out/takeover-20261024/20-status-effect-slot-forms.md",
+ "since": "2026-10-19",
+ "counter_example": "tests/cases/status-bare-ok.mlog",
+ "match": {
+  "sevs": [],
+  "msg_any": []
+ },
+ "auto_downgrade": false,
+ "observed": {
+  "hits": 0,
+  "programs": 0,
+  "share": 0
+ },
+ "state": "refuted -- the effect slot is build-dependent (v159.3: bare literal name; v160.x: LVar that also accepts @status-<name>); the bare-name-only reading and the later at-sign-only reading were both wrong; replaced by the slot check in tools/mlogcheck.py"
+}

@@ -1,0 +1,4 @@
+ubind @flare
+radar enemy any any distance 0 5 u
+uradar enemy any any distance 0 3 target
+end

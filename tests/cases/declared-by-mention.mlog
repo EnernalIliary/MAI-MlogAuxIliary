@@ -1,0 +1,6 @@
+﻿draw triangle copper lead metaglass graphite sand coal
+print copper
+read a @this "copper"
+read b @this "lead"
+read c @this "zzz"
+end

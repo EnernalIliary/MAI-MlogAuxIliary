@@ -1,0 +1,21 @@
+{
+  "id": "privileged-var-needs-world-processor",
+  "kind": "semantics",
+  "severity": "INFO",
+  "claim": "`@server` / `@client*` are privileged built-ins: a micro/logic/hyper processor reads the null constant from them, so the instruction runs but the branch never takes. Only a world processor (privileged) sees a real value.",
+  "why": "GlobalVars registers these names with putEntry(name, value, true) (:81-90), and get(name, privileged) returns vars.get(\"null\") when !privileged && privilegedNames.contains(name) (:253-256). Nothing throws, which is why a program ported from a world processor to a normal one silently loses the branch.",
+  "source": "source",
+  "ref": "GlobalVars.java:81-90",
+  "since": "2026-10-19",
+  "counter_example": "tests/cases/privileged-var-string.mlog",
+  "heuristic_note": "A world processor reads these for real, but a .mlog file does not name its block, so analyse() cannot tell it apart and still prints the INFO. That is why this is INFO and not WARN; treat it as a reminder, not a verdict.",
+  "match": {
+    "sevs": [
+      "INFO"
+    ],
+    "msg_any": [
+      "privileged: only a world processor"
+    ]
+  },
+  "auto_downgrade": false
+}

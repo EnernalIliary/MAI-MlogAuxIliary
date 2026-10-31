@@ -1,0 +1,12 @@
+set i 0
+# ---- 主循环开始 ----
+# 这个标签前面有 5 行注释和 1 个空行
+# 注释会被 strip_comment 变成空串,空行只被跳过
+# 两者都占【行号】但不占【语句序号】
+# 游戏里 jump 目标是语句序号(LParser.java:117-125)
+
+looptop:
+op add i i 1
+jump looptop lessThan i 5
+print i
+end
