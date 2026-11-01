@@ -365,6 +365,8 @@ def main():
     # v0.18.0：首次配置向导的布线（无头没有 Vars.ui，只能验页面能建 + 标记读回）。
     "print('MAIWELCOME:' + maiWelcomeProbe());",
     "print('MAILLM:' + maiLlmProbe());",
+    # v0.18.1（用户 m10546）：改键之后原版落盘的是只有 min/max 的 Axis，读数必须跟上。
+    "print(maiKeybindProbe());",
     # v0.12.5: the retained selection box + corner badge state machine (no sidecar, no ui)
     "print('MAIJOBBOX0:' + maiJobBox());",
     "print('MAIJOBBOXPIN:' + maiJobBoxPin(JSON.stringify(['a','b']), JSON.stringify(['queued','running'])));",
@@ -392,7 +394,7 @@ def main():
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
                               'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIBP:',
-                              'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:',
+                              'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
@@ -1285,8 +1287,8 @@ def main():
              'v0.16.1: the zlib branch of the payload decoder is gone'),
             ('function blueprintCtxOf(name){',
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
-            ('btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);',
-             'v0.16.1: the blueprint page entry button is gone'),
+            ('btns.button("MAI 控制面板", function(){ openBlueprintPicker(); }).width(150);',
+             'v0.18.1: the blueprint page entry button is gone'),
             ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
              'v0.17.1: the schematic info page MAI button is gone'),
             ('mode: "improve", desc: text, links: null, ipt: 2, origin: null,',
@@ -1307,8 +1309,8 @@ def main():
              'v0.16.1: the zlib branch of the payload decoder is gone'),
             ('function blueprintCtxOf(name){',
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
-            ('btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);',
-             'v0.16.1: the blueprint page entry button is gone'),
+            ('btns.button("MAI 控制面板", function(){ openBlueprintPicker(); }).width(150);',
+             'v0.18.1: the blueprint page entry button is gone'),
             ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
              'v0.17.1: the schematic info page MAI button is gone'),
             ('mode: "improve", desc: text, links: null, ipt: 2, origin: null,',
@@ -1396,7 +1398,7 @@ def main():
                         ('function drawSizeText(', 'the vanilla size label is gone'),
                         ('L.stroke(2);', 'the 2px outline stroke is gone'),
                         ('Pal.accentBack', 'the accentBack shadow line is gone'),
-                        ('Core.input.keyDown(selKey)', 'F3 is no longer read as a held button')):
+                        ('var selDown = selKeyDown();', 'F3 is no longer read as a held button')):
         if needle not in code_only:
             problems.append('v0.5.0: ' + why)
     for needle, why in (('selArmed', 'the arming step is back -- F3 must start the drag itself'),
@@ -1415,8 +1417,23 @@ def main():
              'the mai-select keybind is no longer registered with KeyBind.add'),
             ('function selKeyCode(){',
              'reading the currently bound select key back out of KeyBind is gone'),
-            ('Core.input.keyDown(selKey)',
+            ('var selDown = selKeyDown();',
              'the drag no longer reads the bound key as a held button'),
+            ('function selKeyAxis(){',
+             'v0.18.1: reading the KeyBind.Axis itself is gone'),
+            ('if(ax.min !== null && ax.min !== undefined){ return Core.input.keyDown(ax.min) === true; }',
+             'v0.18.1: an axis-form bind (key == null, min/max set) is ignored again '
+             '-- that is exactly the "rebind does not take effect" bug'),
+            ('kv(t, "框选键", selKeyName(), mk,',
+             'v0.18.1: the settings page no longer shows which key is currently bound'),
+            ('function listKeyTap(){',
+             'v0.18.1: the list key (F2) is no longer read through the registered bind'),
+            ('Packages.arc.input.KeyBind.add("mai-list", dflt, "mlogauxiliary")',
+             'v0.18.1: the list key is no longer registered as a MAI keybind'),
+            ('if(listKeyTap()){',
+             'v0.18.1: the update hook no longer uses the rebindable list key'),
+            ('kv(t, "清单键", listKeyName(), mk,',
+             'v0.18.1: the settings page no longer shows the list key'),
             ('function alignText(el, align){',
              'the label alignment helper is gone (Cell.center() does not move the text)'),
             ('alignText(lbl, Packages.arc.util.Align.center);',
@@ -1775,7 +1792,7 @@ def main():
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                         'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
-                        'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:')):
+                        'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:')):
             print('  ' + l[:300])
     return 0
 

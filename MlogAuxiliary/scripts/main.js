@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.18.0";
+    var MOD_VERSION = "0.18.1";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -43,6 +43,9 @@ function __logicWriterMain(){
     var HUD_SCALE_MAX  = 2;
     var HUD_SCALE_STEP = 0.1;
     var hudScaleBtn    = null;     // 设置页中间那格（显示当前倍率，点一下回 1.0×）
+    var hudScaleLbl    = null;     // 设置页缩放行右侧的「1.0×」
+    var hudSlider      = null;     // 设置页缩放滑条（无 UI 环境为 null，退化成按钮）
+    var hudSliderLast  = -1;       // 上一帧滑条读数：用来判断「用户拖过了」
     var LLM_MODEL_KEY = "mlogauxiliary-llm-model";
     var KEY_REGION  = ["f7"];      // F7：扫鼠标周围 10 格，列出链接候选
     var KEY_SELECT  = ["f3"];      // F3：按住 = 鼠标左键拉框（v0.5.0；F8 是游戏控制台，F9/F10 也被占）
@@ -469,6 +472,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // 行用灰底 Styles.grayPanel：原版 CheckSetting 用的同一个 Drawable（SettingsMenuDialog.java:825-827），
     // 行宽/内边距也照它（minWidth 500、padTop 7 -> 这里 540 / 5，给中文留点余量）。
     var LABEL_W = 128, VALUE_W = 390, ROW_W = 540;
+    // v0.18.1（用户 m10289）：infoCircle 固定贴住每行最右侧，值区给它留出位置。
+    var INFO_W = 26;
 
     // ------------------------------------------------ v0.17.0（用户 m09440）
     // 1.「完成后自动写入」：作业一 done 就写进那台处理器，不用再点进详情。
@@ -514,15 +519,70 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }catch(e){ log("tooltip failed: " + e); return false; }
     }
 
+    // v0.18.1（用户 m10289）：「设置主题色改为 [#8abcd1]，强调色为 [highlight]」。
+    // [highlight] 在游戏里不是独立字段，UI.java:107 定义成 Pal.accent.cpy().lerp(Color.white, 0.3f)，
+    // 这里取同一个算法，颜色与游戏文本标记一致；取不到就退回 Pal.accent。
+    var THEME_COLOR = null, THEME_TRIED = false;
+
+    function themeColor(){
+        if(THEME_COLOR === null && !THEME_TRIED){
+            THEME_TRIED = true;
+            try{ THEME_COLOR = Packages.arc.graphics.Color.valueOf("8abcd1"); }
+            catch(e){ THEME_COLOR = null; log("theme color failed: " + e); }
+        }
+        return THEME_COLOR !== null ? THEME_COLOR : Pal.accent;
+    }
+
+    function emphColor(){
+        try{ return Pal.accent.cpy().lerp(Packages.arc.graphics.Color.white, 0.3); }
+        catch(e){ return Pal.accent; }
+    }
+
+    // 提示要换行：arc 默认的 Tooltips.create(String) 是 t.add(text)（Label 不 wrap），
+    // 长句会拉成一条很宽的提示。Label 本身认 '\n'，所以先手工软换行：
+    // 中文按字数切，ASCII 单词（Core.settings / sidecar 这类）整块搬，标点后优先断。
+    function isAsciiWordChar(c){
+        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9")
+            || c === "_" || c === "." || c === ":" || c === "/" || c === "-" || c === "@";
+    }
+
+    function softWrap(text, max){
+        var s1 = String(text), out = [], line = "", i = 0, c, j, w;
+        while(i < s1.length){
+            c = s1.charAt(i);
+            if(c === "\n"){ out.push(line); line = ""; i++; continue; }
+            if(isAsciiWordChar(c)){
+                j = i;
+                while(j < s1.length && isAsciiWordChar(s1.charAt(j))){ j++; }
+                w = s1.substring(i, j);
+                if(line.length > 0 && (line.length + w.length) > max){ out.push(line); line = ""; }
+                line = line + w;
+                i = j;
+                continue;
+            }
+            if(line.length >= max){ out.push(line); line = ""; }
+            line = line + c;
+            i++;
+            if((c === "\uff1b" || c === "\u3002" || c === "\uff1a" || c === "\uff0c")
+               && line.length >= max * 0.75){
+                out.push(line); line = "";
+            }
+        }
+        if(line.length > 0){ out.push(line); }
+        return out.join("\n");
+    }
+
     function infoIcon(row, text){
         try{
             var cell = row.image(Packages.mindustry.gen.Icon.infoCircle);
             try{ cell.size(18); }catch(e1){ }
-            try{ cell.padLeft(8); }catch(e2){ }
-            try{ cell.color(Pal.accent); }catch(e3){ }
+            try{ cell.padLeft(6); }catch(e2){ }
+            // expandX + right：行宽是固定的，让这一格吃掉剩下的空间，图标就贴住行尾。
+            try{ cell.expandX(); cell.right(); }catch(e3){ }
+            try{ cell.color(emphColor()); }catch(e4){ }
             var el = null;
-            try{ el = cell.get(); }catch(e4){ el = null; }
-            if(el !== null && el !== undefined){ tipOn(el, text); }
+            try{ el = cell.get(); }catch(e5){ el = null; }
+            if(el !== null && el !== undefined){ tipOn(el, softWrap(text, 34)); }
         }catch(e){ log("info icon failed: " + e); }
     }
 
@@ -555,6 +615,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // 值由 KeyBind 自己存 Core.settings（keybind-default-keyboard-mai-select-key），不用我们再管。
     // 清单（F2）与区域候选（F7）不再允许改键，固定用这两个默认键。
     var KB_SELECT = null, KB_TRIED = false;
+    var KB_LIST = null, KB_LIST_TRIED = false;
 
     function selKeyBind(){
         if(KB_SELECT === null && !KB_TRIED){
@@ -571,16 +632,128 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         return KB_SELECT;
     }
 
-    // 当前绑定的框选键；没注册上就退回 F3。
-    function selKeyCode(){
+    // 绑定的「轴」本身（arc 的 KeyBind.Axis：key 是单键，min/max 是区间）。
+    function selKeyAxis(){
         var kb = selKeyBind();
-        if(kb !== null){
+        if(kb === null || kb === undefined){ return null; }
+        try{
+            var ax = kb.value;
+            if(ax === null || ax === undefined){ return null; }
+            return ax;
+        }catch(e){ return null; }
+    }
+
+    // 当前绑定的框选键；没注册上就退回 F3。
+    // v0.18.1（用户 m10546）：「设置控制更改的热键不生效。」—— 根因在 KeybindDialog.rebind：
+    // 默认值是 Axis 的绑定走两步（先按 min 再按 max），落盘的 Axis 只有 min/max、key 是 null
+    // （KeybindDialog.java:133-140 → KeyBind.java:74-77 load 回来同样没有 key）。
+    // 这里原来只认 ax.key ⇒ 改键之后永远读不到 ⇒ 一直退回硬编码的 f3。
+    // 现在两种形状都认：单键用 key，区间用 min（两次按同一颗键时 min == max，就是单键）。
+    function selKeyCode(){
+        var ax = selKeyAxis();
+        if(ax !== null){
             try{
-                var ax = kb.value;
-                if(ax !== null && ax !== undefined && ax.key !== null && ax.key !== undefined){ return ax.key; }
+                if(ax.key !== null && ax.key !== undefined){ return ax.key; }
             }catch(e1){ }
+            try{
+                if(ax.min !== null && ax.min !== undefined){ return ax.min; }
+            }catch(e2){ }
         }
-        try{ return Packages.arc.input.KeyCode.f3; }catch(e2){ return null; }
+        try{ return Packages.arc.input.KeyCode.f3; }catch(e3){ return null; }
+    }
+
+    // 按住判定：不是区间就只看那一颗键；区间取第一个键（第二颗键留给玩家自定义 widen，
+    // 不做「两键同按才算」—— 框选是拖鼠标的动作，要求两个键同时按住只会更难用）。
+    function selKeyDown(){
+        var ax = selKeyAxis();
+        if(ax === null || ax === undefined){
+            var fk = keyByName("f3");
+            if(fk === null || fk === undefined){ return false; }
+            try{ return Core.input.keyDown(fk) === true; }catch(e0){ return false; }
+        }
+        try{
+            if(ax.key !== null && ax.key !== undefined){ return Core.input.keyDown(ax.key) === true; }
+            if(ax.min !== null && ax.min !== undefined){ return Core.input.keyDown(ax.min) === true; }
+        }catch(e){ log("selKeyDown failed: " + e); }
+        return false;
+    }
+
+    // 给设置页显示：现在这颗键到底绑成了什么。
+    function selKeyName(){
+        var ax = selKeyAxis();
+        if(ax !== null && ax !== undefined){
+            try{
+                if(ax.key !== null && ax.key !== undefined){ return ax.key.getName(); }
+            }catch(e1){ }
+            try{
+                if(ax.min !== null && ax.min !== undefined){
+                    var a = ax.min.getName();
+                    if(ax.max !== null && ax.max !== undefined && ax.max !== ax.min){
+                        a = a + " / " + ax.max.getName();
+                    }
+                    return a;
+                }
+            }catch(e2){ }
+        }
+        return "f3";
+    }
+
+    // v0.18.1（用户 m10546）：「设置控制更改的热键不生效。」修好 sel* 之后，
+    // F2「处理器清单」也照同一套注册进原版按键绑定（分类 MAI、条目「处理器清单（MAI）」），
+    // 这样 f3 与 f2 都能在 设置 → 控制 里改。F7（区域候选）仍固定。
+    function listKeyBind(){
+        if(KB_LIST === null && !KB_LIST_TRIED){
+            KB_LIST_TRIED = true;
+            try{
+                var dflt = new Packages.arc.input.KeyBind.Axis(Packages.arc.input.KeyCode.f2);
+                KB_LIST = Packages.arc.input.KeyBind.add("mai-list", dflt, "mlogauxiliary");
+                log("keybind registered: mai-list");
+            }catch(e){
+                KB_LIST = null;
+                log("keybind add failed (list): " + e);
+            }
+        }
+        return KB_LIST;
+    }
+
+    function listKeyAxis(){
+        var kb = listKeyBind();
+        if(kb === null || kb === undefined){ return null; }
+        try{
+            var ax = kb.value;
+            if(ax === null || ax === undefined){ return null; }
+            return ax;
+        }catch(e){ return null; }
+    }
+
+    // 单击判定（清单是「按一下就开」）：单键用 key，区间用 min。
+    function listKeyTap(){
+        var ax = listKeyAxis();
+        if(ax === null || ax === undefined){ return hotTap("f2"); }
+        try{
+            if(ax.key !== null && ax.key !== undefined){ return Core.input.keyTap(ax.key) === true; }
+            if(ax.min !== null && ax.min !== undefined){ return Core.input.keyTap(ax.min) === true; }
+        }catch(e){ log("listKeyTap failed: " + e); }
+        return false;
+    }
+
+    function listKeyName(){
+        var ax = listKeyAxis();
+        if(ax !== null && ax !== undefined){
+            try{
+                if(ax.key !== null && ax.key !== undefined){ return ax.key.getName(); }
+            }catch(e1){ }
+            try{
+                if(ax.min !== null && ax.min !== undefined){
+                    var a = ax.min.getName();
+                    if(ax.max !== null && ax.max !== undefined && ax.max !== ax.min){
+                        a = a + " / " + ax.max.getName();
+                    }
+                    return a;
+                }
+            }catch(e2){ }
+        }
+        return "f2";
     }
 
     function keyByName(name){
@@ -616,16 +789,29 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     }
 
     // 1. 自动写入：只写 done 且留了载荷的，写完照旧记一笔框角状态。
+    // v0.18.1（用户 m10374）：「开启自动写入也不生效」。
+    // 补三件事：①拿不到处理器时再用作业自己的 origin 找一次（框角批量那条路的 b 就是
+    // lookupBuild 的结果，单台面板那条路给的是 mine.b —— 两条都兜住）；
+    // ②每次跳过都 log 一行原因，不再静默；③写上之后照旧记一笔框角状态。
     function autoWriteApply(b, job){
         if(!autoWriteOn()){ return null; }
-        if(b === null || b === undefined || job === null || job === undefined){ return null; }
+        if(job === null || job === undefined){ return null; }
+        if(b === null || b === undefined){ b = lookupBuild(job); }
+        if(b === null || b === undefined){
+            log("auto write skipped: no processor for job " + String(job.id));
+            return null;
+        }
         if(String(job.state) !== "done"){ return null; }
-        if(String(job.bytes_b64 || "").length === 0){ return null; }
+        if(String(job.bytes_b64 || "").length === 0){
+            log("auto write skipped: job " + String(job.id) + " has no payload");
+            return null;
+        }
         var r = "";
         try{ r = String(writeBuild(b, jobAsPlan(job))); }
         catch(e){ r = "自动写入失败：" + e; }
         try{ jobBoxWritten(b); }catch(e2){ }
         hint(r);
+        log("auto write job " + String(job.id) + " -> " + r);
         return r;
     }
 
@@ -638,14 +824,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
     function section(t, title){
         var sc = t.add(title);
-        try{ sc.color(Pal.accent); }catch(e0){ }
+        try{ sc.color(themeColor()); }catch(e0){ }
         try{ sc.width(ROW_W); }catch(e1){ }
         try{ sc.center(); }catch(e2){ }
         try{ sc.padTop(12); sc.padBottom(2); }catch(e3){ }
         try{ alignText(sc.get(), Packages.arc.util.Align.center); }catch(e4){ }
         try{ sc.row(); }catch(e5){ }
         try{
-            t.image(Packages.mindustry.gen.Tex.whiteui, Pal.accent).growX().height(3).padTop(2).padBottom(4).row();
+            t.image(Packages.mindustry.gen.Tex.whiteui, themeColor()).growX().height(3).padTop(2).padBottom(4).row();
         }catch(e){
             t.add("").height(4).row();
         }
@@ -655,11 +841,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // v0.17.0：多一个 expl 参数 —— 长解释挂到行尾的 infoCircle 上，只在悬浮时显示。
     function kv(t, k, v, mk, expl){
         mk = mk || realRow;
+        var hasExpl = (expl !== null && expl !== undefined && String(expl).length > 0);
         var row = mk();
         row.margin(8).left();
         if(k.length > 0){ row.add(k).width(LABEL_W).left().color(Pal.gray); }
-        row.labelWrap(String(v)).width(VALUE_W).left();
-        if(expl !== null && expl !== undefined && String(expl).length > 0){ infoIcon(row, expl); }
+        row.labelWrap(String(v)).width(hasExpl ? (VALUE_W - INFO_W) : VALUE_W).left();
+        if(hasExpl){ infoIcon(row, expl); }
         t.add(row).width(ROW_W).left().padTop(5).row();
     }
 
@@ -684,17 +871,26 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // 「增加一个设置选项，是否将AI工作提示发送到服务器聊天框，默认关闭」。
     // 顺序固定：大模型 → 聊天播报 → 快捷动作 → 本地快检 → 说明 → 运行环境（永远最后）。
     // sidecar 不再单独成段：地址固定本机 8765、随游戏自启，出问题时看运行环境那一行。
+    // v0.18.1（用户 m10327）：「隐藏密钥按钮使用游戏原有的 :eye: 图标放在密钥栏最右侧」。
+    // UI.formatIcons 把 ":eye:" / ":eyeOff:" 换成图标字体里的字形；两个字形都在
+    // （扫 out/_server160.jar 的 mindustry/gen/Icon.class 常量池确认有 eye / eyeOff / eyeSmall）。
+    // 字号跟随按钮样式，所以按钮里写通行标记即可，不必自己贴图。
+    function eyeMark(hidden){
+        var mark = hidden ? ":eye:" : ":eyeOff:";
+        try{ return String(Packages.mindustry.core.UI.formatIcons(mark)); }
+        catch(e){ log("eye mark failed: " + e); return hidden ? "显示" : "隐藏"; }
+    }
+
     function buildSettingsTable(t, mk){
         mk = mk || realRow;
         t.defaults().pad(3).left();
         // v0.17.0（用户 m09440 / 2）：主标题两行居中、加大。
-        titleLine(t, "MAI", 1.9, Pal.accent);
-        titleLine(t, "MlogAuxIliary", 1.2, Pal.accent);
+        titleLine(t, "MAI", 1.9, themeColor());
+        titleLine(t, "MlogAuxIliary", 1.2, themeColor());
         titleLine(t, "v" + MOD_VERSION + " · 说一句要什么 → 生成 → 预检 → 写入", 0.9, Pal.gray);
         var parts = diagParts(), i;
 
         section(t, "大模型");
-        buttonRow(t, ["首次配置向导"], [function(){ welcomeOpen(); }], mk);
         kv(t, "档位", llmText(), mk, "启用后由模型直接写逻辑：描述交给模型，模型写 mlog，本模组只做预检与写入。");
         var lrow = mk();
         lrow.margin(8).left();
@@ -720,18 +916,20 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             keyField.setPasswordMode(true);
             try{ keyField.setPasswordCharacter('*'); }catch(e1){ log("password char skipped: " + e1); }
         }catch(e){ log("password mode skipped (this table has no cell.get)"); }
-        t.add(krow).width(ROW_W).left().padTop(5).row();
-        var kbtn = mk();
-        kbtn.margin(6).left();
-        var ktoggle = kbtn.button("显示密钥", function(){
-            var masked = true;
-            try{ masked = keyField.isPasswordMode(); }catch(e0){ }
+        // v0.18.1（用户 m10327）：显隐不再是另起一行的文字按钮，而是这一行最右侧的眼睛图标。
+        // expandX + right 把按钮推到行尾（行宽固定 ROW_W，值区 300，剩下的空间全给它）。
+        var keyShown = false;
+        var ktoggle = krow.button(eyeMark(true), function(){
             try{
-                keyField.setPasswordMode(!masked);
-                ktoggle.get().setText(!masked ? "隐藏密钥" : "显示密钥");
+                keyShown = !keyShown;
+                keyField.setPasswordMode(!keyShown);
+                ktoggle.get().setText(eyeMark(!keyShown));
             }catch(e2){ log("password toggle skipped: " + e2); }
-        }).height(38).padRight(6);
-        t.add(kbtn).width(ROW_W).left().padTop(5).row();
+        }).height(34).width(46);
+        try{ ktoggle.expandX(); ktoggle.right(); }catch(e3){ log("eye align skipped: " + e3); }
+        try{ tipOn(ktoggle.get(), "显示或隐藏密钥明文。密钥本身存在 Core.settings 里，只是遮住显示。"); }
+        catch(e4){ log("eye tip skipped: " + e4); }
+        t.add(krow).width(ROW_W).left().padTop(5).row();
         var mrow = mk();
         mrow.margin(8).left();
         mrow.add("模型").width(LABEL_W).left().color(Pal.gray);
@@ -762,16 +960,41 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
            + "关闭时只在本机提示。默认关闭。");
 
         section(t, "框选控件");
+        // v0.18.1（用户 m10374）：「框选控件缩放做成滑条，参考原版设置」。
+        // 原版的滑条就是 arc 的 Slider（Slider.java:37 `Slider(float,float,float,boolean)`），
+        // 但拿不到 changed(Runnable)，所以在 update 钩子里靠 hudSliderTick() 每帧对读数；
+        // 无头环境（Core.scene 为 null，样式建不出来）退化成原来那一格按钮。
         var hrow = mk();
-        hrow.margin(6).left();
-        hrow.button("缩小", function(){ hudScaleStep(-1); hudScaleRefresh(); }).height(38).padRight(6);
-        hudScaleBtn = hrow.button(hudScaleBtnText(), function(){ hudScaleSet(1); hudScaleRefresh(); })
-            .height(38).padRight(6);
-        hrow.button("放大", function(){ hudScaleStep(1); hudScaleRefresh(); }).height(38);
-        t.add(hrow).width(ROW_W).left().padTop(5).row();
+        hrow.margin(8).left();
+        hrow.add("缩放").width(LABEL_W).left().color(Pal.gray);
+        var sliderMade = false;
+        try{
+            if(Core.scene !== null && Core.scene !== undefined){
+                var hsl = new Packages.arc.scene.ui.Slider(HUD_SCALE_MIN, HUD_SCALE_MAX, HUD_SCALE_STEP, false);
+                var hsc = hrow.add(hsl).width(VALUE_W - 120).left();
+                hudSlider = hsc.get();
+                hudSlider.setValue(hudScale());
+                hudSliderLast = hudScale();
+                sliderMade = true;
+            }
+        }catch(e5){
+            hudSlider = null;
+            log("hud slider unavailable, falling back to buttons: " + e5);
+        }
+        if(!sliderMade){
+            hudScaleBtn = hrow.button(hudScaleBtnText(), function(){ hudScaleSet(1); hudScaleRefresh(); })
+                .height(38).padRight(6);
+        }
+        hudScaleLbl = hrow.labelWrap(hudScaleText()).width(70).left();
         infoIcon(hrow, "框角按钮和状态条的大小倍率（" + HUD_SCALE_MIN + "×–" + HUD_SCALE_MAX
-           + "×，每次 " + HUD_SCALE_STEP + "×）。按钮、字号、留白一起缩放，下一帧生效；"
-           + "点中间那一格回到 1.0×。");
+           + "×，步长 " + HUD_SCALE_STEP + "×）。拖滑条即时生效，按钮、字号、留白一起缩放。");
+        t.add(hrow).width(ROW_W).left().padTop(5).row();
+        // v0.18.1：把「当前绑成了什么键」直接显示出来，省得去按键绑定界面猜。
+        kv(t, "框选键", selKeyName(), mk,
+           "在 设置 → 控制 → 按键绑定 里改：分类 MAI、条目「框选处理器（MAI）」。"
+           + "按住这颗键再拖鼠标就是框选；区间绑定取第一个键。");
+        kv(t, "清单键", listKeyName(), mk,
+            "在 设置 → 控制 → 按键绑定 里改：分类 MAI、条目「处理器清单（MAI）」。按一下列出全图处理器。");
 
         section(t, "写入");
         var awrow = mk();
@@ -818,15 +1041,22 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }
         }
 
+        // v0.18.1（用户 m10327）：「最近提示改成可复制的文本日志」——
+        // 不再只留最后一条挤在一格按钮里，改成整段日志（最近 12 条，带时分秒，换行排开），
+        // 下面「复制日志」一次拷整段，报错误时可以整段贴给我。
         section(t, "最近提示");
-        var lrow = mk();
-        lrow.margin(6).left();
-        lastHintLbl = lrow.button(hintLineLabel(), function(){ hintCopy(); lastHintLblRefresh(); })
-            .height(38).padRight(6);
-        lrow.button("清空", function(){ hintClear(); lastHintLblRefresh(); }).height(38);
-        t.add(lrow).width(ROW_W).left().padTop(5).row();
-        infoIcon(lrow, "这里留最后一条提示（错误也在这里）。屏幕上的提示只闪一下就没了，"
-           + "点上面那一格复制全文。");
+        var hrow = mk();
+        hrow.margin(8).left();
+        var hcell = hrow.labelWrap(hintLogText()).width(VALUE_W - INFO_W).left();
+        try{ lastHintLog = hcell.get(); }catch(e5){ lastHintLog = null; }
+        infoIcon(hrow, "这是最近的提示日志，错误也在里面；只在本机保留最近 12 条，换行写全。"
+           + "屏幕上的提示只闪一下，要留证据就点下面的「复制日志」。");
+        t.add(hrow).width(ROW_W).left().padTop(5).row();
+        var hbtn = mk();
+        hbtn.margin(6).left();
+        lastHintLbl = hbtn.button("复制日志", function(){ hintLogCopy(); }).height(38).padRight(6);
+        hbtn.button("清空", function(){ hintLogClear(); }).height(38).padRight(6);
+        t.add(hbtn).width(ROW_W).left().padTop(5).row();
 
         section(t, "说明");
         var urow = mk();
@@ -841,6 +1071,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         for(i = 0; i < parts.length; i++){
             if(parts[i].k !== "快检"){ kv(t, parts[i].k, parts[i].v, mk); }
         }
+        // v0.18.1（用户 m10327）：「首次配置向导的按钮放在最后的运行环境」。
+        buttonRow(t, ["首次配置向导"], [function(){ welcomeOpen(); }], mk);
     }
 
     // 区域面板的布线（v0.6.0）：框选松手之后不再只弹一段纯文本，而是把「区域摘要 +
@@ -931,6 +1163,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             // 下面这些在真机上作用于 Cell / Label（不是 Table 的 API），
             // 所以这里实现但**不记进 used**：smoke 只拿 used 去真引擎里解析 Table 方法。
             size: function(){ return node; },
+            expandX: function(){ return node; },
             padLeft: function(){ return node; },
             center: function(){ return node; },
             get: function(){ return node; },
@@ -2820,6 +3053,46 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // 「设置 → 最近提示」能看、能复制。hint() 里写，纯函数好自检。
         var LAST_HINT = {text: "", at: 0};
         var lastHintLbl = null;
+        // v0.18.1（用户 m10327）：「最近提示改成可复制的文本日志」。
+        // 保留 LAST_HINT（最后一条，探针与旧逻辑还在读），另外攒一份最近 HINT_LOG_MAX 条。
+        var HINT_LOG = [], HINT_LOG_MAX = 12, lastHintLog = null;
+
+        function hintLogPush(at, text){
+            HINT_LOG.push({at: at, text: String(text)});
+            if(HINT_LOG.length > HINT_LOG_MAX){ HINT_LOG.splice(0, HINT_LOG.length - HINT_LOG_MAX); }
+        }
+
+        function hintClock(at){
+            try{
+                var fmt = new Packages.java.text.SimpleDateFormat("HH:mm:ss");
+                return String(fmt.format(new Packages.java.util.Date(Number(at))));
+            }catch(e){ return "--:--:--"; }
+        }
+
+        function hintLogText(){
+            if(HINT_LOG.length === 0){ return "（还没有提示）"; }
+            var out = [], i;
+            for(i = 0; i < HINT_LOG.length; i++){
+                out.push(hintClock(HINT_LOG[i].at) + "  " + HINT_LOG[i].text);
+            }
+            return out.join("\n");
+        }
+
+        function hintLogCopy(){
+            if(HINT_LOG.length === 0){ hint("还没有提示可复制"); return "no hint"; }
+            var t = hintLogText();
+            try{ Core.app.setClipboardText(t); }catch(e){ return "clipboard failed: " + e; }
+            hint("已复制最近 " + HINT_LOG.length + " 条提示");
+            return "copied:" + t.length;
+        }
+
+        function hintLogClear(){
+            HINT_LOG.splice(0, HINT_LOG.length);
+            LAST_HINT.text = "";
+            LAST_HINT.at = 0;
+            lastHintLblRefresh();
+            return "hint log cleared";
+        }
 
         // v0.15.1（D3）：作业管理窗的过滤状态（只在模组侧过滤，sidecar 只认 state= 精确值）。
         var managerFilter = {text: "", onlyBad: false, limit: 100};
@@ -3531,9 +3804,91 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }
         }
 
+        // v0.18.1（用户 m10374）：「查看详情的UI窗口做的不好……彻底移除旧版的查看详情」。
+        // 现在「查看」只有两种结果：
+        //   已完成 → 开原版逻辑编辑器预览模型写的逻辑（executor 传 null、privileged 传 false：
+        //            只预览，不绑定任何处理器，改了也写不回去）；
+        //   没完成 → 把思考过程打印到本机聊天框（ChatFragment.addMessage 只 append 本地列表，
+        //            不走 Call.sendChatMessage，所以不会发到服务器）。
+        function jobViewPick(){
+            if(jobBox === null || jobBox.ids === null || jobBox.ids === undefined){ return null; }
+            var ids = jobBox.ids, i, j;
+            try{
+                var b = aimedBuild();
+                if(b !== null){
+                    for(i = 0; i < ids.length; i++){
+                        j = jobBox.jobs[ids[i]];
+                        if(j !== null && j !== undefined && lookupBuild(j) === b){ return j; }
+                    }
+                }
+            }catch(e0){ log("job view pick by aim failed: " + e0); }
+            for(i = 0; i < ids.length; i++){
+                j = jobBox.jobs[ids[i]];
+                if(j !== null && j !== undefined){ return j; }
+            }
+            return null;
+        }
+
+        // 只进本机聊天框：ChatFragment.java:311 的 addMessage(String) 只是往本地 list 里加一条。
+        function chatLocalSay(line){
+            if(Vars.ui === null || Vars.ui === undefined){ return false; }
+            var frag = null;
+            try{ frag = Vars.ui.chatfrag; }catch(e0){ frag = null; }
+            if(frag === null || frag === undefined){ return false; }
+            try{ frag.addMessage(String(line)); return true; }
+            catch(e){ log("local chat failed: " + e); return false; }
+        }
+
+        function jobThinkToChat(job){
+            var shown = 0;
+            try{
+                var ls = jobReasoningLines(job, REASON_LINES, REASON_LINE);
+                for(var i = 0; i < ls.length; i++){
+                    if(!chatLocalSay("MAI · " + ls[i])){ break; }
+                    shown++;
+                }
+            }catch(e){ log("thinking to chat failed: " + e); }
+            if(shown === 0){ chatLocalSay("MAI · " + jobProgressText(job)); }
+            return shown;
+        }
+
+        function previewLogic(job){
+            var code = "";
+            try{ code = String(job && job.code ? job.code : ""); }catch(e0){ code = ""; }
+            if(code.length === 0){ return "作业里没有代码可看（载荷还没回来）"; }
+            try{
+                if(Vars.ui === null || Vars.ui.logic === null || Vars.ui.logic === undefined){
+                    return "逻辑编辑器不可用（无界面环境）";
+                }
+                // 原版调用形状见 LogicBlock.java:754：ui.logic.show(code, executor, privileged, cons)。
+                Vars.ui.logic.show(code, null, false, function(txt){ log("logic preview closed"); });
+                return "";
+            }catch(e){
+                try{ Vars.ui.showText("Mlog辅助 · 逻辑预览", code); return ""; }
+                catch(e2){ return "预览失败：" + e; }
+            }
+        }
+
         function jobWidgetView(){
-            try{ openJobManager(); }
-            catch(e){ hint("作业窗口打不开：" + e); }
+            var job = jobViewPick();
+            if(job === null){
+                hint("这一批作业还没回来，稍等一下再点「查看」。");
+                return;
+            }
+            var state = String(job.state);
+            if(state === "done"){
+                var why = previewLogic(job);
+                if(why !== ""){ hint(why); }
+                return;
+            }
+            if(isJobTerminal(state)){
+                hint("作业" + stateCn(state) + "：" + jobProgressText(job));
+                return;
+            }
+            if(!chatLocalSay("MAI · " + jobProgressText(job))){
+                hint(jobProgressText(job));
+            }
+            jobThinkToChat(job);
         }
 
         function jobWidgetCancel(){
@@ -3691,11 +4046,22 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return Math.round(n * 100) / 100;
         }
 
+        // v0.18.1（用户 m10374）：「框选控件缩放……而且好像改不了」—— 确实改不了。
+        // 根因：arc 的 Settings.getFloat 就是 `(float)get(name, def)`（Settings.java:357-359），
+        // Java 里这是「先当 Float 再拆箱」，而 JS 数字经 put(String,Object) 进 values 是
+        // java.lang.Double ⇒ 每次读都抛 ClassCastException，被下面的 catch 吞掉后永远退回 1×。
+        // 现在存字符串、读 Object 再 parseFloat（老存档里可能已经是 Double，所以也不能走 getString）。
+        function hudScaleRaw(){
+            var o = null;
+            try{ o = Core.settings.get(HUD_SCALE_KEY, null); }catch(e0){ o = null; }
+            if(o === null || o === undefined){ return 1; }
+            var n = 0;
+            try{ n = parseFloat(String(o)); }catch(e1){ n = 0; }
+            return n;
+        }
+
         function hudScale(){
-            var v = 1;
-            try{ v = Core.settings.getFloat(HUD_SCALE_KEY, 1); }
-            catch(e){ v = 1; }
-            return hudScaleClamp(v);
+            return hudScaleClamp(hudScaleRaw());
         }
 
         function hudScaleText(){
@@ -3717,7 +4083,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
         function hudScaleSet(v){
             var n = hudScaleClamp(v);
-            try{ Core.settings.put(HUD_SCALE_KEY, n); }
+            try{ Core.settings.put(HUD_SCALE_KEY, String(n)); }
             catch(e){ log("save " + HUD_SCALE_KEY + " failed: " + e); }
             jobWidgetDrop();          // 按新倍率重建，下一帧 jobButtonsSync 会重做
             log("hud scale = " + n);
@@ -3726,6 +4092,26 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
         function hudScaleStep(dir){
             return hudScaleSet(hudScale() + (dir > 0 ? HUD_SCALE_STEP : -HUD_SCALE_STEP));
+        }
+
+        // 滑条没有 changed 回调（ProgressBar 只有 setValue/getValue），所以每帧对一次读数：
+        // 拖动时立刻跟手，松手后也停在原处。
+        function hudSliderTick(){
+            if(hudSlider === null || hudSlider === undefined){ return; }
+            try{
+                var v = hudSlider.getValue();
+                if(hudSliderLast >= 0 && Math.abs(v - hudSliderLast) < 0.005){ return; }
+                hudSliderLast = v;
+                hudScaleSet(v);
+                try{
+                    if(hudScaleLbl !== null && hudScaleLbl !== undefined){
+                        hudScaleLbl.get().setText(hudScaleText());
+                    }
+                }catch(e2){ log("hud scale label not updated"); }
+            }catch(e){
+                hudSlider = null;
+                log("hud slider dropped: " + e);
+            }
         }
 
         function chatTrim(s, max){
@@ -4446,7 +4832,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }
 
         // ---------------------------------------------------------- B2/B4（v0.16.1）
-        // 蓝图页底栏加一个「MAI 对话」，原版「蓝图 → 详细」页里也挂一个「继续对话」。
+        // 蓝图页底栏加一个「MAI 控制面板」，原版「蓝图 → 详细」页里也挂一个「MAI」。
         // 上下文从处理器代码的签名 payload v2 里读回来：token 尾部是
         // <flag><base64url>，flag 为 z（zlib 压过的 JSON）或 j（原文 JSON）。
         var BP_TITLE = "";
@@ -4843,7 +5229,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             try{ btns = Vars.ui.schematics.buttons; }catch(e){ btns = null; }
             if(btns === null || btns === undefined){ return; }
             try{
-                btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);
+                btns.button("MAI 控制面板", function(){ openBlueprintPicker(); }).width(150);
                 BP_BTN_ADDED = true;
             }catch(e2){ log("blueprint page button failed: " + e2); }
         }
@@ -5516,6 +5902,45 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                  + " cells=" + cells + " side=" + SIDE.state;
         },
 
+        // v0.18.1：主题色 / 强调色 / 提示换行的自检口（无头环境没有 Scene，也能看颜色与断行）。
+        maiThemeProbe: function(){
+            var sample = "长解释收进 infoCircle：只在鼠标悬浮时显示，常驻的只有短句；"
+                       + "图标固定贴在每一行的最右侧，提示按 34 个字软换行，"
+                       + "Core.settings 这类英文整块搬，不会被拆开。";
+            var wrapped = softWrap(sample, 34);
+            var ls = wrapped.split("\n"), i, mx = 0;
+            for(i = 0; i < ls.length; i++){ if(ls[i].length > mx){ mx = ls[i].length; } }
+            return "MAITHEME:ok theme=" + String(themeColor()) + " emph=" + String(emphColor())
+                 + " lines=" + ls.length + " maxline=" + mx + " first=" + ls[0];
+        },
+
+        // v0.18.1（用户 m10546）「设置控制更改的热键不生效」的回归口：
+        // KeybindDialog.rebind 改完键落盘的是「只有 min/max、key 为 null」的 Axis
+        // （KeybindDialog.java:133-140 → KeyBind.java:74-77），这里直接造出那个形状，
+        // 看模组的读数有没有跟上；再验一遍单键形状，最后还原默认值。
+        maiKeybindProbe: function(){
+            var kb = selKeyBind();
+            if(kb === null || kb === undefined){ return "MAIKEYBIND:no bind"; }
+            var before = null;
+            var out = "";
+            try{
+                before = kb.value;
+                kb.value = new Packages.arc.input.KeyBind.Axis(
+                    Packages.arc.input.KeyCode.g, Packages.arc.input.KeyCode.h);
+                var c1 = selKeyCode();
+                out = "MAIKEYBIND:ok axis=" + selKeyName()
+                    + " code=" + (c1 === null || c1 === undefined ? "null" : String(c1.getName()));
+                kb.value = new Packages.arc.input.KeyBind.Axis(Packages.arc.input.KeyCode.y);
+                var c2 = selKeyCode();
+                out = out + " one=" + selKeyName()
+                    + " onecode=" + (c2 === null || c2 === undefined ? "null" : String(c2.getName()));
+            }catch(e){
+                out = "MAIKEYBIND:bad " + e;
+            }
+            try{ if(before !== null && before !== undefined){ kb.value = before; } }catch(e2){ }
+            return out + " back=" + selKeyName();
+        },
+
         maiBlueprintSaveProbe: function(rjson){
                 var r = null;
                 try{ r = JSON.parse(String(rjson)); }catch(e){ r = null; }
@@ -5894,6 +6319,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 if(box === null || box === undefined || typeof box.setText !== "function"){ return; }
                 box.setText(hintLineLabel());
             }catch(e){ log("hint label refresh skipped: " + e); }
+            // v0.18.1：日志那一段也要跟着换（设置页开着的时候新提示要立刻出现）。
+            try{
+                if(lastHintLog !== null && lastHintLog !== undefined
+                   && typeof lastHintLog.setText === "function"){
+                    lastHintLog.setText(hintLogText());
+                }
+            }catch(e2){ log("hint log refresh skipped: " + e2); }
         }
 
         function hintLineRefresh(){ lastHintLblRefresh(); }
@@ -5932,6 +6364,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         function hint(text){
             LAST_HINT.text = String(text);        // v0.15.1：留最后一条，设置页能看能复制
             LAST_HINT.at = Packages.java.lang.System.currentTimeMillis();
+            hintLogPush(LAST_HINT.at, String(text));   // v0.18.1：同时进「最近提示」文本日志
             lastHintLblRefresh();
             if(Vars.ui === null || Vars.ui === undefined){ return; }
             try{ Vars.ui.showInfoFade(String(text)); }catch(e){ }
@@ -6411,8 +6844,10 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     }
                     if(Vars.state.isMenu()){ return; }
                     welcomeTick();
+                    hudSliderTick();  // v0.18.1：滑条没有 changed 回调，每帧对一次读数
                     if(Vars.ui.chatfrag.shown()){ return; }
-                    selKeyBind();                     // v0.17.1：确保框选键已注册进原版按键绑定
+                    selKeyBind();
+                    listKeyBind();                     // v0.17.1：确保框选键已注册进原版按键绑定
                     if(hotTap(KEY_REGION[0])){
                         if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
                         var rb = targetBuild();
@@ -6427,7 +6862,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                                             rb.tile.x + rr, rb.tile.y + rr);
                         }
                     }
-                    if(hotTap(KEY_LIST[0])){
+                    if(listKeyTap()){
                         if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
                         openListPanel();
                     }
@@ -6435,7 +6870,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     // 没有「就绪」态、不需要点左键，也不弹任何窗（弹窗会抢鼠标）。
                     if(KEY_SELECT !== null){
                         var selKey = selKeyCode();
-                        var selDown = Core.input.keyDown(selKey);
+                        var selDown = selKeyDown();
                         if(selDown && !selHolding){
                             if(Core.scene === null || !Core.scene.hasDialog()){
                                 var s0 = mouseTile();
