@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.18.1";
+    var MOD_VERSION = "0.18.2";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -522,20 +522,111 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // v0.18.1（用户 m10289）：「设置主题色改为 [#8abcd1]，强调色为 [highlight]」。
     // [highlight] 在游戏里不是独立字段，UI.java:107 定义成 Pal.accent.cpy().lerp(Color.white, 0.3f)，
     // 这里取同一个算法，颜色与游戏文本标记一致；取不到就退回 Pal.accent。
-    var THEME_COLOR = null, THEME_TRIED = false;
+    // v0.18.2（用户 m10938）：「允许在设置中调节主题色和强调色」。两个颜色都存 Core.settings，
+    // 值是 6 位十六进制字符串。**不能存数字**：arc 的 Settings.getFloat 是 (float)get(...)，
+    // JS 数字会变成 java.lang.Double，强转抛 ClassCastException（v0.18.1 倍率 bug 同一个坑）。
+    var THEME_KEY = "mlogauxiliary-theme-color";
+    var EMPH_KEY = "mlogauxiliary-emph-color";
+    var THEME_DEFAULT = "8abcd1";          // v0.18.1 用户指定的主题色
+    var COLOR_CACHE = {};                  // hex -> Color，别每帧 valueOf
 
-    function themeColor(){
-        if(THEME_COLOR === null && !THEME_TRIED){
-            THEME_TRIED = true;
-            try{ THEME_COLOR = Packages.arc.graphics.Color.valueOf("8abcd1"); }
-            catch(e){ THEME_COLOR = null; log("theme color failed: " + e); }
+    // 只认 6 位十六进制：'#'、空格容错，其它一律当非法（返回 null）。手写扫描，不用字符类正则。
+    function hex6(v){
+        if(v === null || v === undefined){ return null; }
+        var raw = String(v), s = "", i, c, lc;
+        for(i = 0; i < raw.length; i++){
+            c = raw.charAt(i);
+            if(c === "#" || c === " "){ continue; }
+            s = s + c;
         }
-        return THEME_COLOR !== null ? THEME_COLOR : Pal.accent;
+        if(s.length !== 6){ return null; }
+        for(i = 0; i < 6; i++){
+            lc = s.charAt(i).toLowerCase();
+            if(!((lc >= "0" && lc <= "9") || (lc >= "a" && lc <= "f"))){ return null; }
+        }
+        return s.toLowerCase();
     }
 
-    function emphColor(){
-        try{ return Pal.accent.cpy().lerp(Packages.arc.graphics.Color.white, 0.3); }
-        catch(e){ return Pal.accent; }
+    // Color.toString() 是 rrggbbaa，取前 6 位
+    function colorHexOf(col){
+        try{ return hex6(String(col).substring(0, 6)); }
+        catch(e){ return null; }
+    }
+
+    function colorOfHex(h, fallback){
+        if(h === null || h === undefined){ return fallback; }
+        var hit = COLOR_CACHE[h];
+        if(hit !== undefined && hit !== null){ return hit; }
+        try{
+            var c = Packages.arc.graphics.Color.valueOf(h);
+            COLOR_CACHE[h] = c;
+            return c;
+        }catch(e){
+            log("color parse failed: " + h + " / " + e);
+            return fallback;
+        }
+    }
+
+    // 读设置里的颜色；没设或非法就用默认值（defHex 为 null 时交给调用方兜底）
+    function colorSetting(key, defHex){
+        var raw = null;
+        try{ raw = Core.settings.get(key, null); }catch(e0){ raw = null; }
+        var h = hex6(raw);
+        if(h === null){ h = hex6(defHex); }
+        return h;
+    }
+
+    function themeHex(){ return colorSetting(THEME_KEY, THEME_DEFAULT); }
+
+    // 强调色默认取 [highlight] 的算法：UI.java:107 Pal.accent.cpy().lerp(Color.white, 0.3f)
+    function emphDefaultHex(){
+        try{ return colorHexOf(Pal.accent.cpy().lerp(Packages.arc.graphics.Color.white, 0.3)); }
+        catch(e){ return "ffd37f"; }
+    }
+
+    function emphHex(){ return colorSetting(EMPH_KEY, emphDefaultHex()); }
+
+    function themeColor(){ return colorOfHex(themeHex(), Pal.accent); }
+    function emphColor(){ return colorOfHex(emphHex(), Pal.accent); }
+
+    // 外观段的两种颜色：一行 = 标签 + 十六进制输入框 + 色块 + 「默认」+ 行尾 infoIcon。
+    // 非法输入退回当前值并说明格式；改动即时落盘（选框/高亮下一帧变，
+    // 已经建好的标题这类控件要重开设置页才换色）。
+    function colorRow(t, label, key, defHex, mk, expl){
+        var row = mk();
+        row.margin(8).left();
+        row.add(label).width(LABEL_W).left().color(Pal.gray);
+        var field = null;
+        var fcell = row.field(colorSetting(key, defHex), function(v){
+            var h = hex6(v);
+            if(h === null){
+                log("odd color input: " + v);
+                try{ if(field !== null){ field.setText(colorSetting(key, defHex)); } }catch(e1){ }
+                try{
+                    if(Vars.ui !== null && Vars.ui !== undefined){
+                        Vars.ui.showText("Mlog辅助 · 颜色", "颜色要写成 6 位十六进制，例如 " + defHex + "。");
+                    }
+                }catch(e2){ }
+                return;
+            }
+            try{ Core.settings.put(key, h); }catch(e3){ log("color save failed: " + e3); }
+            log("color " + key + " = " + h);
+            try{ if(swatch !== null){ swatch.setColor(colorOfHex(h, Pal.accent)); } }catch(e4){ }
+        }).width(120).left();
+        try{ field = fcell.get(); }catch(e5){ field = null; }
+        var swatch = null;
+        try{ swatch = row.image(Packages.mindustry.gen.Tex.whiteui).width(22).height(22).padLeft(8).get(); }
+        catch(e6){ swatch = null; }
+        try{ if(swatch !== null){ swatch.setColor(colorOfHex(colorSetting(key, defHex), Pal.accent)); } }
+        catch(e7){ }
+        row.button("默认", function(){
+            var h = hex6(defHex);
+            try{ Core.settings.put(key, h); }catch(e8){ log("color reset failed: " + e8); }
+            try{ if(field !== null){ field.setText(h); } }catch(e9){ }
+            try{ if(swatch !== null){ swatch.setColor(colorOfHex(h, Pal.accent)); } }catch(e10){ }
+        }).height(34).padLeft(8);
+        infoIcon(row, expl);
+        t.add(row).width(ROW_W).left().padTop(5).row();
     }
 
     // 提示要换行：arc 默认的 Tooltips.create(String) 是 t.add(text)（Label 不 wrap），
@@ -995,6 +1086,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
            + "按住这颗键再拖鼠标就是框选；区间绑定取第一个键。");
         kv(t, "清单键", listKeyName(), mk,
             "在 设置 → 控制 → 按键绑定 里改：分类 MAI、条目「处理器清单（MAI）」。按一下列出全图处理器。");
+
+        // v0.18.2（用户 m10938）：「允许在设置中调节主题色和强调色」。
+        section(t, "外观");
+        colorRow(t, "主题色", THEME_KEY, THEME_DEFAULT, mk,
+            "选框、标题、分隔线用的颜色。写 6 位十六进制（例如 " + THEME_DEFAULT + "），改完选框立刻变。");
+        colorRow(t, "强调色", EMPH_KEY, emphDefaultHex(), mk,
+            "框里那些逻辑处理器的高亮颜色。默认取游戏 [highlight] 的算法（accent 向白 30%）。");
 
         section(t, "写入");
         var awrow = mk();
@@ -5910,8 +6008,25 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var wrapped = softWrap(sample, 34);
             var ls = wrapped.split("\n"), i, mx = 0;
             for(i = 0; i < ls.length; i++){ if(ls[i].length > mx){ mx = ls[i].length; } }
+            // v0.18.2：颜色现在是设置项，写入后必须立刻读得回来（再还原）。
+            var orig = null, set = "none", back = "none";
+            try{ orig = Core.settings.get(THEME_KEY, null); }catch(e10){ }
+            try{
+                Core.settings.put(THEME_KEY, "ff8800");
+                set = String(colorHexOf(themeColor()));
+            }catch(e11){
+                set = "bad " + e11;
+            }
+            try{
+                if(orig === null || orig === undefined){ Core.settings.remove(THEME_KEY); }
+                else { Core.settings.put(THEME_KEY, String(orig)); }
+                back = String(themeHex());
+            }catch(e12){
+                back = "bad " + e12;
+            }
             return "MAITHEME:ok theme=" + String(themeColor()) + " emph=" + String(emphColor())
-                 + " lines=" + ls.length + " maxline=" + mx + " first=" + ls[0];
+                 + " lines=" + ls.length + " maxline=" + mx + " first=" + ls[0]
+                 + " set=" + set + " back=" + back + " dflt=" + THEME_DEFAULT;
         },
 
         // v0.18.1（用户 m10546）「设置控制更改的热键不生效」的回归口：
@@ -6213,9 +6328,10 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 var D = Packages.arc.graphics.g2d.Draw;
                 var L = Packages.arc.graphics.g2d.Lines;
                 L.stroke(2);
+                // v0.18.2（用户 m10938）：「逻辑选框应用主题色」——阴影仍取 accentBack（和原版同配方）。
                 D.color(Pal.accentBack);
                 L.rect(a.x, a.y - 1, a.w, a.h);
-                D.color(Pal.accent);
+                D.color(themeColor());
                 L.rect(a.x, a.y, a.w, a.h);
                 D.color();
             }catch(e){ /* 画不出来不影响选择本身 */ }
@@ -6236,7 +6352,10 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var D = Packages.arc.graphics.g2d.Draw;
             var L = Packages.arc.graphics.g2d.Lines;
             L.stroke(2);
-            D.color(Pal.accent);
+            // v0.18.2（用户 m10938 / m10943）：高亮用强调色；位置要在格子正中 ——
+            // Tile.worldx() 返回 x*tilesize 是格子中心（Tile.java:166-172），
+            // 所以左下角要再退半格，少退这半格就整体偏右上角（v0.6.0 选框踩过同一个坑）。
+            D.color(emphColor());
             for(var x = r.x1; x <= r.x2; x++){
                 for(var y = r.y1; y <= r.y2; y++){
                     var t = null;
@@ -6246,7 +6365,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     try{ b = t.build; }catch(e1){ b = null; }
                     if(b === null || b === undefined){ continue; }
                     if(!isLogicBuild(b)){ continue; }
-                    L.rect(x * 8, y * 8, 8, 8);
+                    L.rect((x - 0.5) * 8, (y - 0.5) * 8, 8, 8);
                 }
             }
             D.color();

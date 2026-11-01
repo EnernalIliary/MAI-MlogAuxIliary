@@ -367,6 +367,8 @@ def main():
     "print('MAILLM:' + maiLlmProbe());",
     # v0.18.1（用户 m10546）：改键之后原版落盘的是只有 min/max 的 Axis，读数必须跟上。
     "print(maiKeybindProbe());",
+    # v0.18.2（用户 m10938）：主题色/强调色成了设置项，写入必须立刻读回来。
+    "print(maiThemeProbe());",
     # v0.12.5: the retained selection box + corner badge state machine (no sidecar, no ui)
     "print('MAIJOBBOX0:' + maiJobBox());",
     "print('MAIJOBBOXPIN:' + maiJobBoxPin(JSON.stringify(['a','b']), JSON.stringify(['queued','running'])));",
@@ -394,7 +396,7 @@ def main():
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
                               'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIBP:',
-                              'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:',
+                              'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:', 'MAITHEME:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
@@ -1398,9 +1400,24 @@ def main():
                         ('function drawSizeText(', 'the vanilla size label is gone'),
                         ('L.stroke(2);', 'the 2px outline stroke is gone'),
                         ('Pal.accentBack', 'the accentBack shadow line is gone'),
+                        # v0.18.2（用户 m10938 / m10943）：选框用主题色、框内高亮用强调色且贴格子正中。
+                        ('D.color(themeColor());', 'the selection frame colour is not the theme colour'),
+                        ('D.color(emphColor());', 'the logic highlight colour is not the emphasis colour'),
+                        ('L.rect((x - 0.5) * 8, (y - 0.5) * 8, 8, 8);',
+                         'the logic highlight is not centred on the tile'),
                         ('var selDown = selKeyDown();', 'F3 is no longer read as a held button')):
         if needle not in code_only:
             problems.append('v0.5.0: ' + why)
+    # v0.18.2（用户 m10938）：「允许在设置中调节主题色和强调色」——两个设置项与存取层都要在。
+    for needle, why in (('var THEME_KEY = "mlogauxiliary-theme-color";',
+                         'the theme colour setting key is gone'),
+                        ('var EMPH_KEY = "mlogauxiliary-emph-color";',
+                         'the emphasis colour setting key is gone'),
+                        ('section(t, "外观");', 'the appearance section is gone'),
+                        ('function colorRow(t, label, key, defHex, mk, expl){',
+                         'the colour row builder is gone')):
+        if needle not in code_only:
+            problems.append('v0.18.2: ' + why)
     for needle, why in (('selArmed', 'the arming step is back -- F3 must start the drag itself'),
                         ('D.alpha(0.35)', 'the translucent fill is back -- vanilla is outline only'),
                         ('keyTap(Packages.arc.input.KeyCode[KEY_SELECT',
@@ -1792,7 +1809,7 @@ def main():
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                         'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
-                        'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:')):
+                        'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:', 'MAITHEME:')):
             print('  ' + l[:300])
     return 0
 
