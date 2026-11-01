@@ -259,7 +259,10 @@ _MODULES = ["mlog.py", "aigenerated.py", "mlogcheck.py", "mlogir.py",
 
 
 def _sha(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # Line-ending-insensitive: git checkouts (autocrlf) rewrite LF as CRLF,
+    # and a manifest generated on the author box would false-STALE on CI.
+    # Every payload is text (.py/.json), so normalizing to LF is safe.
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def cmd_info(args) -> int:
