@@ -1285,8 +1285,8 @@ def main():
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
             ('btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);',
              'v0.16.1: the blueprint page entry button is gone'),
-            ('info.buttons.button("继续对话", function(){ openBlueprintChat(nm); }).width(120);',
-             'v0.16.1: the schematic info page continue button is gone'),
+            ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
+             'v0.17.1: the schematic info page MAI button is gone'),
             ('mode: "improve", desc: text, links: null, ipt: 2, origin: null,',
              'v0.16.1: blueprint chat must post an improve job'),
             ('try{ Vars.schematics.saveChanges(sch); }',
@@ -1307,8 +1307,8 @@ def main():
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
             ('btns.button("MAI 对话", function(){ openBlueprintPicker(); }).width(130);',
              'v0.16.1: the blueprint page entry button is gone'),
-            ('info.buttons.button("继续对话", function(){ openBlueprintChat(nm); }).width(120);',
-             'v0.16.1: the schematic info page continue button is gone'),
+            ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
+             'v0.17.1: the schematic info page MAI button is gone'),
             ('mode: "improve", desc: text, links: null, ipt: 2, origin: null,',
              'v0.16.1: blueprint chat must post an improve job'),
             ('try{ Vars.schematics.saveChanges(sch); }',
@@ -1403,6 +1403,38 @@ def main():
                          'F3 is read as a tap again -- it must be a held button')):
         if needle in code_only:
             problems.append('v0.5.0: ' + why)
+    # v0.17.1（用户 m09822）：①框选键注册进原版「按键绑定」，②设置页标题文字居中，
+    # ③蓝图「详细」页一个「MAI」按钮管上下文，④框选先读签名挂载的上下文。
+    # 少了任何一条都等于回到用户报的问题，所以逐条钉住。
+    for needle, why in (
+            ('function selKeyBind(){',
+             'the vanilla keybind registration is gone'),
+            ('Packages.arc.input.KeyBind.add("mai-select"',
+             'the mai-select keybind is no longer registered with KeyBind.add'),
+            ('function selKeyCode(){',
+             'reading the currently bound select key back out of KeyBind is gone'),
+            ('Core.input.keyDown(selKey)',
+             'the drag no longer reads the bound key as a held button'),
+            ('function alignText(el, align){',
+             'the label alignment helper is gone (Cell.center() does not move the text)'),
+            ('alignText(lbl, Packages.arc.util.Align.center);',
+             'the settings title text is no longer centered'),
+            ('alignText(sc.get(), Packages.arc.util.Align.center);',
+             'section headings are no longer centered'),
+            ('function sigCtxInRegion(targets){',
+             'reading a workspace context out of the signature is gone'),
+            ('function wsFromSig(r, sig){',
+             'rebuilding a workspace from signature meta is gone'),
+            ('function wsAttachCtx(ws, r, targets, desc){',
+             'attaching a selection to an already-known workspace is gone'),
+            ('var sig = sigCtxInRegion(targets);',
+             'the F3 dialog no longer tries the signature before anything else')):
+        if needle not in code_only:
+            problems.append('v0.17.1: ' + why)
+    for needle, why in (('hotBegin(', 'the self-made rebind capture is back -- use the vanilla keybind page'),
+                        ('HOT_KEY', 'the self-made hotkey store is back -- KeyBind owns the value now')):
+        if needle in code_only:
+            problems.append('v0.17.1: ' + why)
     # ---- P3 region snapshot, read back from the engine
     snap = None
     for l in text.splitlines():

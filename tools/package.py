@@ -168,6 +168,11 @@ def layout() -> list[tuple[str, Path]]:
     rows: list[tuple[str, Path]] = []
     for rel in ('mod.hjson', 'README.md', 'scripts/main.js'):
         rows.append(('mod/MlogAuxiliary/' + rel, MOD / rel))
+    # v0.17.1：按键绑定条目的名字来自 bundles/bundle*.properties
+    # （Mods.java:636-660 把 mod.root/bundles 合进根 bundle）。漏了不会报错，
+    # 只是设置→控制→按键绑定 里显示成原始键名 "mai-select"。
+    for p in sorted((MOD / 'bundles').glob('*.properties')):
+        rows.append(('mod/MlogAuxiliary/bundles/' + p.name, p))
     for name in sidecar_modules():
         rows.append((SIDE + name + '.py', TOOLS / (name + '.py')))
     for p in sidecar_data():

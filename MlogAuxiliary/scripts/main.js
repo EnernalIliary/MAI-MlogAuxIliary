@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.17.0";
+    var MOD_VERSION = "0.17.1";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -526,6 +526,15 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }catch(e){ log("info icon failed: " + e); }
     }
 
+    // Label 的文字对齐是自己的字段（labelAlign 默认 left），只给 Cell 设 center()
+    // 只挪控件、不挪文字 —— v0.17.1 用户报「标题都没居中」就是这里。
+    function alignText(el, align){
+        if(el === null || el === undefined){ return; }
+        try{
+            if(typeof el.setAlignment === "function"){ el.setAlignment(align); }
+        }catch(e){ log("align failed: " + e); }
+    }
+
     // 2. 设置页主标题：两行、居中、放大。
     function titleLine(t, text, scale, color){
         var cell = t.add(String(text));
@@ -536,81 +545,52 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var lbl = cell.get();
             try{ lbl.setFontScale(scale); }catch(e4){ }
             try{ lbl.setColor(color); }catch(e5){ }
+            alignText(lbl, Packages.arc.util.Align.center);
         }catch(e6){ }
         try{ cell.row(); }catch(e7){ }
     }
 
-    // 5. 可改的热键（F3 框选 / F2 清单 / F7 区域）。名字存 Core.settings，
-    // 用的时候现查 KeyCode，改完立即生效。
-    var HOT_KEY = "mlogauxiliary-hotkey-";
-    var HOT_WANT = null;
+    // 5. 热键：v0.17.1（用户 m09822 / 1）起框选键注册进原版「按键绑定」界面
+    // （设置 → 控制 → 按键绑定，键名来自 bundles/bundle*.properties 的 keybind.mai-select.name），
+    // 值由 KeyBind 自己存 Core.settings（keybind-default-keyboard-mai-select-key），不用我们再管。
+    // 清单（F2）与区域候选（F7）不再允许改键，固定用这两个默认键。
+    var KB_SELECT = null, KB_TRIED = false;
 
-    function hotGet(which, dflt){
-        try{
-            var v = String(Core.settings.getString(HOT_KEY + which, dflt) || "");
-            return (v.length === 0) ? String(dflt) : v;
-        }catch(e){ return String(dflt); }
+    function selKeyBind(){
+        if(KB_SELECT === null && !KB_TRIED){
+            KB_TRIED = true;
+            try{
+                var dflt = new Packages.arc.input.KeyBind.Axis(Packages.arc.input.KeyCode.f3);
+                KB_SELECT = Packages.arc.input.KeyBind.add("mai-select", dflt, "mlogauxiliary");
+                log("keybind registered: mai-select");
+            }catch(e){
+                KB_SELECT = null;
+                log("keybind add failed: " + e);
+            }
+        }
+        return KB_SELECT;
     }
 
-    function hotSet(which, name){
-        try{ Core.settings.put(HOT_KEY + which, String(name)); }
-        catch(e){ log("hotkey save failed: " + e); }
+    // 当前绑定的框选键；没注册上就退回 F3。
+    function selKeyCode(){
+        var kb = selKeyBind();
+        if(kb !== null){
+            try{
+                var ax = kb.value;
+                if(ax !== null && ax !== undefined && ax.key !== null && ax.key !== undefined){ return ax.key; }
+            }catch(e1){ }
+        }
+        try{ return Packages.arc.input.KeyCode.f3; }catch(e2){ return null; }
     }
 
-    function hotKeyCode(which, dflt){
-        var n = hotGet(which, dflt);
-        try{ return Packages.arc.input.KeyCode[n]; }catch(e){ return null; }
+    function keyByName(name){
+        try{ return Packages.arc.input.KeyCode[String(name)]; }catch(e){ return null; }
     }
 
-    function hotTap(which, dflt){
-        var k = hotKeyCode(which, dflt);
+    function hotTap(name){
+        var k = keyByName(name);
         if(k === null || k === undefined){ return false; }
         try{ return Core.input.keyTap(k) === true; }catch(e){ return false; }
-    }
-
-    function hotLabelText(which, name, dflt){
-        return String(name) + "：" + hotGet(which, dflt).toUpperCase();
-    }
-
-    function hotCellSet(cell, text){
-        try{
-            if(cell === null || cell === undefined || typeof cell.get !== "function"){ return; }
-            var b = cell.get();
-            if(b === null || b === undefined || typeof b.setText !== "function"){ return; }
-            b.setText(String(text));
-        }catch(e){ log("hotkey label not updated"); }
-    }
-
-    function hotLabelsRefresh(){
-        hotCellSet(hotSelLbl, hotLabelText("select", "框选", "f3"));
-        hotCellSet(hotListLbl, hotLabelText("list", "清单", "f2"));
-        hotCellSet(hotRegionLbl, hotLabelText("region", "区域", "f7"));
-    }
-
-    function hotBegin(which){
-        HOT_WANT = String(which);
-        hint("按下要绑的键（Esc 取消）");
-    }
-
-    function hotCaptureTick(){
-        if(HOT_WANT === null){ return; }
-        var ks = null;
-        try{ ks = Packages.arc.input.KeyCode.values(); }catch(e){ return; }
-        for(var i = 0; i < ks.length; i++){
-            var nm = String(ks[i].name());
-            if(nm === "anyKey" || nm === "unknown"){ continue; }
-            if(nm.indexOf("mouse") === 0){ continue; }
-            var down = false;
-            try{ down = Core.input.keyTap(ks[i]) === true; }catch(e1){ down = false; }
-            if(!down){ continue; }
-            if(nm === "escape"){ HOT_WANT = null; hint("已取消改键"); return; }
-            var which = HOT_WANT;
-            HOT_WANT = null;
-            hotSet(which, nm);
-            hint("热键已改为 " + nm.toUpperCase());
-            hotLabelsRefresh();
-            return;
-        }
     }
 
     // 6. 尽量让 sidecar 无感：后端还在启动时，投递先排队，就绪那一刻自动发出去，
@@ -657,7 +637,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     }
 
     function section(t, title){
-        t.add(title).color(Pal.accent).left().padTop(12).padBottom(2).row();
+        var sc = t.add(title);
+        try{ sc.color(Pal.accent); }catch(e0){ }
+        try{ sc.width(ROW_W); }catch(e1){ }
+        try{ sc.center(); }catch(e2){ }
+        try{ sc.padTop(12); sc.padBottom(2); }catch(e3){ }
+        try{ alignText(sc.get(), Packages.arc.util.Align.center); }catch(e4){ }
+        try{ sc.row(); }catch(e5){ }
         try{
             t.image(Packages.mindustry.gen.Tex.whiteui, Pal.accent).growX().height(3).padTop(2).padBottom(4).row();
         }catch(e){
@@ -816,17 +802,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         ], mk);
 
         section(t, "热键");
-        var hkrow = mk();
-        hkrow.margin(6).left();
-        hotSelLbl = hkrow.button(hotLabelText("select", "框选", "f3"), function(){ hotBegin("select"); })
-            .height(38).padRight(6);
-        hotListLbl = hkrow.button(hotLabelText("list", "清单", "f2"), function(){ hotBegin("list"); })
-            .height(38).padRight(6);
-        hotRegionLbl = hkrow.button(hotLabelText("region", "区域", "f7"), function(){ hotBegin("region"); })
-            .height(38);
-        infoIcon(hkrow, "点一个按钮，再按下要用的键（Esc 取消），立即生效。"
-           + "框选默认 F3（按住拖框），清单默认 F2，区域候选默认 F7。");
-        t.add(hkrow).width(ROW_W).left().padTop(5).row();
+        kv(t, "框选", "F3（按住拖框）· 在「设置 → 控制 → 按键绑定」里改", mk,
+           "框选键注册在原版按键绑定界面里，和其它热键一起改、一起恢复默认；"
+           + "改完立刻生效，不用重启。");
+        kv(t, "清单 / 区域候选", "F2 / F7（固定）", mk,
+           "这两个键不提供改键：F2 打开全图处理器清单，F7 列出光标附近 10 格的链接候选。");
 
         section(t, "本地快检");
         for(i = 0; i < parts.length; i++){
@@ -3574,8 +3554,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }
 
         // 一个描述框 → 这块区域里每个处理器各投一个作业（P5 批量入口，v0.12.5）。
-        function startJobBatch(targets, desc, rect, improve){
-            var ws = wsAttach(rect, targets, desc);        // v0.14.0：这块框选 = 一个工作区快照
+        function startJobBatch(targets, desc, rect, improve, wsIn){
+            // v0.17.1：签名挂载 / 已认出的工作区直接沿用，别再新建一个
+            var ws = (wsIn === undefined || wsIn === null)
+                ? wsAttach(rect, targets, desc)            // v0.14.0：这块框选 = 一个工作区快照
+                : wsAttachCtx(wsIn, rect, targets, desc);
             var box = {r: rect, ws: (ws === null ? null : String(ws.id)),
                        desc: desc, targets: targets,      // v0.15.1：续聊要认得出框里哪几台
                        ids: [], jobs: {}, pend: targets.length,
@@ -3630,17 +3613,36 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 return "no processor in region";
             }
             var desc = "";
-            var wsId = wsFindActive(r), wsHit = (wsId === null) ? null : wsLoad(wsId);   // v0.14.0
+            var sig = sigCtxInRegion(targets);                       // v0.17.1：签名挂载优先
+            var wsHit = null, wsFromSignature = false, i2;
+            if(sig !== null && String(sig.meta.ws).length > 0){
+                wsHit = wsLoad(String(sig.meta.ws));
+                wsFromSignature = (wsHit !== null);
+            }
+            if(wsHit === null && sig !== null && wsFromSignature === false && String(sig.meta.ws).length === 0){
+                wsHit = wsFromSig(r, sig);
+                wsFromSignature = (wsHit !== null);
+            }
+            if(wsHit === null){
+                var wsId = wsFindActive(r);                          // v0.14.0 老路子
+                wsHit = (wsId === null) ? null : wsLoad(wsId);
+            }
             var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 描述 v" + MOD_VERSION
                 + (wsHit === null ? "" : " · 工作区「" + String(wsHit.name) + "」"));
             d.cont.defaults().pad(6).left();
-            if(wsHit !== null){
+            if(wsFromSignature && sig !== null){
+                d.cont.add("已从签名挂载读到上下文：" + String(wsHit.name)
+                    + (String(sig.meta.job).length > 0 ? "（作业 " + String(sig.meta.job) + "）" : "")
+                    + " · 来自 @" + String(sig.x) + "," + String(sig.y)).row();
+            }else if(wsHit !== null){
                 d.cont.add("复用已有工作区：写完不消失，可继续改进；归档 / 释放见作业管理窗").row();
             }
             d.cont.add(targets.length === 1
                         ? ("目标：@" + targets[0].x + "," + targets[0].y)
                         : ("目标：区域里 " + targets.length + " 个处理器，每个处理器生成一段")).row();
-            d.cont.field("", function(v){ desc = String(v); }).width(520).row();
+            var prefill = "";
+            if(wsFromSignature && wsHit !== null){ prefill = String(wsHit.notes || ""); }
+            d.cont.field(prefill, function(v){ desc = String(v); }).width(520).row();
             // v0.17.0：生成界面也给一个自动写入开关（用户 m09440 / 1）
             var awCell = d.cont.button(autoWriteText(), function(){
                 autoWriteSet(!autoWriteOn());
@@ -3650,7 +3652,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 var text = trimText(desc);
                 if(text.length === 0){ hint("先写一句描述：这段逻辑要做什么"); return; }
                 d.hide();
-                startJobBatch(targets, text, r);
+                startJobBatch(targets, text, r, false, wsHit);
             }).width(120);
             if(wsHit !== null){
                 var canImprove = false, pl = wsHit.procs || [];
@@ -3660,7 +3662,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                         var text = trimText(desc);
                         if(text.length === 0){ text = "在上一版的基础上继续改进"; }
                         d.hide();
-                        startJobBatch(targets, text, r, true);
+                        startJobBatch(targets, text, r, true, wsHit);
                     }).width(140);
                 }
             }
@@ -4221,7 +4223,69 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return trimText(s);
         }
 
-        // zlib 解压（带 flag 字节的 base64url 已经剥掉）。
+        // v0.17.1（用户 m09822 / 4）：框选之后先看框里的处理器有没有「签名挂载」的上下文
+    // （payload v2 的 m 段：工作区 id / 名字 / 当时的描述 / 作业 id），有就拿它当这块框选的上下文，
+    // 没有才回落到「按选框中心找 active 工作区」的老路子。
+    function sigCtxInRegion(targets){
+        var list = targets || [], i;
+        for(i = 0; i < list.length; i++){
+            var b = list[i].b;
+            if(b === null || b === undefined){ continue; }
+            var code = "";
+            try{ code = String(b.code || ""); }catch(e0){ code = ""; }
+            if(code.length === 0 || code.indexOf("aigenerated:") < 0){ continue; }
+            var meta = null;
+            try{ meta = sigMetaOf(code); }catch(e1){ meta = null; }
+            if(meta === null){ continue; }
+            if(String(meta.ws).length === 0 && String(meta.name).length === 0
+               && String(meta.prompt).length === 0){
+                continue;
+            }
+            return {meta: meta, code: code, b: b, x: list[i].x, y: list[i].y};
+        }
+        return null;
+    }
+
+    // 签名里记着工作区 id、但磁盘上那份已经不在了（删了 / 换了台机器）：
+    // 用它重建一个临时工作区，好让「改进上一版」还能拿到 prevCode。
+    function wsFromSig(r, sig){
+        if(sig === null || sig === undefined){ return null; }
+        var meta = sig.meta;
+        var nm = String(meta.name).length > 0 ? String(meta.name) : "签名挂载的上下文";
+        var ws = wsNew(r, nm);
+        if(String(meta.ws).length > 0){
+            ws.id = String(meta.ws);
+            wsCurrent = String(ws.id);
+        }else{
+            ws.id = "sig" + String(wsStamp()) + "_" + String(wsSeq);
+            wsCurrent = String(ws.id);
+        }
+        ws.notes = String(meta.prompt || "");
+        ws.sig = {job: String(meta.job || "")};
+        var row = wsTouchProc(ws, sig.b, ws.notes);
+        if(row !== null){ row.code = String(sig.code); }
+        wsSave(ws);
+        return ws;
+    }
+
+    function wsAttachCtx(ws, r, targets, desc){
+        if(ws === null || ws === undefined){ return wsAttach(r, targets, desc); }
+        var b = ws.bounds || {};
+        if(b.x1 === undefined || b.x1 === null){
+            ws.bounds = {x1: Number(r.x1), y1: Number(r.y1), x2: Number(r.x2), y2: Number(r.y2)};
+        }else{
+            ws.bounds = {x1: Math.min(Number(b.x1), Number(r.x1)),
+                         y1: Math.min(Number(b.y1), Number(r.y1)),
+                         x2: Math.max(Number(b.x2), Number(r.x2)),
+                         y2: Math.max(Number(b.y2), Number(r.y2))};
+        }
+        for(var i = 0; i < (targets || []).length; i++){ wsTouchProc(ws, targets[i].b, desc); }
+        wsSave(ws);
+        wsCurrent = String(ws.id);
+        return ws;
+    }
+
+    // zlib 解压（带 flag 字节的 base64url 已经剥掉）。
         // 单独一个函数：dn 一个函数里塞 try/catch + while 时 Rhino 的 codegen 会报
         // "invalid bytecode"，拆开就没事（真机 v160.7 上验过）。
         function sigInflate(raw){
@@ -4476,7 +4540,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
             var ctx = blueprintCtxOf(name);
             if(ctx === null){ hint("找不到蓝图「" + String(name) + "」"); return "no blueprint"; }
-            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 蓝图对话 · " + String(ctx.name));
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 蓝图上下文 · " + String(ctx.name));
             d.cont.defaults().pad(4).left();
             var host = new Packages.arc.scene.ui.layout.Table();
             try{ d.cont.pane(host).height(360).width(640).row(); }
@@ -4492,9 +4556,16 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             BP_CHAT.host = host;
             BP_CHAT.dialog = d;
             renderBlueprintChat();
-            d.buttons.button("继续对话", function(){ blueprintChatAsk(); }).width(130);
-            d.buttons.button("写回蓝图", function(){ blueprintWriteBack(); }).width(130);
-            d.buttons.button("关闭", function(){ d.hide(); BP_CHAT.host = null; BP_CHAT.dialog = null; }).width(110);
+            d.buttons.button("继续对话", function(){ blueprintChatAsk(); }).width(120);
+            d.buttons.button("写回蓝图", function(){ blueprintWriteBack(); }).width(120);
+            d.buttons.button("复制上下文", function(){
+                var t = bpMetaLine(BP_CHAT.meta);
+                try{
+                    Core.app.setClipboardText(t);
+                    hint("上下文已复制");
+                }catch(e){ log("clipboard failed: " + e); }
+            }).width(130);
+            d.buttons.button("关闭", function(){ d.hide(); BP_CHAT.host = null; BP_CHAT.dialog = null; }).width(100);
             d.show();
             return "opened";
         }
@@ -4568,11 +4639,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var nm = blueprintTitleName(txt);
             if(nm.length === 0){ return; }
             try{
-                // v0.17.0（用户 m09517）：蓝图「详细」页直接给「MAI 对话」，
-                // 不用再跑到蓝图页底栏去找；顺手留「继续对话」。
-                info.buttons.button("MAI 对话", function(){ openBlueprintPicker(); }).width(120);
-                info.buttons.button("继续对话", function(){ openBlueprintChat(nm); }).width(120);
+                // v0.17.1（用户 m09822 / 3）：按钮就一个「MAI」，和返回 / 导出 / 编辑并排，
+                // 点开是这个蓝图的上下文管理（看上下文、继续对话、写回、复制）。
+                info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);
             }catch(e3){ log("info page button failed: " + e3); }
+
         }
 
         function blueprintTick(){
@@ -6089,10 +6160,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                         if(settingsTries % 60 === 0){ registerSettings(); }
                     }
                     if(Vars.state.isMenu()){ return; }
-                    hotCaptureTick();                 // v0.17.0：正在改热键就先吃掉这一下
-                    if(HOT_WANT !== null){ return; }
                     if(Vars.ui.chatfrag.shown()){ return; }
-                    if(hotTap("region", KEY_REGION[0])){
+                    selKeyBind();                     // v0.17.1：确保框选键已注册进原版按键绑定
+                    if(hotTap(KEY_REGION[0])){
                         if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
                         var rb = targetBuild();
                         if(rb === null){
@@ -6106,14 +6176,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                                             rb.tile.x + rr, rb.tile.y + rr);
                         }
                     }
-                    if(hotTap("list", KEY_LIST[0])){
+                    if(hotTap(KEY_LIST[0])){
                         if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
                         openListPanel();
                     }
                     // F3 = 鼠标左键：按住就拉框（起点=按下那一刻的鼠标格），松开就出快照。
                     // 没有「就绪」态、不需要点左键，也不弹任何窗（弹窗会抢鼠标）。
                     if(KEY_SELECT !== null){
-                        var selKey = hotKeyCode("select", KEY_SELECT[0]);
+                        var selKey = selKeyCode();
                         var selDown = Core.input.keyDown(selKey);
                         if(selDown && !selHolding){
                             if(Core.scene === null || !Core.scene.hasDialog()){

@@ -110,6 +110,19 @@ def main() -> int:
                 problems.append('mod/MlogAuxiliary/%s differs from the repo copy' % rel)
         print('PACK:mod main.js %s' % P.sha256(P.MOD / 'scripts' / 'main.js')[:16])
 
+        # ---- 2b. the mod bundle ships (v0.17.1: keybind names live there) ---
+        bundles = sorted((P.MOD / 'bundles').glob('*.properties'))
+        if not bundles:
+            problems.append('MlogAuxiliary/bundles/*.properties is gone -- the keybind '
+                            'would show up as the raw id "mai-select"')
+        for p in bundles:
+            shipped = tree / 'mod' / 'MlogAuxiliary' / 'bundles' / p.name
+            if not shipped.is_file():
+                problems.append('bundles/%s did not make it into the package' % p.name)
+            elif 'mai-select' not in shipped.read_text(encoding='utf-8'):
+                problems.append('bundles/%s has no keybind.mai-select.name' % p.name)
+        print('PACK:bundles %d file(s)' % len(bundles))
+
         # ---- 3. VERSION.txt lists everything shipped ---------------------
         vt = (tree / 'VERSION.txt').read_text(encoding='utf-8')
         listed = {ln.split(' ', 2)[2] for ln in vt.splitlines() if ln.startswith('sha256 ')}

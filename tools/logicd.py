@@ -84,7 +84,7 @@ import aigenerated             # noqa: E402  (the hidden @aigenerated signature)
 PROTOCOL = 1
 # The sidecar is what gets restarted when a fix ships, and a stale process answers
 # /health with 200 all day, so let the answer say which build it is (v0.12.3).
-SIDECAR_VERSION = '0.17.0'
+SIDECAR_VERSION = '0.17.1'
 GAME = 'mindustry v160.7 (executor jar out/_server160.jar)'
 
 #: v0.14.2: every program this sidecar hands out is signed before it is analyzed
