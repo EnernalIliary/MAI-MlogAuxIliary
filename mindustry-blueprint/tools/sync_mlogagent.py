@@ -285,11 +285,16 @@ def main(argv: list[str] | None = None) -> int:
                          "(trimmed exports only; the repo copies must be complete)")
     args = ap.parse_args(argv)
 
-    if not SKILL.is_dir():
-        print(f"!! skill directory not found: {SKILL}")
-        return 2
-
     targets = MIRROR_ORDER if args.mirror == "all" else [args.mirror]
+    if not SKILL.is_dir() and "skill" in targets:
+        # 公开仓/CI 的 fresh checkout 没有 .dsh 技能目录：write_target 对缺席
+        # 目录本来就跳过（return 0），这里只有显式点名 skill 才值得硬退。
+        print(f"!! skill directory not found: {SKILL}")
+        if args.mirror == "all" and args.check:
+            print("   (checking the in-tree mirrors only; skill copy absent)")
+            targets = [n for n in targets if n != "skill"]
+        else:
+            return 2
     names = payload()
     print(f"source : {HERE}  ({len(names)} payload file(s))")
     rc = 0
