@@ -362,6 +362,8 @@ def main():
     # 原版「详细」页标题形如 "[[schematic] 名"（arc 用 [[ 转义一个 [）。
     "print(maiBpTitleProbe('[[schematic] 蓝图甲'));",
     "print(maiBpChatProbe('蓝图甲'));",
+    # v0.18.0：首次配置向导的布线（无头没有 Vars.ui，只能验页面能建 + 标记读回）。
+    "print('MAIWELCOME:' + maiWelcomeProbe());",
     "print('MAILLM:' + maiLlmProbe());",
     # v0.12.5: the retained selection box + corner badge state machine (no sidecar, no ui)
     "print('MAIJOBBOX0:' + maiJobBox());",
@@ -390,7 +392,7 @@ def main():
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
                               'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIBP:',
-                              'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:',
+                              'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
@@ -1435,6 +1437,33 @@ def main():
                         ('HOT_KEY', 'the self-made hotkey store is back -- KeyBind owns the value now')):
         if needle in code_only:
             problems.append('v0.17.1: ' + why)
+    # v0.18.0（用户 m10072）：第一次启动弹「欢迎 + 快速配置」。
+    # 三步都要在：验后端可用、填模型并启用、重启。少一步向导就没有意义，
+    # 而多一次自动弹窗则是回归（标记没写/读了没判），所以正反都钉。
+    if 'MAIWELCOME:ok' not in joined:
+        problems.append('v0.18.0: the welcome page no longer builds: %r'
+                        % [l for l in lines if l.startswith('MAIWELCOME:')][:1])
+    elif 'seen=no' not in joined:
+        problems.append('v0.18.0: the first-run flag reads back as already seen on a fresh config')
+    for needle, why in (
+            ('function welcomeBuild(t, mk){',
+             'the welcome page layout is gone'),
+            ('function welcomeTick(){',
+             'nothing pops the welcome page on first launch any more'),
+            ('var WELCOME_KEY = "mlogauxiliary-welcome-done";',
+             'the first-run flag key is gone (the wizard would pop on every launch)'),
+            ('welcomeMarkSeen();',
+             'the wizard never records that it was shown'),
+            ('"GET", "/health"',
+             'step 1 no longer checks the sidecar health endpoint'),
+            ('kind: "llm"',
+             'step 2 no longer enables the model tier'),
+            ('Core.app.exit()',
+             'step 3 can no longer restart the game'),
+            ('buttonRow(t, ["\u9996\u6b21\u914d\u7f6e\u5411\u5bfc"]',
+             'the settings page lost its way back into the wizard')):
+        if needle not in code_only:
+            problems.append('v0.18.0: ' + why)
     # ---- P3 region snapshot, read back from the engine
     snap = None
     for l in text.splitlines():

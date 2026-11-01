@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.17.1";
+    var MOD_VERSION = "0.18.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -694,6 +694,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         var parts = diagParts(), i;
 
         section(t, "大模型");
+        buttonRow(t, ["首次配置向导"], [function(){ welcomeOpen(); }], mk);
         kv(t, "档位", llmText(), mk, "启用后由模型直接写逻辑：描述交给模型，模型写 mlog，本模组只做预检与写入。");
         var lrow = mk();
         lrow.margin(8).left();
@@ -1247,6 +1248,244 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     else if(d.raw){ lines.push("原文：" + String(d.raw).slice(0, 200)); }
                     llmNote(lines.join("\n"));
                 });
+        }
+
+        // ---------------------------------------------------------- 首次配置向导（v0.18.0）
+        // 用户 m10072：「第一次启动时候弹出欢迎和快速配置页面，并在验证 sidecar 可用，
+        // 模型配置完成之后重启。」只在第一次自动弹（标记写 Core.settings）；
+        // 「稍后再说」也记标记，之后从「设置 → Mlog辅助 → 大模型」里的按钮重开。
+        var WELCOME_KEY = "mlogauxiliary-welcome-done";
+        var WELCOME = {dlg: null, url: "", key: "", model: "", note: "", sideNote: "",
+                       okSide: false, okLlm: false, busy: false, tried: false};
+
+        function welcomeSeen(){
+            try{ return Core.settings.getBool(WELCOME_KEY, false) === true; }
+            catch(e){ return true; }        // 读不到就当看过，别每次进游戏都弹
+        }
+
+        function welcomeMarkSeen(){
+            try{ Core.settings.put(WELCOME_KEY, true); }
+            catch(e){ log("welcome flag failed: " + e); }
+        }
+
+        function welcomeSideText(){
+            return sidecarStateText() + (WELCOME.okSide ? " · 可用" : " · 未确认");
+        }
+
+        // 纯布线：真机的 Dialog.cont 与无头 smoke 的假表共用（fakeTable 只认 add/label/field/button）。
+        function welcomeBuild(t, mk){
+            mk = mk || realRow;
+            t.defaults().pad(3).left();
+            titleLine(t, "欢迎使用 Mlog辅助", 1.5, Pal.accent);
+            kv(t, "", "三步配好：确认后端可用 → 填好模型 → 重启游戏。"
+                    + "之后按住框选键（默认 F3）框住若干处理器，写一句话就能生成、预检并写入逻辑。", mk);
+
+            section(t, "第 1 步 · 后端");
+            kv(t, "状态", welcomeSideText(), mk,
+               "后端（sidecar）是模组自带的本地服务，负责编译、预检和调用模型；随游戏自启，一般不用手动管。");
+            buttonRow(t, ["启动并检测后端"], [function(){ welcomeCheckSidecar(); }], mk);
+            if(WELCOME.sideNote.length > 0){ kv(t, "", WELCOME.sideNote, mk); }
+
+            section(t, "第 2 步 · 模型");
+            kv(t, "当前", llmText(), mk, "模型档：填好地址、密钥和模型名后启用，此后描述意图由模型直接写逻辑。");
+            var r1 = mk();
+            r1.margin(8).left();
+            r1.add("地址").width(LABEL_W).left().color(Pal.gray);
+            r1.field(WELCOME.url, function(v){ WELCOME.url = String(v); }).width(300).left();
+            t.add(r1).width(ROW_W).left().padTop(5).row();
+            var r2 = mk();
+            r2.margin(8).left();
+            r2.add("密钥").width(LABEL_W).left().color(Pal.gray);
+            r2.field(WELCOME.key, function(v){ WELCOME.key = String(v); }).width(300).left();
+            t.add(r2).width(ROW_W).left().padTop(5).row();
+            var r3 = mk();
+            r3.margin(8).left();
+            r3.add("模型").width(LABEL_W).left().color(Pal.gray);
+            r3.field(WELCOME.model, function(v){ WELCOME.model = String(v); }).width(300).left();
+            t.add(r3).width(ROW_W).left().padTop(5).row();
+            buttonRow(t, ["获取模型", "测试端点", "保存并启用"],
+                      [function(){ welcomeModels(); },
+                       function(){ welcomeTest(); },
+                       function(){ welcomeApply(); }], mk);
+            if(WELCOME.note.length > 0){ kv(t, "", WELCOME.note, mk); }
+
+            section(t, "第 3 步 · 重启");
+            kv(t, "", "配置存在本机。重启游戏后，设置页、框选与蓝图入口全部按新配置工作。", mk);
+            buttonRow(t, ["完成（稍后自己重启）", "现在退出游戏"],
+                      [function(){ welcomeFinish(); },
+                       function(){ welcomeExit(); }], mk);
+        }
+
+        function welcomeRender(){
+            var d = WELCOME.dlg;
+            if(d === null){ return; }
+            var t = d.cont;
+            try{ t.clear(); }catch(e){ log("welcome clear failed: " + e); }
+            welcomeBuild(t, realRow);
+            t.row();
+            t.button("稍后再说（随时可在设置页里改）", function(){ welcomeFinish(); })
+                .height(38).width(360).padTop(10);
+        }
+
+        function welcomeOpen(){
+            if(Vars.ui === null){ return "welcome: no ui"; }
+            if(WELCOME.dlg !== null){
+                try{ WELCOME.dlg.show(); }catch(e){ }
+                return "welcome: already open";
+            }
+            WELCOME.url = llmUrl();
+            WELCOME.key = llmKey();
+            WELCOME.model = llmModel();
+            if(WELCOME.url.length === 0){ WELCOME.url = LLM_DEFAULT_URL; }
+            WELCOME.okSide = (SIDE.state === "up");
+            WELCOME.note = "";
+            WELCOME.sideNote = "";
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 首次配置");
+            WELCOME.dlg = d;
+            try{ d.closeOnBack(); }catch(e){ }
+            try{ d.cont.defaults().pad(3).left(); }catch(e){ }
+            welcomeRender();
+            d.show();
+            welcomeMarkSeen();
+            try{ welcomeCheckSidecar(); }catch(e){ log("welcome sidecar check failed: " + e); }
+            return "welcome: open";
+        }
+
+        // 第 1 步：先让模组拉起后端，再自己问一次 /health（ensureSidecar 是异步的）。
+        function welcomeCheckSidecar(){
+            WELCOME.sideNote = "正在检测后端…";
+            welcomeRender();
+            try{ ensureSidecar(false); }catch(e){ log("welcome ensureSidecar failed: " + e); }
+            httpJson("GET", "/health", null, function(code, text){
+                var d = parse(text);
+                if(d !== null && d.ok === true){
+                    WELCOME.okSide = true;
+                    WELCOME.sideNote = "后端可用：v" + String(d.version) + " · 端口 " + String(d.port);
+                    log("welcome: sidecar ok v" + String(d.version));
+                }else{
+                    WELCOME.okSide = false;
+                    WELCOME.sideNote = "后端还没起来（" + sidecarStateText() + "）："
+                        + jobWhy(code, text, d) + "。第一次启动要等它编译完，几秒后再点一次。";
+                }
+                welcomeRender();
+            });
+        }
+
+        // 第 2 步：取模型列表（https 端点由后端代取，模组自己的裸 Socket 只走明文 HTTP）。
+        function welcomeModels(){
+            llmSave(LLM_URL_KEY, WELCOME.url);
+            llmSave(LLM_KEY_KEY, WELCOME.key);
+            WELCOME.note = "正在取模型列表…";
+            welcomeRender();
+            llmFetchModels(function(ok, doc, err){
+                if(!ok){
+                    WELCOME.note = "取模型列表失败：" + String(err) + "（也可以直接把模型名填进去）";
+                    welcomeRender();
+                    return;
+                }
+                var list = (doc && doc.models) || [];
+                WELCOME.note = "端点返回 " + list.length + " 个模型，选一个后点「保存并启用」。";
+                welcomeRender();
+                showPickList("Mlog辅助 · 选择模型（" + list.length + "）", list, function(m){
+                    WELCOME.model = m;
+                    WELCOME.note = "已选模型：" + m + "。接着点「保存并启用」。";
+                    welcomeRender();
+                });
+            });
+        }
+
+        function welcomeTest(){
+            var url = WELCOME.url;
+            if(url.length === 0){
+                WELCOME.note = "先填模型地址（例如 " + LLM_DEFAULT_URL + "）。";
+                welcomeRender();
+                return;
+            }
+            llmSave(LLM_URL_KEY, url);
+            llmSave(LLM_KEY_KEY, WELCOME.key);
+            llmSave(LLM_MODEL_KEY, WELCOME.model);
+            WELCOME.note = "正在测试端点…";
+            welcomeRender();
+            httpJson("POST", "/llm/probe",
+                JSON.stringify({url: url, model: WELCOME.model, key: WELCOME.key}),
+                function(code, text){
+                    var d = parse(text);
+                    if(d === null){
+                        WELCOME.note = "后端没回 JSON：" + jobWhy(code, text, null);
+                        welcomeRender();
+                        return;
+                    }
+                    if(d.ok !== true){
+                        WELCOME.note = "测试失败：" + String(d.error || jobWhy(code, text, null));
+                        welcomeRender();
+                        return;
+                    }
+                    var note = "HTTP " + String(d.status) + " · " + String(d.model || "(端点默认)");
+                    if(d.finish_reason !== undefined && d.finish_reason !== null){
+                        note += " · finish_reason " + String(d.finish_reason);
+                    }
+                    if(d.content){ note += " · 回复 " + String(d.content).slice(0, 80); }
+                    else if(d.error){ note += " · 错误 " + String(d.error); }
+                    WELCOME.note = "端点可用：" + note + "。接着点「保存并启用」。";
+                    welcomeRender();
+                });
+        }
+
+        function welcomeApply(){
+            if(WELCOME.url.length === 0){
+                WELCOME.note = "先填模型地址（例如 " + LLM_DEFAULT_URL + "）。";
+                welcomeRender();
+                return;
+            }
+            llmSave(LLM_URL_KEY, WELCOME.url);
+            llmSave(LLM_KEY_KEY, WELCOME.key);
+            llmSave(LLM_MODEL_KEY, WELCOME.model);
+            WELCOME.note = "正在保存并启用…";
+            welcomeRender();
+            llmApply(JSON.stringify({kind: "llm", url: WELCOME.url,
+                                     model: WELCOME.model, key: WELCOME.key}),
+                function(code, d, text){
+                    if(d === null || d.ok !== true){
+                        WELCOME.note = "启用失败：" + ((d && d.error) ? String(d.error) : jobWhy(code, text, null));
+                        welcomeRender();
+                        return;
+                    }
+                    WELCOME.okLlm = true;
+                    WELCOME.note = "已启用：" + String(d.model || "(端点默认)")
+                        + "。最后一步：重启游戏。";
+                    welcomeRender();
+                });
+        }
+
+        function welcomeFinish(){
+            welcomeMarkSeen();
+            if(WELCOME.dlg !== null){
+                var d = WELCOME.dlg;
+                WELCOME.dlg = null;
+                try{ d.hide(); }catch(e){ log("welcome hide failed: " + e); }
+            }
+            hint("首次配置已结束。重启游戏后，按住框选键框住处理器即可开始。");
+            return "welcome: done";
+        }
+
+        function welcomeExit(){
+            welcomeMarkSeen();
+            hint("正在退出游戏；重新打开后配置生效。");
+            try{ Core.app.exit(); }
+            catch(e){ log("welcome exit failed: " + e); }
+            return "welcome: exit";
+        }
+
+        // 每帧调，只在「第一次进游戏、没有别的对话框」时弹一次。
+        function welcomeTick(){
+            if(WELCOME.tried || WELCOME.dlg !== null){ return; }
+            if(welcomeSeen()){ WELCOME.tried = true; return; }
+            if(Vars.ui === null || Vars.ui === undefined){ return; }
+            if(Core.scene === null || Core.scene === undefined){ return; }
+            try{ if(Vars.state.isMenu()){ return; } }catch(e){ return; }
+            if(Core.scene.hasDialog()){ return; }        // 让别的窗先关，下一帧再说
+            WELCOME.tried = true;
+            welcomeOpen();
         }
 
         function endpoint(url){
@@ -5266,7 +5505,18 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         var api = {
             // v0.15.0：面板上的失败说明与诊断（无头环境没有侧车也能自检文案）。
             // v0.16.0 B1：蓝图保存的守卫（无头环境 Vars.schematics 为 null）。
-            maiBlueprintSaveProbe: function(rjson){
+            // v0.18.0：无头环境没有 Vars.ui，只能验布线 + 标记读回。
+        maiWelcomeProbe: function(){
+            var ft = fakeTable();
+            var why = "", cells = 0;
+            try{ welcomeBuild(ft.table, function(){ return ft.table; }); cells = ft.count(); }
+            catch(e){ why = String(e); }
+            return (why.length === 0 ? "ok" : ("bad " + why))
+                 + " seen=" + (welcomeSeen() ? "yes" : "no")
+                 + " cells=" + cells + " side=" + SIDE.state;
+        },
+
+        maiBlueprintSaveProbe: function(rjson){
                 var r = null;
                 try{ r = JSON.parse(String(rjson)); }catch(e){ r = null; }
                 var msg = blueprintSaveBox(r, "探针蓝图", null);
@@ -6160,6 +6410,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                         if(settingsTries % 60 === 0){ registerSettings(); }
                     }
                     if(Vars.state.isMenu()){ return; }
+                    welcomeTick();
                     if(Vars.ui.chatfrag.shown()){ return; }
                     selKeyBind();                     // v0.17.1：确保框选键已注册进原版按键绑定
                     if(hotTap(KEY_REGION[0])){
