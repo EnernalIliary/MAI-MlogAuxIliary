@@ -199,12 +199,13 @@ def build_prompt(job, hint=None):
     out.append("=== rules ===")
     out.append("- mlog only, one statement per line, no comments, no blank-line tricks.")
     out.append("- A variable is a name used as an operand; assign it before reading it.")
-    out.append("- jump targets: NEVER count line numbers. Write a label on its own line")
-    out.append("  (`wait_ready:` -- nothing else on that line) and jump to the label:")
-    out.append("  `jump wait_ready always`. The game resolves labels when the program loads;")
-    out.append("  a numeric target that is off by one silently jumps INTO the middle of a")
-    out.append("  block, so the statements it skipped never run. Every jump in your reply")
-    out.append("  must name a label you defined.")
+    out.append("- jump targets are 0-based STATEMENT indices: `jump 0 always` means the")
+    out.append("  very first statement, and a label line is NOT a statement, so every label")
+    out.append("  above a jump shifts its index. NEVER count line numbers. Write a label on")
+    out.append("  its own line (`wait_ready:` -- nothing else on that line) and jump to it:")
+    out.append("  `jump wait_ready always`. A numeric target that is off by one silently")
+    out.append("  jumps INTO the middle of a block, so the statements it skipped never run;")
+    out.append("  every jump in your reply must name a label you defined, never a number.")
     out.append("- print/printflush: print writes into the buffer, printflush sends it.")
     out.append("- sensor <result> <block> <property> reads a property of a linked block.")
     out.append("- control/radar/ucontrol need the documented argument count for v160.")
@@ -294,8 +295,11 @@ jump loop always""",
         "keys": ["射击", "攻击", "炮塔", "敌人", "雷达", "radar", "turret", "shoot", "enemy"],
         "code": """loop:
 radar enemy any any distance turret1 1 target
-jump loop equal target null
-control shoot turret1 target 0
+jump fire notEqual target null
+wait 0.5
+jump loop always
+fire:
+control shootp turret1 target 1
 jump loop always""",
     },
     {

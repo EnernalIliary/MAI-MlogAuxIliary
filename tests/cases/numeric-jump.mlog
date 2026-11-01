@@ -1,0 +1,4 @@
+set n 1
+jump 3 lessThan n 2
+op add n n 1
+end

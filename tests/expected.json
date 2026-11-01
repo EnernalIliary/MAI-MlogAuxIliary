@@ -87,6 +87,27 @@
     "case": "radar-count-ok.mlog",
     "digest": []
   },
+  "check/numeric-jump": {
+    "kind": "check_rid",
+    "case": "numeric-jump.mlog",
+    "digest": [
+      [
+        "WARN",
+        1,
+        "numeric-jump"
+      ]
+    ]
+  },
+  "check/numeric-jump-ok": {
+    "kind": "check",
+    "case": "numeric-jump-ok.mlog",
+    "digest": [
+      [
+        "WARN",
+        1
+      ]
+    ]
+  },
   "ir/labels-resolved": {
     "kind": "ir",
     "case": "label.mlog",
@@ -165,7 +186,12 @@
   "check/labels-blank": {
     "kind": "check",
     "case": "labels-check.mlog",
-    "digest": []
+    "digest": [
+      [
+        "WARN",
+        2
+      ]
+    ]
   },
   "check/reactor-slow": {
     "kind": "check",
@@ -174,18 +200,47 @@
       [
         "WARN",
         1
+      ],
+      [
+        "WARN",
+        1
+      ],
+      [
+        "WARN",
+        3
+      ],
+      [
+        "WARN",
+        23
       ]
     ]
   },
   "check/reactor-ok": {
     "kind": "check",
     "case": "reactor-guard-ok.mlog",
-    "digest": []
+    "digest": [
+      [
+        "WARN",
+        1
+      ],
+      [
+        "WARN",
+        21
+      ]
+    ]
   },
   "check/reactor-unknown": {
     "kind": "check",
     "case": "reactor-guard-unknown.mlog",
     "digest": [
+      [
+        "WARN",
+        1
+      ],
+      [
+        "WARN",
+        21
+      ],
       [
         "INFO",
         0
@@ -199,18 +254,51 @@
       [
         "WARN",
         1
+      ],
+      [
+        "WARN",
+        1
+      ],
+      [
+        "WARN",
+        3
+      ],
+      [
+        "WARN",
+        23
       ]
     ]
   },
   "check/reactor-impact-ok": {
     "kind": "check",
     "case": "reactor-guard-impact-ok.mlog",
-    "digest": []
+    "digest": [
+      [
+        "WARN",
+        1
+      ],
+      [
+        "WARN",
+        3
+      ],
+      [
+        "WARN",
+        23
+      ]
+    ]
   },
   "check/label-index": {
     "kind": "check",
     "case": "label-index.mlog",
     "digest": [
+      [
+        "WARN",
+        0
+      ],
+      [
+        "WARN",
+        1
+      ],
       [
         "WARN",
         2
@@ -334,13 +422,22 @@
       [
         "ERR",
         3
+      ],
+      [
+        "WARN",
+        3
       ]
     ]
   },
   "check/spin-handshake": {
     "kind": "check",
     "case": "spin-ok.mlog",
-    "digest": []
+    "digest": [
+      [
+        "WARN",
+        3
+      ]
+    ]
   },
   "pack/three-fields": {
     "kind": "pack",
@@ -498,6 +595,14 @@
     "digest": [
       [
         "WARN",
+        1
+      ],
+      [
+        "WARN",
+        2
+      ],
+      [
+        "WARN",
         3
       ]
     ]
@@ -505,7 +610,16 @@
   "check/loop-labels-ok": {
     "kind": "check",
     "case": "loop-labels-ok.mlog",
-    "digest": []
+    "digest": [
+      [
+        "WARN",
+        1
+      ],
+      [
+        "WARN",
+        3
+      ]
+    ]
   },
   "tool/aigenerated": {
     "kind": "aigenerated",

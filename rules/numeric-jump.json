@@ -1,0 +1,20 @@
+{
+ "id": "numeric-jump",
+ "kind": "semantics",
+ "severity": "WARN",
+ "claim": "`jump` takes a 0-based STATEMENT index, so a hand-counted number is a promise about the code above it: insert one statement (or one label line, which shifts nothing) and the jump silently lands somewhere else. A jump must name a label.",
+ "why": "LParser.java:117-125 records a label against the count of statements parsed so far and :195-198 resolves `jump <label>` to that 0-based number, which is exactly the literal `jump N` accepts -- so the two forms compile to the same instruction and only the number is fragile. Measured on out/jobs/43fe34c6557e3eeb.json (out/takeover-20261024/98-quality-analysis.md §2): `jump 12` pointed one line past the label the author meant and `jump 5` closed the loop one statement late, so four `control shootp` statements never ran and the radar fired exactly once -- every line legal, nothing to complain about at compile time. prepare() rewrites a named jump into the same number, which is why this check has to read the lines as written rather than the prepared statement list. Prefer labels (`loop:` on its own line + `jump loop always`) so the game does the counting.",
+ "source": "source",
+ "ref": "m00174",
+ "since": "2026-11-01",
+ "counter_example": "tests/cases/numeric-jump-ok.mlog",
+ "match": {
+  "sevs": [
+   "WARN"
+  ],
+  "msg_any": [
+   "is a 0-based statement index"
+  ]
+ },
+ "auto_downgrade": false
+}

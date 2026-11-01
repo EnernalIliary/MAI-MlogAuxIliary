@@ -358,6 +358,102 @@ def _load_arity() -> dict[str, int]:
 ARITY = _load_arity()
 
 
+def _load_instr_specs() -> dict[str, dict]:
+    """The same file again, with its structure: slot names, enum slots, sub-commands.
+
+    ARITY answers "how many tokens does the parser consume"; the checks added in
+    v0.19.0 need the rest of what `instr_semantics.json` already knows:
+
+      * `params`      -- which slot IS what (`radar` writes its RESULT in the
+                         last one; `sensor` writes into the first),
+      * `tokens`      -- text index -> Java enum, i.e. the slots whose value has
+                         to be one of a fixed word list,
+      * `subcommands` -- `ucontrol`'s per-sub-command `args`, because `ucontrol
+                         move <x> <y>` and `ucontrol build <x> <y> <block>
+                         <rotation> <config>` do not take the same operands.
+
+    Indices in `tokens` are PARAM indices (0 is the first operand after the
+    mnemonic; `radar`'s `0..2` are target1..target3), so the operand token is
+    `tokens[index + 1]` in the text.
+    """
+    try:
+        raw = (Path(__file__).with_name("instr_semantics.json")).read_text("utf-8")
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    out: dict[str, dict] = {}
+    for name, spec in (data.get("instructions") or {}).items():
+        subs = spec.get("subcommands") or {}
+        out[name.lower()] = {
+            "arity": spec.get("arity"),
+            "params": [str(p).lower() for p in (spec.get("params") or [])],
+            "tokens": {int(k): str(v) for k, v in (spec.get("tokens") or {}).items()},
+            "subcommands": {str(k).lower(): [str(a) for a in ((v or {}).get("args") or [])]
+                            for k, v in subs.items()},
+        }
+    return out
+
+
+INSTR_SPECS = _load_instr_specs()
+
+
+def _load_enums() -> dict[str, list[str]]:
+    """Fixed word lists the parser resolves a slot against (`instr_enums.json`).
+
+    Read straight out of the v160.7 jar's enum classes (RadarTarget, RadarSort,
+    LLocate, BlockFlag, LUnitControl, LAccess.controls), cross-checked against
+    Logic-Docs-v1.1.0.md. Kept as a data file because the same lists are quoted
+    into the model prompt (mlogprovider.py) -- one table, two readers.
+    """
+    try:
+        raw = (Path(__file__).with_name("instr_enums.json")).read_text("utf-8")
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    return {str(k): [str(v) for v in (vals or [])]
+            for k, vals in (data.get("enums") or {}).items()}
+
+
+ENUMS = _load_enums()
+
+#: How many OPERANDS each instruction must be given when the count is fixed by
+#: its signature. Derived, never guessed:
+#:   radar/uradar/sensor/ulocate -> `arity` in instr_semantics.json
+#:   ucontrol                    -> 1 + len(subcommands[sub]["args"])
+#:   control                     -> Logic-Docs-v1.1.0.md:3038-3140, which shows
+#:                                  one written form per type: `control enabled
+#:                                  <b> <v> 0 0 0` (3 operands before the zero
+#:                                  padding), `control shoot <b> <x> <y> <v> 0`
+#:                                  (5), `control shootp <b> <u> <v> 0 0` (4),
+#:                                  `control color|config <b> <v> 0 0 0` (3).
+#: `op` is deliberately absent: a missing operand there is filled by the
+#: statement's own default and compiles to a real instruction (see
+#: rules/arity-is-not-effective-params.json), so an under-arity warning would be
+#: the false positive that was deleted once already.
+_UNDER_ARITY_FIXED = ("radar", "uradar", "sensor", "ulocate")
+
+
+def _operand_min(name: str, toks: list[str]) -> int | None:
+    """Operands the signature requires, or None when the count is not fixed."""
+    spec = INSTR_SPECS.get(name) or {}
+    if name in _UNDER_ARITY_FIXED:
+        n = spec.get("arity")
+        return n if isinstance(n, int) else None
+    if name == "control":
+        if len(toks) < 2:
+            return None
+        return _OPERAND_MIN_CONTROL.get(toks[1].lower())
+    if name == "ucontrol":
+        if len(toks) < 2:
+            return None
+        args = (spec.get("subcommands") or {}).get(toks[1].lower())
+        return None if args is None else 1 + len(args)
+    return None
+
+
+_OPERAND_MIN_CONTROL = {"enabled": 3, "config": 3, "color": 3, "shoot": 5, "shootp": 4}
+
+
 def _load_sensor_props() -> set[str]:
     """The `LAccess` attributes a `sensor` instruction can read.
 
@@ -868,6 +964,32 @@ def analyse(lines: list[str], links: list[str] | None = None, ipt: int = 2,
                 f"`{_t[1]}` is not a label in this program, so the game turns this "
                 f"into a jump to -1, which does nothing; execution just falls through"))
 
+    # `jump 12`: a hand-counted 0-based statement index instead of a label.
+    # LParser resolves a label to the statement counter (LParser.java:117-125) --
+    # the same 0-based number `jump` takes as a literal -- and prepare() rewrites
+    # a named jump into that number, so the prepared statement list can no longer
+    # tell a label from a hand-counted number. This scan therefore reads the lines
+    # as written. The failure this catches is out/takeover-20261024/
+    # 98-quality-analysis.md §2: `jump 12` / `jump 5`, each one line off, one
+    # branch never executed and a radar fired exactly once.
+    for _i, _raw in enumerate(lines):
+        _c = strip_comment(_raw)
+        if "aigenerated:" in _c:
+            # The signature idiom `jump 0 always 0 "aigenerated:MAI:<12hex>"` is
+            # written by tools/aigenerated.py on purpose (target 0 = restart the
+            # program, the id lives in the value slot); it is not the numeric
+            # confusion this rule hunts.
+            continue
+        _t = _c.split()
+        if len(_t) < 2 or _t[0].lower() != "jump" or not is_number(_t[1]):
+            continue
+        out.append(Finding(
+            "WARN", _i + 1, "numeric-jump",
+            f"`{_t[1]}` is a 0-based statement index, not a label; label lines do not "
+            f"count as statements, so inserting one line above silently re-points this "
+            f"jump at the wrong statement -- put `<name>:` on its own line and jump to "
+            f"that name instead"))
+
     # ---- 病毒逻辑 / virus logic: `ucontrol build ... @this` ---------------
     # The last argument of `ucontrol build` is the config copied onto the new
     # block, so passing `@this` builds a processor configured with THIS
@@ -916,6 +1038,84 @@ def analyse(lines: list[str], links: list[str] | None = None, ipt: int = 2,
                 f"engine reads as a boolean (1 ascending, anything else descending) "
                 f"and the statement returns ONE unit -- there is no count operand; "
                 f"writing {_t[6]} does not make it look for {_t[6]} units"))
+
+    # ---- too few operands for the signature (v0.19.0) ----------------------
+    # The analyzer has always trimmed SURPLUS operands (defs_of/uses_of cap at
+    # `arity`); a line that is one operand SHORT was silent, which is how the
+    # prompt's own example library shipped `control shoot turret1 target 0` --
+    # one operand short of `control shoot <block> <x> <y> <on>` -- as a shape the
+    # gate accepted (out/takeover-20261024/98-quality-analysis.md §3-§4).
+    # Only the signature-sensitive instructions are checked. `op add r 1` is NOT
+    # a finding: the statement fills its missing slot with its own default and
+    # still compiles to a real OpI, which is the false positive that was deleted
+    # once already -- the reasoning is pinned in
+    # rules/arity-is-not-effective-params.json.
+    for _idx, (_i, _c) in enumerate(stmts):
+        _t = tokenize(_c)
+        if not _t:
+            continue
+        _name = _t[0].lower()
+        _need = _operand_min(_name, _t)
+        if _need is None:
+            continue
+        _have = len(_t) - 1
+        if _have >= _need:
+            continue
+        _params = ", ".join((INSTR_SPECS.get(_name) or {}).get("params") or [])
+        out.append(Finding(
+            "WARN", _i + 1, "under-arity",
+            f"`{_name}` is short by {_need - _have} operand(s): the signature reads "
+            f"{_need} here ({_params or 'operand count'}) and this line has {_have}, "
+            f"so the operands you left out are not the ones the engine will act on"))
+
+    # ---- slots the parser resolves against a fixed word list (v0.19.0) -----
+    # `radar enemy any any distance turret1 1 out` works because RadarTarget has
+    # a constant literally named `enemy`: the slot is an enum word, not a
+    # variable and not a number, so a word the enum does not have is not a
+    # filter. Same for `control`'s first operand (the five members of
+    # LAccess.controls) and `ulocate`'s mode. The slot table comes from
+    # instr_semantics.json `tokens`, the word lists from instr_enums.json (read
+    # out of the v160.7 jar) -- nothing here is a hand-written guess.
+    # Reported as WARN: the value is wrong, and the message quotes the list, so
+    # the fix is visible without another round trip. `op`/`jump`/`sensor`
+    # content slots are NOT included -- they have rules of their own
+    # (unknown-op, sensor-not-a-property) and their slot may legitimately be a
+    # variable in ways these enum slots cannot.
+    _enum_alias = {"LAccess": "ControlType"}
+    _enum_checked = ("RadarTarget", "RadarSort", "ControlType", "LLocate")
+    for _idx, (_i, _c) in enumerate(stmts):
+        _t = tokenize(_c)
+        if not _t:
+            continue
+        _name = _t[0].lower()
+        _spec = INSTR_SPECS.get(_name) or {}
+        for _pos, _enum in sorted((_spec.get("tokens") or {}).items()):
+            _enum = _enum_alias.get(_enum, _enum)
+            if _enum not in _enum_checked:
+                continue
+            _vals = ENUMS.get(_enum) or []
+            if not _vals or _pos + 1 >= len(_t):
+                continue
+            _val = _t[_pos + 1]
+            if _val.lower() in {v.lower() for v in _vals}:
+                continue
+            _words = "|".join(_vals)
+            if _enum == "RadarTarget":
+                _msg = (f"`{_val}` is not a radar filter: operand {_pos + 1} of "
+                        f"`{_name}` takes only {_words} (v160.7) -- the slot is an "
+                        f"enum word, not a variable or a number")
+            elif _enum == "RadarSort":
+                _msg = (f"`{_val}` is not a radar sort key: operand {_pos + 1} of "
+                        f"`{_name}` takes only {_words} (v160.7) -- the slot is an "
+                        f"enum word, not a variable")
+            elif _enum == "ControlType":
+                _msg = (f"`{_val}` is not a control type: operand 1 of `control` takes "
+                        f"only {_words} (v160.7), then the block, then that type's own "
+                        f"operands (`control shoot <block> <x> <y> <on>`)")
+            else:
+                _msg = (f"`{_val}` is not a ulocate mode: operand 1 of `ulocate` takes "
+                        f"only {_words} (v160.7)")
+            out.append(Finding("WARN", _i + 1, "slot-not-in-enum", _msg))
 
     # Link names are bound by the processor itself, not by an assignment, so
     # they are live from the very first statement. We also auto-detect them by

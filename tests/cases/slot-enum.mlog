@@ -1,0 +1,5 @@
+ubind @flare
+radar bogus any any distance turret1 1 out
+control salvo1 shoot 0 0 1
+ulocate mine core false @copper outx outy found outb
+end

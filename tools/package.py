@@ -166,8 +166,14 @@ def layout() -> list[tuple[str, Path]]:
     wherever "every shipped file" matters (`VERSION.txt`, verify step 6).
     """
     rows: list[tuple[str, Path]] = []
-    for rel in ('mod.hjson', 'README.md', 'scripts/main.js'):
+    for rel in ('mod.hjson', 'README.md'):
         rows.append(('mod/MlogAuxiliary/' + rel, MOD / rel))
+    # v0.18.3（用户 m11124「本地快检显示未加载」）：scripts/ 下不止 main.js。
+    # main.js 自己 require("rules.generated") / require("quickcheck")（Mods.java 只执行
+    # scripts/ 里唯一的 .js），所以这两个文件必须跟着进包；漏了游戏里 require 抛异常、
+    # RULES 恒为 null，设置页的「本地快检」就永远写未加载。
+    for p in sorted((MOD / 'scripts').glob('*.js')):
+        rows.append(('mod/MlogAuxiliary/scripts/' + p.name, p))
     # v0.17.1：按键绑定条目的名字来自 bundles/bundle*.properties
     # （Mods.java:636-660 把 mod.root/bundles 合进根 bundle）。漏了不会报错，
     # 只是设置→控制→按键绑定 里显示成原始键名 "mai-select"。

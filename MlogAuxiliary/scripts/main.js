@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.18.2";
+    var MOD_VERSION = "0.18.3";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -61,6 +61,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
     var sidecarOk = null;
     var settingsDone = false;
+    // v0.18.3（用户 m11124）：「运行环境的设置项显示未注册」——设置页正在渲染这件事本身
+    // 就证明分类注册成功了；selfTest 那条假表路径里 settingsDone 还是 false，会假阴性。
+    var SETTINGS_LIVE = false;
     var settingsErr = null;
     var settingsTries = 0;    // 见热键钩子：UI 晚于脚本建好时每 60 帧重试一次   // 注册失败时的原文，摊在诊断里，省得翻 last_log.txt
 
@@ -91,7 +94,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         parts.push({k: "大模型", v: llmText()});
         parts.push({k: "数据目录", v: dirText(Vars.dataDirectory)});
         parts.push({k: "mods 目录", v: dirText(Vars.modDirectory)});
-        parts.push({k: "设置项", v: settingsDone ? "已注册（设置 → Mlog辅助）"
+        parts.push({k: "设置项", v: (settingsDone || SETTINGS_LIVE) ? "已注册（设置 → Mlog辅助）"
                     : (settingsErr === null ? "未注册（Vars.ui 未就绪）" : "注册失败：" + settingsErr)});
         return parts;
     }
@@ -974,6 +977,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
     function buildSettingsTable(t, mk){
         mk = mk || realRow;
+        SETTINGS_LIVE = true;
         t.defaults().pad(3).left();
         // v0.17.0（用户 m09440 / 2）：主标题两行居中、加大。
         titleLine(t, "MAI", 1.9, themeColor());
@@ -1105,72 +1109,25 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
            + "关着时点作业详情里的「写入」。默认关。");
         t.add(awrow).width(ROW_W).left().padTop(5).row();
 
-        section(t, "快捷动作");
-        buttonRow(t, ["AI 辅助编程", "复制诊断"], [
-            function(){ showAiPanel(); },
-            function(){ copyDiag(); }
-        ], mk);
-        buttonRow(t, ["快检光标下的处理器", "打印诊断"], [
-            function(){ quickAimed(); },
-            function(){ print("[mai] --- diag ---"); print(diagText()); }
-        ], mk);
-        buttonRow(t, ["重新注册分类", "审查状态"], [
-            function(){ settingsDone = false; registerSettings(); },
-            function(){ showReview(); }
-        ], mk);
-        buttonRow(t, ["撤销上次写入", "撤销快照"], [
-            function(){ var r = undo(); if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 撤销", r); } },
-            function(){ if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 撤销", undoInfo()); } }
-        ], mk);
-
-        section(t, "热键");
-        kv(t, "框选", "F3（按住拖框）· 在「设置 → 控制 → 按键绑定」里改", mk,
-           "框选键注册在原版按键绑定界面里，和其它热键一起改、一起恢复默认；"
-           + "改完立刻生效，不用重启。");
-        kv(t, "清单 / 区域候选", "F2 / F7（固定）", mk,
-           "这两个键不提供改键：F2 打开全图处理器清单，F7 列出光标附近 10 格的链接候选。");
-
-        section(t, "本地快检");
-        for(i = 0; i < parts.length; i++){
-            if(parts[i].k === "快检"){
-                kv(t, parts[i].k, parts[i].v, mk,
-                   "模组自带的离线静态检查：不联网也能标出不可达语句、未定义变量、链接没绑上这类问题，"
-                   + "规则与 sidecar 的检查器同源，只在本机跑。");
-            }
-        }
-
-        // v0.18.1（用户 m10327）：「最近提示改成可复制的文本日志」——
-        // 不再只留最后一条挤在一格按钮里，改成整段日志（最近 12 条，带时分秒，换行排开），
-        // 下面「复制日志」一次拷整段，报错误时可以整段贴给我。
-        section(t, "最近提示");
+        // v0.18.3（用户 m11124）：「诊断全部移动到最近提示页」「按钮只要一个复制」。
+        // 版本 / 快检 / sidecar / 模型 / 目录都摊在这一页，出问题点一次「复制」整段带走。
+        section(t, "诊断与最近提示");
         var hrow = mk();
         hrow.margin(8).left();
         var hcell = hrow.labelWrap(hintLogText()).width(VALUE_W - INFO_W).left();
         try{ lastHintLog = hcell.get(); }catch(e5){ lastHintLog = null; }
-        infoIcon(hrow, "这是最近的提示日志，错误也在里面；只在本机保留最近 12 条，换行写全。"
-           + "屏幕上的提示只闪一下，要留证据就点下面的「复制日志」。");
+        infoIcon(hrow, "最近的提示日志（错误也在里面），只在本机保留最近 12 条；"
+           + "屏幕上的提示只闪一下，要留证据就点下面的「复制」。");
         t.add(hrow).width(ROW_W).left().padTop(5).row();
         var hbtn = mk();
         hbtn.margin(6).left();
-        lastHintLbl = hbtn.button("复制日志", function(){ hintLogCopy(); }).height(38).padRight(6);
-        hbtn.button("清空", function(){ hintLogClear(); }).height(38).padRight(6);
+        lastHintLbl = hbtn.button("复制", function(){ hintLogCopy(); }).height(38).padRight(6);
         t.add(hbtn).width(ROW_W).left().padTop(5).row();
-
-        section(t, "说明");
-        var urow = mk();
-        urow.margin(8).left();
-        urow.add("框选").width(LABEL_W).left().color(Pal.gray);
-        urow.labelWrap("按住框选键在处理器上拖一个框 → 写一句要什么 → 生成 → 预检 → 写入").width(VALUE_W).left();
-        infoIcon(urow, "原版逻辑编辑器底部会多一条「审查」栏；sidecar 随游戏自启，"
-           + "未就绪时投递会排队，就绪后自动发出，不用再点一遍。");
-        t.add(urow).width(ROW_W).left().padTop(5).row();
+        for(i = 0; i < parts.length; i++){ kv(t, parts[i].k, parts[i].v, mk); }
 
         section(t, "运行环境");
-        for(i = 0; i < parts.length; i++){
-            if(parts[i].k !== "快检"){ kv(t, parts[i].k, parts[i].v, mk); }
-        }
-        // v0.18.1（用户 m10327）：「首次配置向导的按钮放在最后的运行环境」。
         buttonRow(t, ["首次配置向导"], [function(){ welcomeOpen(); }], mk);
+        SETTINGS_LIVE = false;
     }
 
     // 区域面板的布线（v0.6.0）：框选松手之后不再只弹一段纯文本，而是把「区域摘要 +
@@ -4327,9 +4284,17 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
             var targets = [], i, ps = [];
             try{ ps = regionSnapshot(r.x1, r.y1, r.x2, r.y2).processors || []; }catch(e){ ps = []; }
+            var seenQ = {};
             for(i = 0; i < ps.length; i++){
                 var pb = processorAt(ps[i].x, ps[i].y);
-                if(pb !== null){ targets.push({b: pb, x: ps[i].x, y: ps[i].y}); }
+                if(pb === null){ continue; }
+                // v0.18.3（用户 m11320）：同一台处理器只投一单（防多格建筑重复枚举）。
+                var qid = null;
+                try{ qid = String(pb.id); }catch(eQ){ qid = null; }
+                if(qid === null || qid === "undefined"){ qid = "t" + ps[i].x + "," + ps[i].y; }
+                if(seenQ[qid] === true){ continue; }
+                seenQ[qid] = true;
+                targets.push({b: pb, x: ps[i].x, y: ps[i].y});
             }
             if(targets.length === 0){
                 hint("区域里没有处理器：拖框要把处理器框进去（F2 看全图清单）");
@@ -5327,7 +5292,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             try{ btns = Vars.ui.schematics.buttons; }catch(e){ btns = null; }
             if(btns === null || btns === undefined){ return; }
             try{
-                btns.button("MAI 控制面板", function(){ openBlueprintPicker(); }).width(150);
+                // v0.18.3（用户 m11124）：「MAI 控制面板按钮是用来管理工作区的，替代以前的查看页面」。
+                btns.button("MAI 控制面板", function(){ openWorkspaceDialog(); }).width(150);
                 BP_BTN_ADDED = true;
             }catch(e2){ log("blueprint page button failed: " + e2); }
         }
@@ -5426,6 +5392,15 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var host = new Packages.arc.scene.ui.layout.Table();
             try{ d.cont.pane(host).height(320).width(600).row(); }catch(e){ d.cont.add(host).row(); }
             d.buttons.button("刷新", function(){ renderWorkspaces(host, d); }).width(110);
+            // v0.18.3（用户 m11124）：「撤销功能移入 MAI 控制面板」。
+            d.buttons.button("撤销上次写入", function(){
+                var r = undo();
+                if(Vars.ui !== null && Vars.ui !== undefined){ Vars.ui.showText("Mlog辅助 · 撤销", String(r)); }
+                renderWorkspaces(host, d);
+            }).width(150);
+            d.buttons.button("撤销快照", function(){
+                if(Vars.ui !== null && Vars.ui !== undefined){ Vars.ui.showText("Mlog辅助 · 撤销", String(undoInfo())); }
+            }).width(120);
             d.buttons.button("从蓝图创建", function(){ renderBlueprintPicker(host, d); }).width(140);
             d.buttons.button("关闭", function(){ d.hide(); }).width(110);
             d.closeOnBack();
@@ -5822,7 +5797,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(y2 > maxY){ y2 = maxY; }
             var grid = [], procs = [], truncated = false, x, y;
             // v0.12.9：方块计数 / 库存 / 单位 / 敌方
-            var blocks = {}, items = {}, liquids = {}, stores = [], seenIds = {}, enemyBlocks = 0;
+            var blocks = {}, items = {}, liquids = {}, stores = [], seenIds = {}, seenProcs = {}, enemyBlocks = 0;
             var itemsSeq = null, liquidsSeq = null;
             try{ itemsSeq = Vars.content.items(); }catch(e){ itemsSeq = null; }
             try{ liquidsSeq = Vars.content.liquids(); }catch(e){ liquidsSeq = null; }
@@ -5842,9 +5817,18 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     grid.push({x: x, y: y, block: name});
                     blocks[name] = (blocks[name] || 0) + 1;
                     if(isProcessor(bld)){
-                        procs.push({x: x, y: y, block: name,
-                                    code: String(bld.code === null ? "" : bld.code),
-                                    links: linkList(bld)});
+                        // v0.18.3（用户 m11320）：逻辑处理器 2x2、超核处理器 3x3，
+                        // 同一台建筑在它占的每个格子上都被枚举一次 ⇒ 完全框选时
+                        // 同一份逻辑被下发 4/9 个作业。按建筑 id 去重（和库存同一手）。
+                        var pid = null;
+                        try{ pid = String(bld.id); }catch(eP){ pid = null; }
+                        if(pid === null || pid === "undefined"){ pid = "t" + x + "," + y; }
+                        if(seenProcs[pid] !== true){
+                            seenProcs[pid] = true;
+                            procs.push({x: x, y: y, block: name,
+                                        code: String(bld.code === null ? "" : bld.code),
+                                        links: linkList(bld)});
+                        }
                     }
                     if(bld !== null && bld !== undefined){
                         // 同一个建筑在它占的每个格子上都出现一次：库存只算一遍。
@@ -6356,16 +6340,30 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             // Tile.worldx() 返回 x*tilesize 是格子中心（Tile.java:166-172），
             // 所以左下角要再退半格，少退这半格就整体偏右上角（v0.6.0 选框踩过同一个坑）。
             D.color(emphColor());
-            for(var x = r.x1; x <= r.x2; x++){
-                for(var y = r.y1; y <= r.y2; y++){
+            // v0.18.3（用户 m11340）：高亮和选框同步缩放 —— 一台处理器画**一整块**外框，
+            // 宽高 = block.size * tilesize（2x2 逻辑处理器 16、3x3 超核 24），不再逐格画 8px；
+            // 同台建筑只画一次（bld.id 去重，多格建筑以前会被画 4/9 遍）。
+            // Building 的 x/y 就是建筑几何中心（Entityc），尺寸取 block.size。
+            var seenH = {}, hx, hy;
+            for(hx = r.x1; hx <= r.x2; hx++){
+                for(hy = r.y1; hy <= r.y2; hy++){
                     var t = null;
-                    try{ t = Vars.world.tile(x, y); }catch(e0){ t = null; }
+                    try{ t = Vars.world.tile(hx, hy); }catch(e0){ t = null; }
                     if(t === null || t === undefined){ continue; }
                     var b = null;
                     try{ b = t.build; }catch(e1){ b = null; }
                     if(b === null || b === undefined){ continue; }
                     if(!isLogicBuild(b)){ continue; }
-                    L.rect((x - 0.5) * 8, (y - 0.5) * 8, 8, 8);
+                    var hid = null;
+                    try{ hid = String(b.id); }catch(e2){ hid = null; }
+                    if(hid === null || hid === "undefined"){ hid = "t" + hx + "," + hy; }
+                    if(seenH[hid] === true){ continue; }
+                    seenH[hid] = true;
+                    var bsize = 1;
+                    try{ bsize = Number(b.block.size); }catch(e3){ bsize = 1; }
+                    if(!(bsize > 0)){ bsize = 1; }
+                    var bx = Number(b.x), by = Number(b.y);
+                    L.rect(bx - bsize * 4, by - bsize * 4, bsize * 8, bsize * 8);
                 }
             }
             D.color();

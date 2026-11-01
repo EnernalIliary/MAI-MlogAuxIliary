@@ -1,0 +1,5 @@
+set n 1
+jump skip lessThan n 2
+op add n n 1
+skip:
+end

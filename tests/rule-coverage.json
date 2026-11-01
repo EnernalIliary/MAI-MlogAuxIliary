@@ -2,6 +2,19 @@
   "bool-param-constantly-zero": [
     "bool-param-zero.mlog"
   ],
+  "numeric-jump": [
+    "const-null-guard.mlog",
+    "counter-op.mlog",
+    "jump-range.mlog",
+    "label-index.mlog",
+    "numeric-jump.mlog",
+    "reactor-guard-impact-ok.mlog",
+    "reactor-guard-impact.mlog",
+    "reactor-guard-ok.mlog",
+    "reactor-guard-slow.mlog",
+    "reactor-guard-unknown.mlog",
+    "virus-logic-clean.mlog"
+  ],
   "constant-null-guard": [
     "const-null-guard.mlog"
   ],
@@ -47,7 +60,11 @@
     "reactor-guard-ok.mlog",
     "reactor-guard-slow.mlog",
     "reactor-guard-unknown.mlog",
+    "slot-enum-ok.mlog",
+    "slot-enum.mlog",
     "surplus-slot.mlog",
+    "under-arity-control.mlog",
+    "under-arity-ok.mlog",
     "unreachable-statement.mlog",
     "val3.mlog"
   ],
@@ -66,7 +83,8 @@
   "link-name-unbindable": [
     "printflush-clears.mlog",
     "sensor-not-prop.mlog",
-    "sensor-not-property.mlog"
+    "sensor-not-property.mlog",
+    "slot-enum.mlog"
   ],
   "printflush-clears-buffer": [
     "printflush-clears.mlog"
@@ -120,5 +138,13 @@
   ],
   "virus-logic": [
     "virus-logic.mlog"
+  ],
+  "slot-not-in-enum": [
+    "slot-enum.mlog",
+    "under-arity-radar.mlog"
+  ],
+  "under-arity": [
+    "under-arity-control.mlog",
+    "under-arity-radar.mlog"
   ]
 }

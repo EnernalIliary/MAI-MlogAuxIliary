@@ -40,9 +40,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 CASES = HERE / "cases"
 EXPECTED = HERE / "expected.json"
-# 公开仓只发一份 tools/（工作区里的三份副本由 gate.py 的 mirror 步守着），
-# 所以这里直接指向本仓的 tools/。
-TOOLS = HERE.parent / "tools"
+TOOLS = HERE.parent / "mindustry-blueprint" / "tools"
 
 ROOT = HERE.parent
 sys.path.insert(0, str(TOOLS))
@@ -51,11 +49,11 @@ sys.path.insert(0, str(TOOLS))
 def _mirror_stale_reason() -> str | None:
     """Why is this suite about to grade stale code?  None = fine.
 
-    Upstream this suite grades the ``mindustry-blueprint/tools`` mirror, because a
-    stale mirror keeps the suite green on old code (that failure hid the
-    status-slot mistake on 2026-10-25).  This public tree ships a single
-    ``tools/``, so there is no mirror to compare against and this always
-    returns None.
+    Every analyzer imported below comes from ``mindustry-blueprint/tools`` (the
+    mirror), not from ``tools/`` (the source of truth).  Editing the source and
+    forgetting ``--mirror`` therefore leaves the suite green on old code -- the
+    exact shape of the failure that hid the status-slot mistake on 2026-10-25.
+    So compare the two first, and refuse to report anything from a stale copy.
     """
     script = ROOT / "tools" / "sync_mlogagent.py"
     if not script.is_file() or not TOOLS.is_dir():
@@ -279,6 +277,12 @@ SUITE: list[tuple[str, str, str | None]] = [
     # number > 1 there is the shape the old doc taught (radar-takes-no-count).
     ("check/radar-count-misuse", "check_rid", "radar-count-misuse.mlog"),
     ("check/radar-count-ok", "check_rid", "radar-count-ok.mlog"),
+    # `jump 3` counts STATEMENTS, not lines: label lines and blank lines do not
+    # take a slot, so a hand-counted number re-points itself the moment anything
+    # above it changes. 0-based index of the jump is 1; the label version of the
+    # same program is silent.
+    ("check/numeric-jump", "check_rid", "numeric-jump.mlog"),
+    ("check/numeric-jump-ok", "check", "numeric-jump-ok.mlog"),
     ("ir/labels-resolved",     "ir",      "label.mlog"),
     ("ir/odd-name",            "odd",     None),
     ("ir/stale-write",        "ir",      "stale.mlog"),

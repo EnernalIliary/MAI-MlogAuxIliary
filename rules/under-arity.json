@@ -1,0 +1,20 @@
+{
+ "id": "under-arity",
+ "kind": "semantics",
+ "severity": "WARN",
+ "claim": "radar/uradar/sensor/control/ucontrol/ulocate read a fixed number of operands; a line that is one or more operands short leaves the trailing slots at the statement's defaults, so the instruction acts on different values than the ones written.",
+ "why": "Signature source: tools/instr_semantics.json (radar/uradar/sensor/ulocate `arity`, ucontrol `subcommands[sub].args`); control's per-type operand counts come from Logic-Docs-v1.1.0.md:3038-3140, which prints one written form per type (`control enabled <b> <v> 0 0 0`, `control shoot <b> <x> <y> <v> 0`, `control shootp <b> <u> <v> 0 0`). The analyzer has always trimmed SURPLUS operands (defs_of/uses_of cap at `arity`) and said nothing about a short line, which is how the prompt's own example library shipped `control shoot turret1 target 0` -- four operands for a five-operand signature -- as a shape the gate accepted (out/takeover-20261024/98-quality-analysis.md §3-§4), and how a job could be written into a processor with a turret that never fires. This is deliberately NOT the `op` case: rules/arity-is-not-effective-params.json records that a missing `op` operand is filled by the statement's own default and still compiles to a real OpI (a≠b, `op add r 1`), so op is excluded here -- the warning is only worth making where the operand count decides which value lands in which slot.",
+ "source": "source",
+ "ref": "m00174",
+ "since": "2026-11-01",
+ "counter_example": "tests/cases/under-arity-ok.mlog",
+ "match": {
+  "sevs": [
+   "WARN"
+  ],
+  "msg_any": [
+   "is short by"
+  ]
+ },
+ "auto_downgrade": false
+}

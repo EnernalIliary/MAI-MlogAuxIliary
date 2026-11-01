@@ -1,0 +1,3 @@
+radar enemy any any distance turret1 1 out
+control shoot turret1 0 0 1
+end

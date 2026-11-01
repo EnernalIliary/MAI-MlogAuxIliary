@@ -123,6 +123,30 @@ def main() -> int:
                 problems.append('bundles/%s has no keybind.mai-select.name' % p.name)
         print('PACK:bundles %d file(s)' % len(bundles))
 
+        # ---- 2c. 每个 scripts/*.js 都要进包（v0.18.3）----------------------
+        # 用户报「本地快检显示未加载」：layout() 原来只拷 scripts/main.js，
+        # 而 main.js 自己 require("rules.generated") / require("quickcheck")。
+        # 少一个文件在游戏里就是 require 抛异常、RULES 恒 null，静默功能缺失。
+        scripts = sorted((P.MOD / 'scripts').glob('*.js'))
+        if not scripts:
+            problems.append('MlogAuxiliary/scripts/*.js is empty -- nothing to ship')
+        for p in scripts:
+            shipped = tree / 'mod' / 'MlogAuxiliary' / 'scripts' / p.name
+            if not shipped.is_file():
+                problems.append('scripts/%s did not make it into the package' % p.name)
+            elif P.sha256(p) != P.sha256(shipped):
+                problems.append('scripts/%s differs from the repo copy' % p.name)
+        main_js = (P.MOD / 'scripts' / 'main.js').read_text(encoding='utf-8')
+        for name in sorted(scripts):
+            stem = name.stem
+            if stem == 'main':
+                continue
+            if ('require("%s")' % stem) in main_js:
+                notes.append('scripts/%s is required by main.js' % name.name)
+            else:
+                notes.append('scripts/%s ships but main.js never requires it' % name.name)
+        print('PACK:scripts %s' % ','.join(p.name for p in scripts))
+
         # ---- 3. VERSION.txt lists everything shipped ---------------------
         vt = (tree / 'VERSION.txt').read_text(encoding='utf-8')
         listed = {ln.split(' ', 2)[2] for ln in vt.splitlines() if ln.startswith('sha256 ')}

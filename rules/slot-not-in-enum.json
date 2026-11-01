@@ -1,0 +1,23 @@
+{
+ "id": "slot-not-in-enum",
+ "kind": "semantics",
+ "severity": "WARN",
+ "claim": "radar's three filter slots and its sort slot, control's first operand and ulocate's mode are enum WORDS the parser resolves against a fixed list; a word that is not in the list is not a filter, a sort key, a control type or a mode.",
+ "why": "The lists are the v160.7 enums read straight out of the shipped jar (out/_server160.jar: RadarTarget, RadarSort, LLocate, LAccess.controls) by out/_enums.py and stored as tools/instr_enums.json; Logic-Docs-v1.1.0.md prints the same values for uradar (:1240-1330), control (:3038-3140) and ulocate (:1326-1400). A model that guesses these slots produces exactly the shapes in out/takeover-20261024/98-quality-analysis.md §4: `radar target salvo1 player any distance` (result first, one filter slot holding a link name) and `control salvo1 shoot px py 1` (block and type swapped). Severity is WARN and the message only states the legal list: what the parser does with an unknown word (InvalidStatement/noop vs a variable read) could not be pinned down from the class files, so the rule does not claim one -- the slot value is wrong either way, and the fix is the same.",
+ "source": "source",
+ "ref": "m00174",
+ "since": "2026-11-01",
+ "counter_example": "tests/cases/slot-enum-ok.mlog",
+ "match": {
+  "sevs": [
+   "WARN"
+  ],
+  "msg_any": [
+   "is not a radar filter",
+   "is not a radar sort key",
+   "is not a control type",
+   "is not a ulocate mode"
+  ]
+ },
+ "auto_downgrade": false
+}

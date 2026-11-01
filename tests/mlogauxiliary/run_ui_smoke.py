@@ -1193,13 +1193,32 @@ def main():
                         ('function llmAutoSync(', 'v0.14.4: the model profile must auto-attach'),
                         ('未配置模型：先在', 'v0.14.4: an unconfigured model must be said up front'),
                         ('setPasswordCharacter(', 'v0.14.4: the key must be masked with a real glyph'),
-                        ('显示密钥', 'v0.14.4: there must be a way to reveal the key on demand')):
+                        ('显示密钥', 'v0.14.4: there must be a way to reveal the key on demand'),
+                        # v0.18.3（用户 m11124）
+                        ('var SETTINGS_LIVE = false;',
+                         'v0.18.3: the settings page must know it is live'),
+                        ('section(t, "诊断与最近提示")',
+                         'v0.18.3: diagnostics belong on the hint-log page'),
+                        ('lastHintLbl = hbtn.button("复制"',
+                         'v0.18.3: the hint page keeps exactly one copy button'),
+                        ('d.buttons.button("撤销上次写入"',
+                         'v0.18.3: undo must live in the MAI control panel')):
         if needle not in code_only:
             problems.append(why)
     # 设置页顺序：运行环境必须排在最后（用户 2026-11-01「运行环境应该放在最后」）
+    # v0.18.3（用户 m11124）：「快捷动作页，说明页毫无意义，诊断全部移动到最近提示页」
+    # ⇒ 段序变成 大模型 / 聊天播报 / 框选控件 / 外观 / 写入 / 热键 / 诊断与最近提示 / 运行环境。
+    # 热键那两条是 kv 行（没有自己的 section），所以不在这里。
     order = ['section(t, "大模型', 'section(t, "聊天播报', 'section(t, "框选控件',
-             'section(t, "快捷动作', 'section(t, "本地快检', 'section(t, "说明',
-             'section(t, "运行环境']
+             'section(t, "外观', 'section(t, "写入',
+             'section(t, "诊断与最近提示', 'section(t, "运行环境']
+    for gone, why in (('section(t, "快捷动作', 'v0.18.3: 快捷动作段应该已经删掉'),
+                      ('section(t, "说明', 'v0.18.3: 说明段应该已经删掉'),
+                      ('section(t, "本地快检', 'v0.18.3: 本地快检段应该并进诊断页'),
+                      ('section(t, "最近提示', 'v0.18.3: 最近提示段应该已并入诊断页'),
+                      ('button("清空"', 'v0.18.3: 提示页只留一个复制按钮')):
+        if gone in code_only:
+            problems.append(why)
     pos = -1
     for key in order:
         at = code_only.find(key)
@@ -1289,7 +1308,7 @@ def main():
              'v0.16.1: the zlib branch of the payload decoder is gone'),
             ('function blueprintCtxOf(name){',
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
-            ('btns.button("MAI 控制面板", function(){ openBlueprintPicker(); }).width(150);',
+            ('btns.button("MAI 控制面板", function(){ openWorkspaceDialog(); }).width(150);',
              'v0.18.1: the blueprint page entry button is gone'),
             ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
              'v0.17.1: the schematic info page MAI button is gone'),
@@ -1311,7 +1330,7 @@ def main():
              'v0.16.1: the zlib branch of the payload decoder is gone'),
             ('function blueprintCtxOf(name){',
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
-            ('btns.button("MAI 控制面板", function(){ openBlueprintPicker(); }).width(150);',
+            ('btns.button("MAI 控制面板", function(){ openWorkspaceDialog(); }).width(150);',
              'v0.18.1: the blueprint page entry button is gone'),
             ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
              'v0.17.1: the schematic info page MAI button is gone'),
@@ -1400,11 +1419,16 @@ def main():
                         ('function drawSizeText(', 'the vanilla size label is gone'),
                         ('L.stroke(2);', 'the 2px outline stroke is gone'),
                         ('Pal.accentBack', 'the accentBack shadow line is gone'),
-                        # v0.18.2（用户 m10938 / m10943）：选框用主题色、框内高亮用强调色且贴格子正中。
+                        # v0.18.2（用户 m10938 / m10943）：选框用主题色、框内高亮用强调色。
+                        # v0.18.3（用户 m11320 / m11340）：高亮按建筑画整块外框（随处理器尺寸缩放）、同台只画一次。
                         ('D.color(themeColor());', 'the selection frame colour is not the theme colour'),
                         ('D.color(emphColor());', 'the logic highlight colour is not the emphasis colour'),
-                        ('L.rect((x - 0.5) * 8, (y - 0.5) * 8, 8, 8);',
-                         'the logic highlight is not centred on the tile'),
+                        ('L.rect(bx - bsize * 4, by - bsize * 4, bsize * 8, bsize * 8);',
+                         'the logic highlight is not a whole-building rect'),
+                        ('if(seenH[hid] === true){ continue; }',
+                         'the logic highlight does not dedupe by building'),
+                        ('if(seenProcs[pid] !== true){',
+                         'the snapshot does not dedupe processors by building'),
                         ('var selDown = selKeyDown();', 'F3 is no longer read as a held button')):
         if needle not in code_only:
             problems.append('v0.5.0: ' + why)

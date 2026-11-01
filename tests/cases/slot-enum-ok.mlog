@@ -1,0 +1,5 @@
+ubind @flare
+radar enemy any any distance turret1 1 out
+control enabled turret1 false
+ulocate ore core false @copper outx outy found outb
+end
