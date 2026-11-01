@@ -1075,7 +1075,7 @@ def main():
                          'a batch submit no longer announces Generating per processor'),
                         ('jobChatDone(jobBox.jobs[want])',
                          'a finished batch job is no longer announced'),
-                        ('if(isJobTerminal(job.state)){ jobChatDone(job); aiJob = null; }',
+                        ('if(isJobTerminal(job.state)){',
                          'a finished single job is no longer announced'),
                         # v0.13.1: the autostart has to be more than a helper nobody calls
     ('function ensureSidecar(',

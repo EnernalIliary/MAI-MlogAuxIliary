@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.16.1";
+    var MOD_VERSION = "0.17.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -356,7 +356,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 SIDE.pingFail = 0;
                 SIDE.pingAt = 0;
                 log("sidecar is up after " + tries + " probe(s) at " + sidecarUrl());
-                hint("sidecar 已就绪：" + sidecarUrl());
+                flushPendingSubmits();      // v0.17.0：排队中的投递现在发出去
                 llmAutoSync();          // v0.14.4：模型档随 sidecar 就绪自动挂载
             }else if(tries >= 25){
                 SIDE.state = "failed";
@@ -470,6 +470,185 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     // 行宽/内边距也照它（minWidth 500、padTop 7 -> 这里 540 / 5，给中文留点余量）。
     var LABEL_W = 128, VALUE_W = 390, ROW_W = 540;
 
+    // ------------------------------------------------ v0.17.0（用户 m09440）
+    // 1.「完成后自动写入」：作业一 done 就写进那台处理器，不用再点进详情。
+    var AUTO_WRITE_KEY = "mlogauxiliary-auto-write";
+    var autoWriteLbl = null;
+    var hotSelLbl = null, hotListLbl = null, hotRegionLbl = null;
+
+    function autoWriteOn(){
+        try{ return Core.settings.getBool(AUTO_WRITE_KEY, false) === true; }
+        catch(e){ return false; }
+    }
+
+    function autoWriteSet(v){
+        try{ Core.settings.put(AUTO_WRITE_KEY, (v === true)); }
+        catch(e){ log("auto write save failed: " + e); }
+    }
+
+    function autoWriteText(){
+        return autoWriteOn() ? "自动写入已开启" : "完成后自动写入：关";
+    }
+
+    function autoWriteRefresh(){
+        try{
+            if(autoWriteLbl === null || autoWriteLbl === undefined){ return; }
+            if(typeof autoWriteLbl.get !== "function"){ return; }
+            var b = autoWriteLbl.get();
+            if(b === null || b === undefined || typeof b.setText !== "function"){ return; }
+            b.setText(autoWriteText());
+        }catch(e){ log("auto write label not updated"); }
+    }
+
+    // 3. 解释信息收进 infoCircle：悬浮才显示，常驻的只有短句。
+    // arc 的 Tooltips.create(String) 是 Java 侧造好的 provider，Rhino 里不用实现 Cons 接口。
+    function tipOn(el, text){
+        try{
+            if(el === null || el === undefined || typeof el.addListener !== "function"){ return false; }
+            // 无头环境没有 Scene（Tooltip 建 label 要 skin）—— 那里不建提示，也不报错。
+            if(Core.scene === null || Core.scene === undefined){ return false; }
+            var tp = Packages.arc.scene.ui.Tooltip.Tooltips.getInstance().create(String(text));
+            try{ tp.setInstant(true); }catch(e1){ }
+            el.addListener(tp);
+            return true;
+        }catch(e){ log("tooltip failed: " + e); return false; }
+    }
+
+    function infoIcon(row, text){
+        try{
+            var cell = row.image(Packages.mindustry.gen.Icon.infoCircle);
+            try{ cell.size(18); }catch(e1){ }
+            try{ cell.padLeft(8); }catch(e2){ }
+            try{ cell.color(Pal.accent); }catch(e3){ }
+            var el = null;
+            try{ el = cell.get(); }catch(e4){ el = null; }
+            if(el !== null && el !== undefined){ tipOn(el, text); }
+        }catch(e){ log("info icon failed: " + e); }
+    }
+
+    // 2. 设置页主标题：两行、居中、放大。
+    function titleLine(t, text, scale, color){
+        var cell = t.add(String(text));
+        try{ cell.width(ROW_W); }catch(e1){ }
+        try{ cell.center(); }catch(e2){ }
+        try{ cell.padTop(scale > 1.5 ? 8 : 0); }catch(e3){ }
+        try{
+            var lbl = cell.get();
+            try{ lbl.setFontScale(scale); }catch(e4){ }
+            try{ lbl.setColor(color); }catch(e5){ }
+        }catch(e6){ }
+        try{ cell.row(); }catch(e7){ }
+    }
+
+    // 5. 可改的热键（F3 框选 / F2 清单 / F7 区域）。名字存 Core.settings，
+    // 用的时候现查 KeyCode，改完立即生效。
+    var HOT_KEY = "mlogauxiliary-hotkey-";
+    var HOT_WANT = null;
+
+    function hotGet(which, dflt){
+        try{
+            var v = String(Core.settings.getString(HOT_KEY + which, dflt) || "");
+            return (v.length === 0) ? String(dflt) : v;
+        }catch(e){ return String(dflt); }
+    }
+
+    function hotSet(which, name){
+        try{ Core.settings.put(HOT_KEY + which, String(name)); }
+        catch(e){ log("hotkey save failed: " + e); }
+    }
+
+    function hotKeyCode(which, dflt){
+        var n = hotGet(which, dflt);
+        try{ return Packages.arc.input.KeyCode[n]; }catch(e){ return null; }
+    }
+
+    function hotTap(which, dflt){
+        var k = hotKeyCode(which, dflt);
+        if(k === null || k === undefined){ return false; }
+        try{ return Core.input.keyTap(k) === true; }catch(e){ return false; }
+    }
+
+    function hotLabelText(which, name, dflt){
+        return String(name) + "：" + hotGet(which, dflt).toUpperCase();
+    }
+
+    function hotCellSet(cell, text){
+        try{
+            if(cell === null || cell === undefined || typeof cell.get !== "function"){ return; }
+            var b = cell.get();
+            if(b === null || b === undefined || typeof b.setText !== "function"){ return; }
+            b.setText(String(text));
+        }catch(e){ log("hotkey label not updated"); }
+    }
+
+    function hotLabelsRefresh(){
+        hotCellSet(hotSelLbl, hotLabelText("select", "框选", "f3"));
+        hotCellSet(hotListLbl, hotLabelText("list", "清单", "f2"));
+        hotCellSet(hotRegionLbl, hotLabelText("region", "区域", "f7"));
+    }
+
+    function hotBegin(which){
+        HOT_WANT = String(which);
+        hint("按下要绑的键（Esc 取消）");
+    }
+
+    function hotCaptureTick(){
+        if(HOT_WANT === null){ return; }
+        var ks = null;
+        try{ ks = Packages.arc.input.KeyCode.values(); }catch(e){ return; }
+        for(var i = 0; i < ks.length; i++){
+            var nm = String(ks[i].name());
+            if(nm === "anyKey" || nm === "unknown"){ continue; }
+            if(nm.indexOf("mouse") === 0){ continue; }
+            var down = false;
+            try{ down = Core.input.keyTap(ks[i]) === true; }catch(e1){ down = false; }
+            if(!down){ continue; }
+            if(nm === "escape"){ HOT_WANT = null; hint("已取消改键"); return; }
+            var which = HOT_WANT;
+            HOT_WANT = null;
+            hotSet(which, nm);
+            hint("热键已改为 " + nm.toUpperCase());
+            hotLabelsRefresh();
+            return;
+        }
+    }
+
+    // 6. 尽量让 sidecar 无感：后端还在启动时，投递先排队，就绪那一刻自动发出去，
+    // 不用玩家自己再点一遍。
+    var PENDING_SUBMITS = [];
+    var pendingHinted = false;
+
+    function flushPendingSubmits(){
+        if(PENDING_SUBMITS.length === 0){ return; }
+        var now = Packages.java.lang.System.currentTimeMillis();
+        var keep = [], i;
+        for(i = 0; i < PENDING_SUBMITS.length; i++){
+            if(now - PENDING_SUBMITS[i].at <= 60000){ keep.push(PENDING_SUBMITS[i]); }
+        }
+        PENDING_SUBMITS = [];
+        pendingHinted = false;
+        if(keep.length === 0){ return; }
+        hint("后端就绪，自动投递 " + keep.length + " 个作业");
+        for(i = 0; i < keep.length; i++){
+            try{ jobSubmit(keep[i].b, keep[i].desc, keep[i].cb, keep[i].wsInfo, keep[i].batch); }
+            catch(e){ log("pending submit failed: " + e); }
+        }
+    }
+
+    // 1. 自动写入：只写 done 且留了载荷的，写完照旧记一笔框角状态。
+    function autoWriteApply(b, job){
+        if(!autoWriteOn()){ return null; }
+        if(b === null || b === undefined || job === null || job === undefined){ return null; }
+        if(String(job.state) !== "done"){ return null; }
+        if(String(job.bytes_b64 || "").length === 0){ return null; }
+        var r = "";
+        try{ r = String(writeBuild(b, jobAsPlan(job))); }
+        catch(e){ r = "自动写入失败：" + e; }
+        try{ jobBoxWritten(b); }catch(e2){ }
+        hint(r);
+        return r;
+    }
+
     // 造一行灰底容器。Styles/Tex 在无头环境里可能还没初始化（静态字段要 atlas），
     // 所以一律 try：拿不到就用无背景的 Table，功能一样，只是不好看。
     function realRow(){
@@ -487,12 +666,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     }
 
     // mk 是行工厂：真机用 realRow()，selfTest 喂假表（无 UI 时真 Table 的 labelWrap 会 NPE）。
-    function kv(t, k, v, mk){
+    // v0.17.0：多一个 expl 参数 —— 长解释挂到行尾的 infoCircle 上，只在悬浮时显示。
+    function kv(t, k, v, mk, expl){
         mk = mk || realRow;
         var row = mk();
         row.margin(8).left();
         if(k.length > 0){ row.add(k).width(LABEL_W).left().color(Pal.gray); }
         row.labelWrap(String(v)).width(VALUE_W).left();
+        if(expl !== null && expl !== undefined && String(expl).length > 0){ infoIcon(row, expl); }
         t.add(row).width(ROW_W).left().padTop(5).row();
     }
 
@@ -520,11 +701,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
     function buildSettingsTable(t, mk){
         mk = mk || realRow;
         t.defaults().pad(3).left();
-        kv(t, "", "Mlog辅助 " + MOD_VERSION + " · 说一句要什么 → 生成 → 预检 → 写入；写入走原版 config 通道，联机由服务端执行", mk);
+        // v0.17.0（用户 m09440 / 2）：主标题两行居中、加大。
+        titleLine(t, "MAI", 1.9, Pal.accent);
+        titleLine(t, "MlogAuxIliary", 1.2, Pal.accent);
+        titleLine(t, "v" + MOD_VERSION + " · 说一句要什么 → 生成 → 预检 → 写入", 0.9, Pal.gray);
         var parts = diagParts(), i;
 
-        section(t, "大模型（启用后由模型直接写逻辑）");
-        kv(t, "档位", llmText(), mk);
+        section(t, "大模型");
+        kv(t, "档位", llmText(), mk, "启用后由模型直接写逻辑：描述交给模型，模型写 mlog，本模组只做预检与写入。");
         var lrow = mk();
         lrow.margin(8).left();
         lrow.add("地址").width(LABEL_W).left().color(Pal.gray);
@@ -569,14 +753,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             log("llm model = " + v);
         }).width(300).left();
         t.add(mrow).width(ROW_W).left().padTop(5).row();
-        buttonRow(t, ["获取模型", "测试端点", "启用模型档"], [
+        buttonRow(t, ["获取模型", "测试端点", "启用模型"], [
             function(){ showLlmModels(); },
             function(){ llmProbe(); },
             function(){ llmEnable(); }
         ], mk);
-        kv(t, "", "地址填 OpenAI 兼容的 /chat/completions（例：" + LLM_DEFAULT_URL
+        infoIcon(lrow, "地址填 OpenAI 兼容的 /chat/completions（例：" + LLM_DEFAULT_URL
            + "），只填到 /v1 也可以，sidecar 会自动补全。密钥只存于本机 Core.settings 与 sidecar 内存，"
-           + "界面默认遮成 *，点「显示密钥」可查看。改完回车保存。", mk);
+           + "界面默认遮成 *，点「显示密钥」可查看。改完回车保存。");
 
         section(t, "聊天播报");
         var crow = mk();
@@ -587,8 +771,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             catch(e0){ log("chat toggle label not updated"); }
         }).height(38).padRight(6);
         t.add(crow).width(ROW_W).left().padTop(5).row();
-        kv(t, "", "开启后，作业的启用与完成状态会发到联机聊天框（MAI<逻辑徽标> 状态 (x,y): 信息）；"
-           + "关闭时只在本机提示。默认关闭。", mk);
+        infoIcon(crow, "开启后，作业的启用与完成状态会发到联机聊天框（MAI<逻辑徽标> 状态 (x,y): 信息）；"
+           + "关闭时只在本机提示。默认关闭。");
 
         section(t, "框选控件");
         var hrow = mk();
@@ -598,9 +782,20 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             .height(38).padRight(6);
         hrow.button("放大", function(){ hudScaleStep(1); hudScaleRefresh(); }).height(38);
         t.add(hrow).width(ROW_W).left().padTop(5).row();
-        kv(t, "", "框角「查看 / 取消」和状态条的大小倍率（" + HUD_SCALE_MIN + "×–" + HUD_SCALE_MAX
+        infoIcon(hrow, "框角按钮和状态条的大小倍率（" + HUD_SCALE_MIN + "×–" + HUD_SCALE_MAX
            + "×，每次 " + HUD_SCALE_STEP + "×）。按钮、字号、留白一起缩放，下一帧生效；"
-           + "点中间那一格回到 1.0×。", mk);
+           + "点中间那一格回到 1.0×。");
+
+        section(t, "写入");
+        var awrow = mk();
+        awrow.margin(6).left();
+        autoWriteLbl = awrow.button(autoWriteText(), function(){
+            autoWriteSet(!autoWriteOn());
+            autoWriteRefresh();
+        }).height(38).padRight(6);
+        infoIcon(awrow, "开着时，作业生成完成、并且留了载荷，就自动写进那台处理器；"
+           + "关着时点作业详情里的「写入」。默认关。");
+        t.add(awrow).width(ROW_W).left().padTop(5).row();
 
         section(t, "快捷动作");
         buttonRow(t, ["AI 辅助编程", "复制诊断"], [
@@ -620,12 +815,27 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             function(){ if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 撤销", undoInfo()); } }
         ], mk);
 
+        section(t, "热键");
+        var hkrow = mk();
+        hkrow.margin(6).left();
+        hotSelLbl = hkrow.button(hotLabelText("select", "框选", "f3"), function(){ hotBegin("select"); })
+            .height(38).padRight(6);
+        hotListLbl = hkrow.button(hotLabelText("list", "清单", "f2"), function(){ hotBegin("list"); })
+            .height(38).padRight(6);
+        hotRegionLbl = hkrow.button(hotLabelText("region", "区域", "f7"), function(){ hotBegin("region"); })
+            .height(38);
+        infoIcon(hkrow, "点一个按钮，再按下要用的键（Esc 取消），立即生效。"
+           + "框选默认 F3（按住拖框），清单默认 F2，区域候选默认 F7。");
+        t.add(hkrow).width(ROW_W).left().padTop(5).row();
+
         section(t, "本地快检");
         for(i = 0; i < parts.length; i++){
-            if(parts[i].k === "快检"){ kv(t, parts[i].k, parts[i].v, mk); }
+            if(parts[i].k === "快检"){
+                kv(t, parts[i].k, parts[i].v, mk,
+                   "模组自带的离线静态检查：不联网也能标出不可达语句、未定义变量、链接没绑上这类问题，"
+                   + "规则与 sidecar 的检查器同源，只在本机跑。");
+            }
         }
-        kv(t, "", "模组自带的离线静态检查：不联网也能标出不可达语句、未定义变量、链接没绑上这类问题，"
-           + "规则与 sidecar 的检查器同源，只在本机跑。", mk);
 
         section(t, "最近提示");
         var lrow = mk();
@@ -634,12 +844,17 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             .height(38).padRight(6);
         lrow.button("清空", function(){ hintClear(); lastHintLblRefresh(); }).height(38);
         t.add(lrow).width(ROW_W).left().padTop(5).row();
-        kv(t, "", "这里留最后一条提示（错误也在这里）。屏幕上的提示只闪一下就没了，"
-           + "点上面那一格复制全文。", mk);
+        infoIcon(lrow, "这里留最后一条提示（错误也在这里）。屏幕上的提示只闪一下就没了，"
+           + "点上面那一格复制全文。");
 
         section(t, "说明");
-        kv(t, "", "F3：指向处理器，描述意图 → 生成 → 预检 → 写入；原版逻辑编辑器底部会多一条「审查」栏。"
-           + "sidecar 随游戏自启，未就绪时投递会提示稍后再投。", mk);
+        var urow = mk();
+        urow.margin(8).left();
+        urow.add("框选").width(LABEL_W).left().color(Pal.gray);
+        urow.labelWrap("按住框选键在处理器上拖一个框 → 写一句要什么 → 生成 → 预检 → 写入").width(VALUE_W).left();
+        infoIcon(urow, "原版逻辑编辑器底部会多一条「审查」栏；sidecar 随游戏自启，"
+           + "未就绪时投递会排队，就绪后自动发出，不用再点一遍。");
+        t.add(urow).width(ROW_W).left().padTop(5).row();
 
         section(t, "运行环境");
         for(i = 0; i < parts.length; i++){
@@ -732,6 +947,16 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             clear: function(){ hit("clear"); return node; },
             add: function(){ n++; hit("add"); return node; },
             image: function(){ n++; hit("image"); return node; },
+            // 下面这些在真机上作用于 Cell / Label（不是 Table 的 API），
+            // 所以这里实现但**不记进 used**：smoke 只拿 used 去真引擎里解析 Table 方法。
+            size: function(){ return node; },
+            padLeft: function(){ return node; },
+            center: function(){ return node; },
+            get: function(){ return node; },
+            addListener: function(){ return node; },
+            setText: function(){ return node; },
+            setFontScale: function(){ return node; },
+            setColor: function(){ return node; },
             label: function(){ n++; hit("label"); return node; },
             labelWrap: function(){ n++; hit("labelWrap"); return node; },
             field: function(v, f){ n++; hit("field"); return node; },
@@ -942,7 +1167,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 var list = (doc && doc.models) || [];
                 showPickList("Mlog辅助 · 选择模型（" + list.length + "）", list, function(m){
                     llmSave(LLM_MODEL_KEY, m);
-                    llmNote("模型已选：" + m + "\n点「启用模型档」后生效。");
+                    llmNote("模型已选：" + m + "\n点「启用模型」后生效。");
                 });
             });
         }
@@ -2411,8 +2636,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
         function jobSubmit(b, desc, cb, wsInfo, batch){
             ensureSidecar(true);             // v0.13.1：装包版里后端是模组自己拉起来的
+            // v0.17.0（用户 m09440 / 6）：后端还在起，就先把这次投递排上，
+            // 就绪那一刻自动发出去 —— 不再让人等一会儿再点一遍。
             if(SIDE.state === "starting"){
-                cb(null, "sidecar 正在启动（首次需几秒），稍后再投");
+                PENDING_SUBMITS.push({b: b, desc: desc, cb: cb, wsInfo: wsInfo, batch: batch,
+                                      at: Packages.java.lang.System.currentTimeMillis()});
+                if(!pendingHinted){ pendingHinted = true; hint("后端启动中，就绪后自动投递"); }
                 return;
             }
             // v0.14.4：模板档已删，没有模型就不生成任何代码 —— 先说清楚要配什么，
@@ -2420,7 +2649,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(llmState.kind !== "llm" && llmState.kind !== "fake"){
                 if(llmUrl().length === 0 || llmModel().length === 0){
                     cb(null, "未配置模型：先在「设置 → Mlog辅助 → 大模型」填地址、密钥、模型，"
-                           + "再点「启用模型档」");
+                           + "再点「启用模型」");
                     return;
                 }
                 llmAutoSync();               // 配置在、sidecar 忘了（刚重启）：先推一遍再投
@@ -2719,7 +2948,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 mine.job = job;
                 try{ renderJob(mine.host, job, mine.b, mine.d); }
                 catch(e){ log("renderJob failed: " + e); }
-                if(isJobTerminal(job.state)){ jobChatDone(job); aiJob = null; }
+                if(isJobTerminal(job.state)){
+                    jobChatDone(job);
+                    // v0.17.0：开了自动写入就在这里落盘（单台 AI 面板那条路）
+                    try{ autoWriteApply(mine.b, job); }catch(e2){ log("auto write failed: " + e2); }
+                    aiJob = null;
+                }
             });
         }
 
@@ -2867,6 +3101,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                         if(jobBox.ws !== null && jobBox.ws !== undefined){   // v0.14.0：终态记回工作区
                             wsRecordTerminal(wsLoad(jobBox.ws), jobBox.jobs[want]);
                         }
+                        // v0.17.0：自动写入（框选批量那条路）—— 只写框里那一台
+                        try{
+                            var awj = jobBox.jobs[want];
+                            if(awj !== null && awj !== undefined){ autoWriteApply(lookupBuild(awj), awj); }
+                        }catch(e4){ log("auto write failed: " + e4); }
                         jobBoxFinishIfDone();
                     });
                 })(jid);
@@ -3402,6 +3641,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                         ? ("目标：@" + targets[0].x + "," + targets[0].y)
                         : ("目标：区域里 " + targets.length + " 个处理器，每个处理器生成一段")).row();
             d.cont.field("", function(v){ desc = String(v); }).width(520).row();
+            // v0.17.0：生成界面也给一个自动写入开关（用户 m09440 / 1）
+            var awCell = d.cont.button(autoWriteText(), function(){
+                autoWriteSet(!autoWriteOn());
+                try{ awCell.get().setText(autoWriteText()); }catch(e0){ log("auto write label not updated"); }
+            }).width(240).left().row();
             d.buttons.button("生成", function(){
                 var text = trimText(desc);
                 if(text.length === 0){ hint("先写一句描述：这段逻辑要做什么"); return; }
@@ -4324,6 +4568,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var nm = blueprintTitleName(txt);
             if(nm.length === 0){ return; }
             try{
+                // v0.17.0（用户 m09517）：蓝图「详细」页直接给「MAI 对话」，
+                // 不用再跑到蓝图页底栏去找；顺手留「继续对话」。
+                info.buttons.button("MAI 对话", function(){ openBlueprintPicker(); }).width(120);
                 info.buttons.button("继续对话", function(){ openBlueprintChat(nm); }).width(120);
             }catch(e3){ log("info page button failed: " + e3); }
         }
@@ -5226,10 +5473,37 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 L.rect(a.x, a.y, a.w, a.h);
                 D.color();
             }catch(e){ /* 画不出来不影响选择本身 */ }
+            // v0.17.0（用户 m09440 / 4）：框里的逻辑处理器直接描出来，
+            // 拖的时候就知道框住了哪几台（只画边、不填色，和原版选框同一套画法）。
+            try{ drawLogicHighlight(r); }catch(e9){ }
             // v0.14.4：框角操作区优先用 HUD 上的原版控件；控件不可用（无 UI / 建表失败）时
             // 才退回即时绘制 —— 两条路都留，谁也挡不住谁。
             if(live){ drawSizeText(r); jobWidgetHide(); }
             else if(!jobButtonsSync()){ drawJobButtons(r, a); }
+        }
+
+        // v0.17.0：框里的逻辑处理器逐格描边。框太大就跳过多余的扫描，宁可少画也不掉帧。
+        function drawLogicHighlight(r){
+            var w = r.x2 - r.x1 + 1, h = r.y2 - r.y1 + 1;
+            if(!(w > 0) || !(h > 0)){ return; }
+            if(w * h > 1024){ return; }
+            var D = Packages.arc.graphics.g2d.Draw;
+            var L = Packages.arc.graphics.g2d.Lines;
+            L.stroke(2);
+            D.color(Pal.accent);
+            for(var x = r.x1; x <= r.x2; x++){
+                for(var y = r.y1; y <= r.y2; y++){
+                    var t = null;
+                    try{ t = Vars.world.tile(x, y); }catch(e0){ t = null; }
+                    if(t === null || t === undefined){ continue; }
+                    var b = null;
+                    try{ b = t.build; }catch(e1){ b = null; }
+                    if(b === null || b === undefined){ continue; }
+                    if(!isLogicBuild(b)){ continue; }
+                    L.rect(x * 8, y * 8, 8, 8);
+                }
+            }
+            D.color();
         }
 
         // 原版还在光标旁写「宽x高 (面积)」（InputHandler.java:1772-1794）：
@@ -5815,8 +6089,10 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                         if(settingsTries % 60 === 0){ registerSettings(); }
                     }
                     if(Vars.state.isMenu()){ return; }
+                    hotCaptureTick();                 // v0.17.0：正在改热键就先吃掉这一下
+                    if(HOT_WANT !== null){ return; }
                     if(Vars.ui.chatfrag.shown()){ return; }
-                    if(KEY_REGION !== null && Core.input.keyTap(Packages.arc.input.KeyCode[KEY_REGION[0]])){
+                    if(hotTap("region", KEY_REGION[0])){
                         if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
                         var rb = targetBuild();
                         if(rb === null){
@@ -5830,14 +6106,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                                             rb.tile.x + rr, rb.tile.y + rr);
                         }
                     }
-                    if(KEY_LIST !== null && Core.input.keyTap(Packages.arc.input.KeyCode[KEY_LIST[0]])){
+                    if(hotTap("list", KEY_LIST[0])){
                         if(!aiShown() && Core.scene !== null && Core.scene.hasDialog()){ return; }
                         openListPanel();
                     }
                     // F3 = 鼠标左键：按住就拉框（起点=按下那一刻的鼠标格），松开就出快照。
                     // 没有「就绪」态、不需要点左键，也不弹任何窗（弹窗会抢鼠标）。
                     if(KEY_SELECT !== null){
-                        var selKey = Packages.arc.input.KeyCode[KEY_SELECT[0]];
+                        var selKey = hotKeyCode("select", KEY_SELECT[0]);
                         var selDown = Core.input.keyDown(selKey);
                         if(selDown && !selHolding){
                             if(Core.scene === null || !Core.scene.hasDialog()){
