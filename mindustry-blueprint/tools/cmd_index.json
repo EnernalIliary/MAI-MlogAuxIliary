@@ -1,0 +1,2488 @@
+[
+ {
+  "num": "00",
+  "title": "Logic 入门与学习大纲",
+  "line": 1,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "01",
+  "title": "ubind（单位绑定）",
+  "line": 218,
+  "format": "ubind <type>",
+  "params": [
+   [
+    "type",
+    "绑定目标。可以是 **content类型的单位类型**（如 `@mono`、`@poly`），也可以是 **unit实例变量**（存储了单位引用的变量）"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "02",
+  "title": "ucontrol idle（原地待命）",
+  "line": 302,
+  "format": "ucontrol idle 0 0 0 0 0",
+  "params": [
+   [
+    "p1 ~ p5",
+    "无实际用途，全部填 0"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "03",
+  "title": "ucontrol stop（停止一切）",
+  "line": 342,
+  "format": "ucontrol stop 0 0 0 0 0",
+  "params": [
+   [
+    "p1 ~ p5",
+    "无实际用途，全部填 0"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "04",
+  "title": "ucontrol move（移动到坐标）",
+  "line": 391,
+  "format": "ucontrol move x y 0 0 0",
+  "params": [
+   [
+    "x",
+    "目标位置的 X 坐标（tile 坐标）"
+   ],
+   [
+    "y",
+    "目标位置的 Y 坐标（tile 坐标）"
+   ],
+   [
+    "p3 ~ p5",
+    "无实际用途，填 0"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "05",
+  "title": "ucontrol approach（接近到一定半径）",
+  "line": 438,
+  "format": "ucontrol approach x y radius 0 0",
+  "params": [
+   [
+    "x",
+    "目标位置的 X 坐标（tile 坐标）"
+   ],
+   [
+    "y",
+    "目标位置的 Y 坐标（tile 坐标）"
+   ],
+   [
+    "radius",
+    "接近半径（单位会移动到距离目标此半径范围内停止）"
+   ],
+   [
+    "p4 ~ p5",
+    "无实际用途，填 0"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "06",
+  "title": "ucontrol pathfind（寻路移动）",
+  "line": 492,
+  "format": "ucontrol pathfind x y 0 0 0",
+  "params": [
+   [
+    "x",
+    "目标位置的 X 坐标（tile 坐标）"
+   ],
+   [
+    "y",
+    "目标位置的 Y 坐标（tile 坐标）"
+   ],
+   [
+    "p3 ~ p5",
+    "无实际用途，填 0"
+   ]
+  ],
+  "notes": [
+   "pathfind 会触发控制状态（通过 checkLogicAI() 将单位控制器替换为 LogicAI 并刷新 10 秒控制计时器 controlTimer）",
+   "旧版本中的 pathfind 实际执行的是 autoPathfind 的功能（自动寻路至敌方核心）",
+   "新版本中 pathfind 已改为按指定坐标寻路。如果导入旧版本的处理器代码，旧的 pathfind 指令会寻路至坐标 (0, 0)"
+  ]
+ },
+ {
+  "num": "07",
+  "title": "ucontrol autoPathfind（自动寻路）",
+  "line": 544,
+  "format": "ucontrol autoPathfind 0 0 0 0 0",
+  "params": [
+   [
+    "p1 ~ p5",
+    "无实际用途，全部填 0"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "08",
+  "title": "ucontrol boost（助推）",
+  "line": 598,
+  "format": "ucontrol boost enable 0 0 0 0",
+  "params": [
+   [
+    "enable",
+    "助推开关。**0 = 关闭助推**，**非 0 = 开启助推**"
+   ],
+   [
+    "p2 ~ p5",
+    "无实际用途，填 0"
+   ]
+  ],
+  "notes": [
+   "只有 canBoost 的单位才有效。部分单位类型不支持助推，对它们使用 boost 没有任何效果",
+   "飞行类型单位本身就在飞行，boost 对它们无额外的升空效果",
+   "boost 的主要作用是让地面单位临时升空越过障碍物或在必要时加速",
+   "boost 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "09",
+  "title": "ucontrol target（瞄准坐标）",
+  "line": 643,
+  "format": "ucontrol target x y shoot 0 0",
+  "params": [
+   [
+    "x",
+    "p1"
+   ],
+   [
+    "y",
+    "p2"
+   ],
+   [
+    "shoot",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "只控制瞄准和射击，不控制移动。若需要单位移动到某处，请配合 ucontrol move 使用",
+   "所有 x、y 参数均为 tile坐标，处理器内部通过世界坐标转换（World.unconv）转为像素坐标（乘以 tilesize = 8）",
+   "布尔参数规则：0 = false，非0 = true",
+   "武器是否能实际射击还取决于武器自身的射程、冷却等属性",
+   "target 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "10",
+  "title": "ucontrol targetp（瞄准对象）",
+  "line": 686,
+  "format": "ucontrol targetp unit shoot 0 0 0",
+  "params": [
+   [
+    "unit",
+    "p1"
+   ],
+   [
+    "shoot",
+    "p2"
+   ],
+   [
+    "p3",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "p1 参数必须是 Teamc 接口实例。如果传入的不是 Teamc（例如传了数字或 null），主目标会被设为 null，单位不会瞄准任何目标",
+   "布尔参数规则：0 = false，非0 = true",
+   "目标移动时，单位武器会自动跟随瞄准",
+   "targetp 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "11",
+  "title": "ucontrol itemDrop（放置物品）",
+  "line": 733,
+  "format": "ucontrol itemDrop to amount 0 0 0",
+  "params": [
+   [
+    "to",
+    "p1"
+   ],
+   [
+    "amount",
+    "p2"
+   ],
+   [
+    "p3",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "距离检查：逻辑物品传输范围 + 建筑大小 * tileSize / 2（logicItemTransferRange = 5.625 tiles）。单位必须在范围内才能传输",
+   "传输超时：1.5 秒传输延迟（transferDelay = 60f * 1.5f），即两次传输之间需要间隔一定时间",
+   "传输条件（全部满足才能传输）：",
+   "itemDrop 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "12",
+  "title": "ucontrol itemTake（取走物品）",
+  "line": 778,
+  "format": "ucontrol itemTake from item amount 0 0",
+  "params": [
+   [
+    "from",
+    "p1"
+   ],
+   [
+    "item",
+    "p2"
+   ],
+   [
+    "amount",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "传输超时：同 itemDrop（1.5 秒传输延迟，transferDelay = 60f * 1.5f），两次取物之间需要间隔一定时间",
+   "取物条件（全部满足才能取走）：",
+   "实际取出数量可能小于请求数量（受建筑存量和单位容量限制）",
+   "itemTake 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "13",
+  "title": "ucontrol payDrop（丢弃载荷）",
+  "line": 821,
+  "format": "ucontrol payDrop 0 0 0 0 0",
+  "params": [
+   [
+    "p1",
+    "p1"
+   ],
+   [
+    "p2",
+    "p2"
+   ],
+   [
+    "p3",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "传输超时：同 itemDrop（1.5 秒传输延迟，transferDelay = 60f * 1.5f）",
+   "单位必须具备载荷携带能力（实现 Payloadc 接口），否则指令无效",
+   "单位当前必须已携带载荷（hasPayload 为 true），否则不会执行丢弃操作",
+   "常用于搬运建筑方块的单位（如 mega、quad 等载荷单位）",
+   "payDrop 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "14",
+  "title": "ucontrol payTake（拾取载荷）",
+  "line": 860,
+  "format": "ucontrol payTake takeUnits 0 0 0 0",
+  "params": [
+   [
+    "takeUnits",
+    "p1"
+   ],
+   [
+    "p2",
+    "p2"
+   ],
+   [
+    "p3",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "传输超时：同 itemDrop（1.5 秒传输延迟，transferDelay = 60f * 1.5f）",
+   "布尔参数规则：0 = false，非0 = true",
+   "拾取单位载荷时，查找范围与单位体积相关（unit.type.hitSize * 2f），体积越大的单位搜索范围越广",
+   "拾取单位载荷时，目标单位必须是已落地的 AI 地面单位",
+   "单位必须具备载荷携带能力（实现 Payloadc 接口）",
+   "payTake 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "15",
+  "title": "ucontrol payEnter（进入建筑）",
+  "line": 904,
+  "format": "ucontrol payEnter 0 0 0 0 0",
+  "params": [
+   [
+    "p1",
+    "p1"
+   ],
+   [
+    "p2",
+    "p2"
+   ],
+   [
+    "p3",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "单位必须位于目标建筑上方（即单位当前位置存在建筑）才能触发进入",
+   "建筑必须与单位同队，且支持控制进入功能（canControlSelect）",
+   "payEnter 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "16",
+  "title": "ucontrol mine（采矿）",
+  "line": 951,
+  "format": "ucontrol mine x y 0 0 0",
+  "params": [
+   [
+    "x",
+    "p1"
+   ],
+   [
+    "y",
+    "p2"
+   ],
+   [
+    "p3",
+    "p3"
+   ],
+   [
+    "p4",
+    "p4"
+   ],
+   [
+    "p5",
+    "p5"
+   ]
+  ],
+  "notes": [
+   "单位必须具备采矿能力（canMine 为 true），否则指令无效。并非所有单位都能采矿",
+   "所有 x、y 参数均为 tile坐标，处理器内部通过世界坐标转换（World.unconv）转为像素坐标（乘以 tilesize = 8）",
+   "单位会自动移动到矿脉位置，不需要额外使用 ucontrol move",
+   "如果指定坐标不是有效矿脉，单位的采矿瓦片会被设为 null，即停止采矿",
+   "mine 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "17",
+  "title": "flag（设置单位标记）",
+  "line": 992,
+  "format": "ucontrol flag value 0 0 0 0",
+  "params": [
+   [
+    "p1",
+    "value"
+   ],
+   [
+    "p2",
+    "-"
+   ],
+   [
+    "p3",
+    "-"
+   ],
+   [
+    "p4",
+    "-"
+   ],
+   [
+    "p5",
+    "-"
+   ]
+  ],
+  "notes": [
+   "每个单位只能存储 1 个数字 flag。如果需要存储多个信息，需要自行设计编码方案（例如用位运算或数学运算把多个值打包到一个数字中）。",
+   "flag 是永久属性，处理器销毁后仍保留，除非单位本身被销毁。",
+   "读取 flag 时使用 sensor result @unit @flag。",
+   "flag 的值可以是任意数字，包括负数和小数。",
+   "flag 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），10 秒内若无其他 ucontrol 指令执行，单位将恢复原 AI。"
+  ]
+ },
+ {
+  "num": "18",
+  "title": "build（逻辑建造）",
+  "line": 1033,
+  "format": "ucontrol build x y block rotation config",
+  "params": [
+   [
+    "p1",
+    "x"
+   ],
+   [
+    "p2",
+    "y"
+   ],
+   [
+    "p3",
+    "block"
+   ],
+   [
+    "p4",
+    "rotation"
+   ],
+   [
+    "p5",
+    "config"
+   ]
+  ],
+  "notes": [
+   "坐标参数 x、y 均为 tile 坐标（瓦片坐标），处理器内部会通过世界坐标转换（World.unconv，即乘以 tilesize=8）转为像素坐标。",
+   "必须满足游戏规则的前置条件，否则指令无效（不会报错，但单位不会执行建造）。",
+   "rotation 的方向遵循 Mindustry 的标准旋转约定：0=向右，1=向上，2=向左，3=向下。",
+   "config 参数用于需要初始配置的建筑（如分选器的目标物品）。对于不需要配置的建筑，传入 0 即可。",
+   "build 会触发控制状态，将单位标记为被逻辑控制。"
+  ]
+ },
+ {
+  "num": "19",
+  "title": "deconstruct（逻辑拆除）",
+  "line": 1083,
+  "format": "ucontrol deconstruct x y 0 0 0",
+  "params": [
+   [
+    "p1",
+    "x"
+   ],
+   [
+    "p2",
+    "y"
+   ],
+   [
+    "p3",
+    "-"
+   ],
+   [
+    "p4",
+    "-"
+   ],
+   [
+    "p5",
+    "-"
+   ]
+  ],
+  "notes": [
+   "坐标参数 x、y 均为 tile 坐标，处理器内部会通过世界坐标转换（World.unconv，即乘以 tilesize=8）转为像素坐标。",
+   "通常需要地图规则允许逻辑拆除（logicUnitDeconstruct），否则指令无效。",
+   "deconstruct 会触发控制状态，将单位标记为被逻辑控制。",
+   "拆除计划与建造计划使用同一套机制，区别在于 breaking 标志位。",
+   "单位会优先执行建造列表中的任务，先到先执行。"
+  ]
+ },
+ {
+  "num": "20",
+  "title": "getBlock（获取方块信息）",
+  "line": 1125,
+  "format": "ucontrol getBlock x y type building floor",
+  "params": [
+   [
+    "p1",
+    "x"
+   ],
+   [
+    "p2",
+    "y"
+   ],
+   [
+    "p3",
+    "type"
+   ],
+   [
+    "p4",
+    "building"
+   ],
+   [
+    "p5",
+    "floor"
+   ]
+  ],
+  "notes": [
+   "坐标参数 x、y 均为 tile 坐标，处理器内部会通过世界坐标转换（World.unconv，即乘以 tilesize=8）转为像素坐标。",
+   "重要：获取的 building 引用即使单位离开原范围后仍可使用。该引用可用于对存储类建筑（cell/bank/display）进行写入或绘制操作。",
+   "限制：获取的 building 引用 不能 用于启用/禁用建筑或修改其配置，这些操作仍需要单位在范围内。",
+   "如果目标位置超出范围，所有三个输出都会被设为 null，可用于判断范围是否足够。",
+   "getBlock 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。"
+  ]
+ },
+ {
+  "num": "21",
+  "title": "within（范围检测）",
+  "line": 1168,
+  "format": "ucontrol within x y radius result 0",
+  "params": [
+   [
+    "p1",
+    "x"
+   ],
+   [
+    "p2",
+    "y"
+   ],
+   [
+    "p3",
+    "radius"
+   ],
+   [
+    "p4",
+    "result"
+   ],
+   [
+    "p5",
+    "-"
+   ]
+  ],
+  "notes": [
+   "坐标参数 x、y 均为 tile 坐标，处理器内部会通过世界坐标转换（World.unconv，即乘以 tilesize=8）转为像素坐标。",
+   "within 会触发控制状态（通过 checkLogicAI() 将单位标记为被逻辑控制），与所有 ucontrol 子指令行为一致。这是因为 within 属于 ucontrol 指令，在执行前会调用 checkLogicAI() 并刷新控制计时器。",
+   "替代方案：如果只需要检查距离而不想触发控制状态，应手动用 op len 计算单位与目标点的距离，再与半径比较：",
+   "适合在已经控制单位的场景下使用，避免在仅需信息查询时意外控制单位。"
+  ]
+ },
+ {
+  "num": "22",
+  "title": "unbind（解除逻辑控制）",
+  "line": 1214,
+  "format": "ucontrol unbind 0 0 0 0 0",
+  "params": [
+   [
+    "p1",
+    "-"
+   ],
+   [
+    "p2",
+    "-"
+   ],
+   [
+    "p3",
+    "-"
+   ],
+   [
+    "p4",
+    "-"
+   ],
+   [
+    "p5",
+    "-"
+   ]
+  ],
+  "notes": [
+   "重要区分：unbind 解除的是单位的\"控制\"状态，而非\"绑定\"状态。执行 unbind 后，@unit 变量仍然指向该单位，但单位不再被逻辑控制。",
+   "警告：除非确信已经通过 ucontrol 系列指令控制了单位，否则不要随意使用 unbind。如果单位正被其他逻辑处理器控制，unbind 可能会打断其他逻辑的运行，或干扰单位的默认 AI 行为。",
+   "unbind 后，单位身上的 flag 标记仍然保留（flag 是单位属性，不受控制状态影响）。",
+   "执行 unbind 后，如需重新控制单位，无需重新 ubind（@unit 仍然指向该单位），只需再次执行 ucontrol/uradar/ulocate 指令即可（checkLogicAI 会重新接管控制）。"
+  ]
+ },
+ {
+  "num": "23",
+  "title": "uradar（单位雷达搜索）",
+  "line": 1254,
+  "format": "uradar target1 target2 target3 sort 0 order output",
+  "params": [
+   [
+    "p1",
+    "target1"
+   ],
+   [
+    "p2",
+    "target2"
+   ],
+   [
+    "p3",
+    "target3"
+   ],
+   [
+    "p4",
+    "sort"
+   ],
+   [
+    "p5",
+    "-"
+   ],
+   [
+    "p6",
+    "order"
+   ],
+   [
+    "p7",
+    "output"
+   ],
+   [
+    "筛选器",
+    "说明"
+   ],
+   [
+    "any",
+    "任意单位"
+   ],
+   [
+    "enemy",
+    "敌方单位"
+   ],
+   [
+    "ally",
+    "友方单位"
+   ],
+   [
+    "player",
+    "玩家单位"
+   ],
+   [
+    "attacker",
+    "攻击型单位"
+   ],
+   [
+    "flying",
+    "飞行单位"
+   ],
+   [
+    "boss",
+    "Boss 单位"
+   ],
+   [
+    "ground",
+    "地面单位"
+   ],
+   [
+    "排序依据",
+    "说明"
+   ],
+   [
+    "distance",
+    "距离"
+   ],
+   [
+    "health",
+    "当前血量"
+   ],
+   [
+    "shield",
+    "护盾"
+   ],
+   [
+    "armor",
+    "装甲"
+   ],
+   [
+    "maxHealth",
+    "最大血量"
+   ]
+  ],
+  "notes": [
+   "uradar 是 单位控制语句，会通过 checkLogicAI() 将单位标记为被逻辑控制。但与 ucontrol/ulocate 不同，uradar 不会刷新控制计时器（controlTimer），因此如果仅使用 uradar 而不执行其他 ucontrol/ulocate 指令，单位将在 10 秒后恢复原 AI。",
+   "由于缓存机制，如果需要实时获取最新目标，需要间隔超过 40 tick 或改变筛选条件。",
+   "当未找到符合条件的单位时，output 输出为 null。",
+   "三个筛选器是 AND 关系，如果某个筛选器设为 any，则该条件不产生限制（等同于\"不限\"）。",
+   "order=0 和 order=1 的语义："
+  ]
+ },
+ {
+  "num": "24",
+  "title": "ulocate（单位定位）",
+  "line": 1326,
+  "format": "ulocate locate flag enemy ore outX outY outFound outBuild",
+  "params": [
+   [
+    "p1",
+    "locate"
+   ],
+   [
+    "p2",
+    "flag"
+   ],
+   [
+    "p3",
+    "enemy"
+   ],
+   [
+    "p4",
+    "ore"
+   ],
+   [
+    "p5",
+    "outX"
+   ],
+   [
+    "p6",
+    "outY"
+   ],
+   [
+    "p7",
+    "outFound"
+   ],
+   [
+    "p8",
+    "outBuild"
+   ],
+   [
+    "模式",
+    "说明"
+   ],
+   [
+    "building",
+    "定位建筑"
+   ],
+   [
+    "ore",
+    "定位矿脉"
+   ],
+   [
+    "spawn",
+    "定位出生点"
+   ],
+   [
+    "damaged",
+    "定位受损建筑"
+   ],
+   [
+    "建筑类型",
+    "说明"
+   ],
+   [
+    "core",
+    "核心"
+   ],
+   [
+    "storage",
+    "仓储"
+   ],
+   [
+    "generator",
+    "发电设施"
+   ],
+   [
+    "turret",
+    "炮塔"
+   ],
+   [
+    "factory",
+    "工厂"
+   ],
+   [
+    "repair",
+    "维修站"
+   ],
+   [
+    "battery",
+    "电池"
+   ],
+   [
+    "reactor",
+    "反应堆"
+   ],
+   [
+    "drill",
+    "钻头"
+   ],
+   [
+    "shield",
+    "力场投影器"
+   ]
+  ],
+  "notes": [
+   "ulocate 是 单位控制语句，会通过 checkLogicAI() 将单位标记为被逻辑控制，并刷新控制计时器（controlTimer = logicControlTimeout，即 10 秒）。",
+   "坐标输出（outX、outY）为 tile 坐标（瓦片坐标），处理器内部会通过世界坐标转换（World.unconv，即乘以 tilesize=8）转为像素坐标。",
+   "重要：游戏内编辑器中，\"是否搜索敌方\"默认为 true（1）。如果需要搜索己方建筑，必须将该参数改为 0/false。",
+   "flag 参数仅在 building 模式下有效；矿物类型（ore）参数仅在 ore 模式下有效。其他模式下这些参数被忽略。",
+   "outBuild 输出在 building 和 damaged 模式下返回建筑引用，在 ore 和 spawn 模式下通常为 null。",
+   "由于缓存机制，如果需要实时获取最新目标，需要间隔超过 40 tick 或改变搜索参数。"
+  ]
+ },
+ {
+  "num": "01",
+  "title": "noop（空操作）",
+  "line": 1405,
+  "format": "noop",
+  "params": [],
+  "notes": [
+   "noop 会占用一个指令位，计入处理器的指令总数（上限由 maxInstructions 控制，默认 1000 条）",
+   "在可视化编辑器中，noop 归类为 unknown（未知）分类，而非 control（控制）分类。但就功能而言，它属于控制流指令",
+   "由于无效语句会被自动替换为 noop，如果发现处理器行为异常且代码中有拼写错误，那些错误行实际上就是 noop"
+  ]
+ },
+ {
+  "num": "02",
+  "title": "wait（等待）",
+  "line": 1453,
+  "format": "wait <value>",
+  "params": [
+   [
+    "value",
+    "等待时间，单位为秒。可以是数值常量（如 `0.5`）或变量名。支持小数"
+   ]
+  ],
+  "notes": [
+   "wait 0 或 wait 后跟负数会让出一个 tick（相当于暂停一帧），而不是无限等待。下一个 tick 会继续执行下一条指令",
+   "value 是变量引用而非快照值。如果在等待期间 value 被其他处理器远程修改，wait 会使用新的值来判断。这就是源码中 value.num() 每次都重新读取的原因",
+   "wait 的时间单位是秒，基于游戏时间（Time.delta）。在游戏暂停时，等待不会推进",
+   "等待期间处理器的指令配额被保留（accumulator 不递减），因此等待结束后不会\"补偿性\"地 burst 执行大量指令",
+   "wait 会占用一个指令位"
+  ]
+ },
+ {
+  "num": "03",
+  "title": "stop（停止执行）",
+  "line": 1528,
+  "format": "stop",
+  "params": [],
+  "notes": [
+   "stop 是 不可逆的（在不重新编程的前提下）。一旦执行，处理器将永久停留在 stop 指令处",
+   "每个 tick 处理器仍会执行一次 stop 指令（然后 yield），因此处理器并非完全\"休眠\"，而是以最低开销运行",
+   "如果需要在运行中动态恢复处理器，可以考虑用 jump 跳过 stop 指令，而非真正执行 stop",
+   "重新编辑处理器代码（加载新程序）会重置 stop 标志，处理器恢复运行",
+   "stop 会占用一个指令位"
+  ]
+ },
+ {
+  "num": "04",
+  "title": "end（跳回开头）",
+  "line": 1592,
+  "format": "end",
+  "params": [],
+  "notes": [
+   "end 是实现处理器循环执行的核心指令。处理器本质上是一个无限循环，end（或自然结束）使其不断从头开始",
+   "由于 end 不设置 yield，在指令配额充足时，end 后的\"新一轮\"会在同一 tick 内立即开始执行。这意味着一个没有 wait 的简单程序可能在单个 tick 内循环多次",
+   "在代码中间使用 end 可以实现\"提前终止本轮循环\"的效果",
+   "文件末尾推荐使用 end 而非裸标签，以明确表示循环边界",
+   "end 会占用一个指令位"
+  ]
+ },
+ {
+  "num": "05",
+  "title": "jump（条件跳转）",
+  "line": 1656,
+  "format": "jump <dest> <op> <value> <compare>",
+  "params": [
+   [
+    "dest",
+    "跳转目标。可以是 **标签名**（如 `loopStart`）或 **行号**（指令索引，从 0 开始）。推荐使用标签名"
+   ],
+   [
+    "op",
+    "比较运算符，类型为 `ConditionOp` 枚举。见下表"
+   ],
+   [
+    "value",
+    "比较左操作数。可以是数值常量、变量名或 content 引用（如 `@copper`）"
+   ],
+   [
+    "compare",
+    "比较右操作数。同上"
+   ],
+   [
+    "运算符",
+    "符号"
+   ],
+   [
+    "`equal`",
+    "=="
+   ],
+   [
+    "`notEqual`",
+    "not"
+   ],
+   [
+    "`lessThan`",
+    "<"
+   ],
+   [
+    "`lessThanEq`",
+    "<="
+   ],
+   [
+    "`greaterThan`",
+    ">"
+   ],
+   [
+    "`greaterThanEq`",
+    ">="
+   ],
+   [
+    "`strictEqual`",
+    "==="
+   ],
+   [
+    "`always`",
+    "always"
+   ]
+  ],
+  "notes": [
+   "推荐使用标签跳转而非行号跳转。行号会随代码编辑而变化，标签则不会",
+   "跳转标签不占用逻辑条数：标签不是指令，不占用指令数组位置，不影响处理器执行速度",
+   "跳转指向的是积木，而不是标签：标签只是位置标记，跳转实际跳到的是标签下方的第一条积木指令。因此标签下方必须有积木，否则踩空",
+   "当 op 为 always 时，value 和 compare 参数在文本格式中可以省略。解析器会保留默认值",
+   "jump 不设置 yield 标志。如果当前 tick 还有指令配额，跳转后会在同一 tick 内继续执行目标指令。这意味着 jump 构成的紧凑循环可能在单个 tick 内执行多次",
+   "如果跳转目标地址为 -1（标签未解析成功），jump 不会跳转，等同于 noop"
+  ]
+ },
+ {
+  "num": "01",
+  "title": "set（变量赋值）",
+  "line": 1778,
+  "format": "set <result> <value>",
+  "params": [
+   [
+    "result",
+    "目标变量名。赋值的结果将写入此变量"
+   ],
+   [
+    "value",
+    "源值。可以是数字字面量、变量名、或 `@` 开头的系统变量"
+   ]
+  ],
+  "notes": [
+   "写入常量变量无效：如果 result 是数字字面量（如 set 10 5）或 @ 开头的只读系统变量（如 @time、@tick 等），赋值会被静默忽略",
+   "@counter 可以被 set：@counter 不是常量变量，可以用 set @counter 0 来重置程序计数器实现跳转。但这种跳转方式容易出错，建议优先使用 jump 标签跳转或 end 指令",
+   "对象赋值是引用复制：set savedUnit @unit 后，savedUnit 和 @unit 指向同一个单位对象，修改单位属性会同时影响两者",
+   "变量默认值：未初始化的变量默认是 null 对象。对其进行 num() 取值会返回 0"
+  ]
+ },
+ {
+  "num": "02",
+  "title": "op（数学与逻辑运算）",
+  "line": 1850,
+  "format": "op <op> <result> <a> <b>",
+  "params": [
+   [
+    "op",
+    "运算符名称（使用枚举名，如 `add`、`lessThan`、`abs` 等，详见下方运算符列表）"
+   ],
+   [
+    "result",
+    "结果变量名。运算结果写入此变量"
+   ],
+   [
+    "a",
+    "第一个操作数"
+   ],
+   [
+    "b",
+    "第二个操作数。一元运算时此参数被忽略，但仍需填写"
+   ]
+  ],
+  "notes": [
+   "一元运算仍需填写 b 参数：虽然 b 被忽略，但文本格式固定为 5 个 token。建议填 0 保持整洁",
+   "equal 与 strictEqual 的区别：",
+   "mod 与 emod 的区别：",
+   "rand 的随机性：使用全局随机状态（GlobalVars.rand），每次调用都会推进随机序列。同一处理器在同一 tick 内多次调用 rand 会得到不同的值",
+   "三角函数使用度数：sin/cos/tan 的输入是度数而非弧度，asin/acos/atan 的输出也是度数",
+   "位运算强制转 long：所有位运算会将操作数强制转换为 64 位整数（long）后运算"
+  ]
+ },
+ {
+  "num": "03",
+  "title": "select（条件选择）",
+  "line": 1999,
+  "format": "select <result> <op> <comp0> <comp1> <a> <b>",
+  "params": [
+   [
+    "result",
+    "结果变量名。条件选择的结果写入此变量"
+   ],
+   [
+    "op",
+    "条件运算符（ConditionOp 枚举名，见下方列表）"
+   ],
+   [
+    "comp0",
+    "条件比较的第一个操作数"
+   ],
+   [
+    "comp1",
+    "条件比较的第二个操作数"
+   ],
+   [
+    "a",
+    "条件为真时返回的值"
+   ],
+   [
+    "b",
+    "条件为假时返回的值"
+   ]
+  ],
+  "notes": [
+   "结果保留类型：select 使用 set() 赋值而非 setnum()，所以 a 或 b 如果是对象（如单位引用），结果也会是对象。这是 select 与 op 的重要区别——op 的结果始终是数字",
+   "always 运算符的用途：当 op 为 always 时，条件恒为真，select 始终返回 a。这可以用于简化代码或作为占位",
+   "equal 与 strictEqual 的区别：与 op 指令中一致，equal 有浮点容差，strictEqual 无容差且要求类型一致",
+   "comp0 和 comp1 是比较对象，a 和 b 是选择对象：不要混淆这两组参数。comp0/comp1 用于条件判断，a/b 是待选择的值",
+   "写入常量无效：如果 result 是常量变量，赋值被静默跳过"
+  ]
+ },
+ {
+  "num": "04",
+  "title": "lookup（内容查找）",
+  "line": 2097,
+  "format": "lookup <type> <result> <id>",
+  "params": [
+   [
+    "type",
+    "内容类型。可选值：`block`、`unit`、`item`、`liquid`、`team`"
+   ],
+   [
+    "result",
+    "结果变量名。查找结果（content 对象）写入此变量"
+   ],
+   [
+    "id",
+    "逻辑 ID（logic ID）。从 0 开始的整数索引"
+   ]
+  ],
+  "notes": [
+   "结果为对象类型：lookup 的结果通过 setobj() 写入，是 content 对象引用，不是数字。可以与 @copper 等 content 常量用 op equal 比较",
+   "ID 超范围返回 null：如果 ID 为负数或超出数量范围，结果为 null 对象。对其进行 num() 取值返回 0",
+   "逻辑 ID 不等于内容 ID：不要将 sensor 读到的 @id 直接用作 lookup 的 ID。@id 是内容 ID，lookup 需要的是逻辑 ID",
+   "team 查找的特殊性：team 不是 content，但可以在 lookup 中查找。查找结果可以用于需要 team 参数的指令",
+   "遍历安全：使用 @xxxCount 变量作为遍历上限，可以安全遍历所有 content，无需硬编码数量",
+   "content 可能因模组而变：不同模组环境下的逻辑 ID 映射不同，@xxxCount 的值也会变化。始终使用数量变量而非硬编码"
+  ]
+ },
+ {
+  "num": "05",
+  "title": "packcolor（打包颜色）",
+  "line": 2197,
+  "format": "packcolor <result> <r> <g> <b> <a>",
+  "params": [
+   [
+    "result",
+    "结果变量名。打包后的颜色值（double）写入此变量"
+   ],
+   [
+    "r",
+    "红色通道，范围 0~1"
+   ],
+   [
+    "g",
+    "绿色通道，范围 0~1"
+   ],
+   [
+    "b",
+    "蓝色通道，范围 0~1"
+   ],
+   [
+    "a",
+    "透明度通道，范围 0~1（0=全透明，1=不透明）"
+   ]
+  ],
+  "notes": [
+   "通道范围会被钳制：所有通道值会被 Mathf.clamp 限制在 [0, 1] 范围内。传入负数变为 0，传入大于 1 的值变为 1",
+   "结果不是常规数字：打包后的 double 值是颜色的位模式，不能用于数学运算。对其进行 op 运算没有意义",
+   "与颜色字面量的关系：Logic 支持颜色字面量（如 %ff0000ff），在解析时也是调用 Color.toDoubleBits 生成相同的 double 值。因此 packcolor red 1 0 0 1 和 set red %ff0000ff 效果相同",
+   "命名颜色：Logic 还支持命名颜色语法 %[colorName]，如 %[accent]。这与 packcolor 无直接关系，但生成相同格式的值",
+   "a=0 为全透明：透明度通道 a 为 0 时颜色完全不可见，为 1 时完全不透明"
+  ]
+ },
+ {
+  "num": "06",
+  "title": "unpackcolor（解包颜色）",
+  "line": 2274,
+  "format": "unpackcolor <r> <g> <b> <a> <value>",
+  "params": [
+   [
+    "r",
+    "红色通道输出变量名。解包后的红色分量（0~1）写入此变量"
+   ],
+   [
+    "g",
+    "绿色通道输出变量名。解包后的绿色分量（0~1）写入此变量"
+   ],
+   [
+    "b",
+    "蓝色通道输出变量名。解包后的蓝色分量（0~1）写入此变量"
+   ],
+   [
+    "a",
+    "透明度通道输出变量名。解包后的透明度分量（0~1）写入此变量"
+   ],
+   [
+    "value",
+    "待解包的颜色值（double，由 `packcolor` 或颜色字面量生成）"
+   ]
+  ],
+  "notes": [
+   "参数顺序与 packcolor 不同：packcolor 是先 result 后 RGBA，unpackcolor 是先 RGBA 后 value。使用时注意不要混淆",
+   "输出变量必须是可写变量：四个输出变量不能是常量（如数字字面量），否则写入被静默跳过",
+   "解包结果范围 0~1：所有通道值归一化为 0~1 范围，与 packcolor 的输入范围一致",
+   "对非颜色值解包：如果 value 不是由 packcolor 或颜色字面量生成的值，解包结果是无意义的随机颜色",
+   "使用临时变量：解包通常用于临时分析或修改颜色，建议输出变量使用 _ 开头的临时变量命名"
+  ]
+ },
+ {
+  "num": "01",
+  "title": "read（读取内存建筑）",
+  "line": 2357,
+  "format": "read result = cell1 at 0",
+  "params": [
+   [
+    "1",
+    "output"
+   ],
+   [
+    "2",
+    "target"
+   ],
+   [
+    "3",
+    "address"
+   ]
+  ],
+  "notes": [
+   "地址索引从 0 开始，最大有效索引为容量减 1（Cell 为 63，Bank 为 511）。",
+   "越界读取得到的是 NaN（Not a Number），可以用 isfinite 判断来过滤。",
+   "内存建筑中存储的值始终是 double 类型（数字），无法直接存储对象/建筑引用。write 写入时也会调用 value.num() 转为数字。",
+   "处理器自身（@this）的读取行为与内存建筑完全不同：使用字符串作为变量名键可以读取处理器内部变量（包括对象引用），使用数字索引则读取链接建筑列表。这是多核通信的核心机制。",
+   "读取消息建筑（Message Block）时，返回的是字符的 Unicode 码点而非子字符串。",
+   "特权处理器可以读取任意队伍的建筑内存。"
+  ]
+ },
+ {
+  "num": "02",
+  "title": "write（写入内存建筑）",
+  "line": 2453,
+  "format": "write result to cell1 at 0",
+  "params": [
+   [
+    "1",
+    "value"
+   ],
+   [
+    "2",
+    "target"
+   ],
+   [
+    "3",
+    "address"
+   ]
+  ],
+  "notes": [
+   "地址索引从 0 开始，最大有效索引为容量减 1（Cell 为 63，Bank 为 511）。",
+   "越界写入会被静默忽略，不会报错，也不会自动扩展数组。",
+   "由于内存建筑存储类型为 double，写入的值会丢失对象信息。例如写入一个建筑引用后再读取，得到的只是数字而非建筑本身。",
+   "处理器自身（@this）的写入行为与内存建筑完全不同：使用字符串作为变量名键可以修改处理器内部变量（包括写入对象引用），使用数字索引则不执行任何操作。这是多核通信中传递单位引用、建筑引用的核心机制。",
+   "内存建筑无法被拾起（canPickup() 返回 false），以避免大数组同步问题。",
+   "特权处理器可以写入任意队伍的建筑内存。"
+  ]
+ },
+ {
+  "num": "03",
+  "title": "draw（绘制指令）",
+  "line": 2556,
+  "format": "",
+  "params": [
+   [
+    "参数位",
+    "通用名"
+   ],
+   [
+    "type",
+    "模式"
+   ],
+   [
+    "x",
+    "参数1"
+   ],
+   [
+    "y",
+    "参数2"
+   ],
+   [
+    "p1",
+    "参数3"
+   ],
+   [
+    "p2",
+    "参数4"
+   ],
+   [
+    "p3",
+    "参数5"
+   ],
+   [
+    "p4",
+    "参数6"
+   ],
+   [
+    "模式名",
+    "内部命令常量"
+   ],
+   [
+    "clear",
+    "commandClear (0)"
+   ],
+   [
+    "color",
+    "commandColor (1)"
+   ],
+   [
+    "col",
+    "commandColorPack (2)"
+   ],
+   [
+    "stroke",
+    "commandStroke (3)"
+   ],
+   [
+    "line",
+    "commandLine (4)"
+   ],
+   [
+    "rect",
+    "commandRect (5)"
+   ],
+   [
+    "lineRect",
+    "commandLineRect (6)"
+   ],
+   [
+    "poly",
+    "commandPoly (7)"
+   ],
+   [
+    "linePoly",
+    "commandLinePoly (8)"
+   ],
+   [
+    "triangle",
+    "commandTriangle (9)"
+   ],
+   [
+    "image",
+    "commandImage (10)"
+   ],
+   [
+    "print",
+    "commandPrint (11)"
+   ],
+   [
+    "translate",
+    "commandTranslate (12)"
+   ],
+   [
+    "scale",
+    "commandScale (13)"
+   ],
+   [
+    "rotate",
+    "commandRotate (14)"
+   ],
+   [
+    "reset",
+    "commandResetTransform (15)"
+   ]
+  ],
+  "notes": [
+   "所有 draw 命令只是写入图形缓冲区，必须配合 drawflush <display> 指令才能在显示屏上显示。",
+   "图形缓冲区上限为 256 条命令。print 模式会将文本逐字符展开，长文本可能快速占满缓冲区。",
+   "坐标和参数使用 10 位有符号整数打包，有效范围为 -511 到 511。超出范围的值会被截断。",
+   "显示屏坐标系的原点 (0, 0) 在左下角，X 轴向右，Y 轴向上。",
+   "Logic Display 的显示尺寸为 80x80 像素，Large Logic Display 为 176x176 像素。超出显示尺寸的绘制内容会被裁剪。",
+   "多边形的边数上限为 25，超过会被限制为 25。"
+  ]
+ },
+ {
+  "num": "04",
+  "title": "print（打印文本）",
+  "line": 2699,
+  "format": "print \"frog\"",
+  "params": [
+   [
+    "1",
+    "value"
+   ]
+  ],
+  "notes": [
+   "print 指令只是向缓冲区追加文本，不会立即显示。必须配合 printflush <message> 刷新到消息建筑才能看到效果。",
+   "文本缓冲区上限为 400 个字符。超出部分会被丢弃，不会自动截断或滚动。",
+   "打印数字时，接近整数的浮点数会自动显示为整数形式。例如 3.9999999 会显示为 4。",
+   "打印内容引用（如 @copper）时，显示的是内容的 name 属性（如 copper），而非显示名称。",
+   "打印建筑或单位时，显示的是其类型的内部名称，而非友好名称。",
+   "多次 print 会连续追加文本，中间不会自动添加空格或换行。需要手动添加。"
+  ]
+ },
+ {
+  "num": "05",
+  "title": "printchar（打印字符）",
+  "line": 2789,
+  "format": "printchar 65",
+  "params": [
+   [
+    "1",
+    "value"
+   ]
+  ],
+  "notes": [
+   "printchar 与 print 一样，只是向缓冲区追加内容，需要配合 printflush 刷新才能显示。",
+   "数字值会通过 Math.floor() 向下取整，因此 printchar 65.9 会打印字符 A（码点 65）。",
+   "通过内容引用打印 emoji 字符时，需要在消息建筑上才能正确显示图标。在逻辑显示屏上通过 draw print 绘制时，emoji 字符的显示效果取决于逻辑字体是否包含对应字形。",
+   "ASCII 可打印字符的码点范围为 32（空格）到 126（~）。码点 10 为换行符，码点 9 为制表符。",
+   "可以使用 printchar 打印 print 指令难以直接输入的字符，如换行符（10）、制表符（9）或其他特殊符号。",
+   "积木编辑器的字符选择器仅覆盖 ASCII 32-126 范围。超出此范围的字符需要手动在输入框中输入码点数值。"
+  ]
+ },
+ {
+  "num": "06",
+  "title": "format（格式化打印）",
+  "line": 2871,
+  "format": "format \"frog\"",
+  "params": [
+   [
+    "1",
+    "value"
+   ]
+  ],
+  "notes": [
+   "format 只替换编号最小的占位符，不一次性替换所有占位符。如果有 {0} 和 {1} 两个占位符，需要调用两次 format。",
+   "占位符编号为单个数字（0-9），不支持多位数字如 {10}。{10} 不会被识别为有效占位符（因为格式要求恰好三个字符 {数字}）。",
+   "如果 textBuffer 中没有占位符，format 不做任何操作，也不会报错。",
+   "format 操作的是已有 textBuffer 内容，因此必须先通过 print 等指令写入包含占位符的模板文本。",
+   "替换可能导致 textBuffer 长度变化。如果替换后的字符串比占位符长，缓冲区可能超过 400 字符上限，此时会被截断。",
+   "多次 format 替换同一编号的占位符时，第一次替换后该占位符已消失，第二次不会再替换。"
+  ]
+ },
+ {
+  "num": "01",
+  "title": "getlink（获取链接的建筑）",
+  "line": 2972,
+  "format": "getlink <output> <index>",
+  "params": [
+   [
+    "output",
+    "变量名"
+   ],
+   [
+    "index",
+    "整数"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "02",
+  "title": "control（控制建筑）",
+  "line": 3038,
+  "format": "control <type> <building> <p1> <p2> <p3> <p4>",
+  "params": [
+   [
+    "type",
+    "控制类型"
+   ],
+   [
+    "building",
+    "建筑引用"
+   ],
+   [
+    "p1",
+    "参数1"
+   ],
+   [
+    "p2",
+    "参数2"
+   ],
+   [
+    "p3",
+    "参数3"
+   ],
+   [
+    "p4",
+    "参数4"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "03",
+  "title": "radar（建筑雷达搜索）",
+  "line": 3193,
+  "format": "radar <target1> <target2> <target3> <sort> <building> <order> <output>",
+  "params": [
+   [
+    "target1",
+    "目标筛选1"
+   ],
+   [
+    "target2",
+    "目标筛选2"
+   ],
+   [
+    "target3",
+    "目标筛选3"
+   ],
+   [
+    "sort",
+    "排序方式"
+   ],
+   [
+    "building",
+    "建筑引用"
+   ],
+   [
+    "order",
+    "整数"
+   ],
+   [
+    "output",
+    "变量名"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "04",
+  "title": "sensor（传感器）",
+  "line": 3295,
+  "format": "sensor <output> <from> <type>",
+  "params": [
+   [
+    "output",
+    "变量名"
+   ],
+   [
+    "from",
+    "对象引用"
+   ],
+   [
+    "type",
+    "属性类型"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "05",
+  "title": "drawflush（刷新绘制到显示屏）",
+  "line": 3455,
+  "format": "drawflush <building>",
+  "params": [
+   [
+    "building",
+    "建筑引用"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "06",
+  "title": "printflush（刷新打印到消息建筑）",
+  "line": 3531,
+  "format": "printflush <building>",
+  "params": [
+   [
+    "building",
+    "建筑引用"
+   ]
+  ],
+  "notes": []
+ },
+ {
+  "num": "01",
+  "title": "setrate（设置处理器执行速度）",
+  "line": 3621,
+  "format": "setrate <amount>",
+  "params": [
+   [
+    "amount",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行，普通处理器无法使用",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "@ipt 的实际累积上限为 maxInstructionScale * ipt（默认 maxInstructionScale=5），即累积的执行点数不会超过 5 倍 ipt",
+   "过高的 @ipt 值可能导致服务器性能下降，应根据实际需求合理设置",
+   "可以通过 sensor result @ipt 读取当前的 @ipt 值"
+  ]
+ },
+ {
+  "num": "02",
+  "title": "getblock（获取方块）",
+  "line": 3671,
+  "format": "getblock <result> <x> <y> <layer>",
+  "params": [
+   [
+    "result",
+    "输出变量"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "layer",
+    "枚举"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "layer 参数为 TileLayer 枚举值，必须使用有效值（block/floor/overlay），否则会导致灰色积木",
+   "x、y 参数为 tile 坐标（瓦片坐标），不是像素坐标（像素坐标 = tile 坐标 × tilesize=8）",
+   "当 layer 为 block 时，如果该坐标没有建筑，输出为 null"
+  ]
+ },
+ {
+  "num": "03",
+  "title": "setblock（设置方块）",
+  "line": 3728,
+  "format": "setblock <x> <y> <block> <team> <rotation> <layer>",
+  "params": [
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "block",
+    "Content"
+   ],
+   [
+    "team",
+    "Team"
+   ],
+   [
+    "rotation",
+    "数值"
+   ],
+   [
+    "layer",
+    "枚举"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "layer 参数为 TileLayer 枚举值，必须使用有效值（block/floor/overlay），否则会导致灰色积木",
+   "x、y 参数为 tile 坐标（瓦片坐标），不是像素坐标",
+   "当 layer 为 block 时，team 和 rotation 参数必须有效；当 layer 为 floor/overlay 时，team 和 rotation 参数会被忽略",
+   "使用 block 图层设置建筑时，会触发建筑放置事件，可能影响游戏逻辑（如触发触发器）"
+  ]
+ },
+ {
+  "num": "04",
+  "title": "spawn（生成单位）",
+  "line": 3784,
+  "format": "spawn <type> <x> <y> <rotation> <team> <result> <effect>",
+  "params": [
+   [
+    "type",
+    "Content"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "rotation",
+    "数值"
+   ],
+   [
+    "team",
+    "Team"
+   ],
+   [
+    "result",
+    "输出变量"
+   ],
+   [
+    "effect",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "type 参数为 content 类型的单位类型，必须使用有效值（如 @dagger）",
+   "result 输出生成的单位引用，可以用于后续的单位控制",
+   "大量生成单位可能导致服务器性能下降"
+  ]
+ },
+ {
+  "num": "05",
+  "title": "bullet（生成子弹）",
+  "line": 3842,
+  "format": "bullet <result> <from> <index> <x> <y> <rotation> <team> <owner> <damage> <velocityScl> <lifeScl> <aimX> <aimY>",
+  "params": [
+   [
+    "result",
+    "输出变量"
+   ],
+   [
+    "from",
+    "建筑引用"
+   ],
+   [
+    "index",
+    "数值"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "rotation",
+    "数值"
+   ],
+   [
+    "team",
+    "Team"
+   ],
+   [
+    "owner",
+    "建筑引用"
+   ],
+   [
+    "damage",
+    "数值"
+   ],
+   [
+    "velocityScl",
+    "数值"
+   ],
+   [
+    "lifeScl",
+    "数值"
+   ],
+   [
+    "aimX",
+    "数值"
+   ],
+   [
+    "aimY",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "from 参数必须为有效的建筑引用，且该建筑必须有武器（如炮塔）",
+   "index 参数对应建筑武器数组的索引，如果超出范围可能导致异常",
+   "owner 参数用于伤害归属判定，如果为 null 则伤害归属于 from 建筑"
+  ]
+ },
+ {
+  "num": "06",
+  "title": "status（应用/清除状态效果）",
+  "line": 3905,
+  "format": "status <apply|clear> <effect> <unit> <duration>",
+  "params": [
+   [
+    "apply/clear",
+    "枚举"
+   ],
+   [
+    "effect",
+    "Content"
+   ],
+   [
+    "unit",
+    "单位引用"
+   ],
+   [
+    "duration",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "effect 参数为状态效果类型，必须使用有效值（如 @burning、@wet、@frozen 等）",
+   "clear 模式下 duration 参数无效，但导出时仍需写出",
+   "状态效果可以叠加，多次 apply 同一状态会刷新持续时间"
+  ]
+ },
+ {
+  "num": "07",
+  "title": "weathersense（检测天气）",
+  "line": 3956,
+  "format": "weathersense <weather> <result>",
+  "params": [
+   [
+    "weather",
+    "Content"
+   ],
+   [
+    "result",
+    "输出变量"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "weather 参数为天气类型，必须使用有效值（如 @rain、@snow、@sandstorm 等）",
+   "天气需要通过 weatherset 指令或游戏规则设置后才能被检测到"
+  ]
+ },
+ {
+  "num": "08",
+  "title": "weatherset（设置天气）",
+  "line": 4011,
+  "format": "weatherset <weather> <state>",
+  "params": [
+   [
+    "weather",
+    "Content"
+   ],
+   [
+    "state",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "weather 参数为天气类型，必须使用有效值（如 @rain、@snow、@sandstorm 等）",
+   "开启天气后，可以使用 weathersense 指令检测天气是否正在生效",
+   "天气关闭不是瞬间消失，而是逐渐消退"
+  ]
+ },
+ {
+  "num": "09",
+  "title": "spawnwave（生成波次）",
+  "line": 4061,
+  "format": "spawnwave <natural> <x> <y>",
+  "params": [
+   [
+    "natural",
+    "数值"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "natural 参数为 1 时，x/y 参数会被忽略，敌人在默认出生点生成",
+   "生成的敌人属于敌方队伍（通常为 crux）",
+   "此指令触发的是当前波次的敌人，不会修改波次编号"
+  ]
+ },
+ {
+  "num": "10",
+  "title": "setrule（设置游戏规则）",
+  "line": 4111,
+  "format": "setrule <rule> <value> <p1> <p2> <p3> <p4>",
+  "params": [
+   [
+    "rule",
+    "枚举"
+   ],
+   [
+    "value",
+    "数值"
+   ],
+   [
+    "p1",
+    "数值"
+   ],
+   [
+    "p2",
+    "数值"
+   ],
+   [
+    "p3",
+    "数值"
+   ],
+   [
+    "p4",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "rule 参数为 LogicRule 枚举值，必须使用有效值，否则会导致灰色积木",
+   "修改游戏规则会立即生效，且影响全局",
+   "部分规则修改后不会被持久化保存（取决于游戏存档逻辑）"
+  ]
+ },
+ {
+  "num": "11",
+  "title": "message（全局消息）",
+  "line": 4172,
+  "format": "message <type> <duration> <outSuccess>",
+  "params": [
+   [
+    "type",
+    "枚举"
+   ],
+   [
+    "duration",
+    "数值"
+   ],
+   [
+    "outSuccess",
+    "输出变量"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "消息内容需要先用 print 写入缓存，再执行 message 指令刷新，与 printflush 刷新到显示屏的逻辑类似",
+   "type 参数为枚举值，必须使用有效值（announce/toast/notify）",
+   "消息显示后会清空打印缓存",
+   "频繁发送全局消息可能影响玩家体验"
+  ]
+ },
+ {
+  "num": "12",
+  "title": "cutscene（镜头控制）",
+  "line": 4225,
+  "format": "cutscene <action> <p1> <p2> <p3> <p4>",
+  "params": [
+   [
+    "action",
+    "枚举"
+   ],
+   [
+    "p1",
+    "数值"
+   ],
+   [
+    "p2",
+    "数值"
+   ],
+   [
+    "p3",
+    "数值"
+   ],
+   [
+    "p4",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "action 参数为枚举值，必须使用有效值（pan/zoom/explore）",
+   "pan 模式下：p1=X 坐标，p2=Y 坐标，p3=速度",
+   "zoom 模式下：p1=缩放级别（1=默认缩放，值越大越远）",
+   "镜头控制会影响所有在线玩家，可能影响游戏体验"
+  ]
+ },
+ {
+  "num": "13",
+  "title": "effect（视觉特效）",
+  "line": 4280,
+  "format": "effect <type> <x> <y> <sizerot> <color> <data>",
+  "params": [
+   [
+    "type",
+    "Content"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "sizerot",
+    "数值"
+   ],
+   [
+    "color",
+    "数值"
+   ],
+   [
+    "data",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "type 参数为特效类型，必须使用有效值（如 @exploShockwave、@fire 等）",
+   "颜色参数建议先用 packcolor 生成打包颜色值再传入",
+   "特效为纯视觉表现，不产生任何实际游戏效果（伤害、状态等）"
+  ]
+ },
+ {
+  "num": "14",
+  "title": "explosion（爆炸）",
+  "line": 4332,
+  "format": "explosion <team> <x> <y> <radius> <damage> <air> <ground> <pierce> <effect>",
+  "params": [
+   [
+    "team",
+    "Team"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "radius",
+    "数值"
+   ],
+   [
+    "damage",
+    "数值"
+   ],
+   [
+    "air",
+    "数值"
+   ],
+   [
+    "ground",
+    "数值"
+   ],
+   [
+    "pierce",
+    "数值"
+   ],
+   [
+    "effect",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "team 参数为队伍枚举值（如 sharded、crux、derelict 等）",
+   "爆炸会对范围内的所有有效目标造成伤害，包括单位和建筑",
+   "radius 参数的单位为格（tile），不是像素"
+  ]
+ },
+ {
+  "num": "15",
+  "title": "fetch（获取数量）",
+  "line": 4387,
+  "format": "fetch <type> <result> <team> <index> <extra>",
+  "params": [
+   [
+    "type",
+    "枚举"
+   ],
+   [
+    "result",
+    "输出变量"
+   ],
+   [
+    "team",
+    "Team"
+   ],
+   [
+    "index",
+    "数值"
+   ],
+   [
+    "extra",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "type 参数为 FetchType 枚举值，必须使用有效值，否则会导致灰色积木",
+   "使用 unit/build 类型时，需要先用对应的 Count 类型获取总数，再用索引逐个获取实例",
+   "extra 参数为单位类型 ID 或建筑类型 ID，可通过 lookup 指令获取"
+  ]
+ },
+ {
+  "num": "16",
+  "title": "getflag（获取全局标记）",
+  "line": 4461,
+  "format": "getflag <result> <flag>",
+  "params": [
+   [
+    "result",
+    "输出变量"
+   ],
+   [
+    "flag",
+    "字符串"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "flag 参数为字符串类型（标记名），如 \"myFlag\"",
+   "全局标记是 世界处理器间通信的重要方式，可以用于在不同世界处理器之间传递数据",
+   "配合 setflag 指令使用，实现跨处理器的状态同步"
+  ]
+ },
+ {
+  "num": "17",
+  "title": "setflag（设置全局标记）",
+  "line": 4512,
+  "format": "setflag <flag> <value>",
+  "params": [
+   [
+    "flag",
+    "字符串"
+   ],
+   [
+    "value",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "flag 参数为字符串类型（标记名），如 \"myFlag\"",
+   "这是世界处理器间通信的重要方式，可用于在不同世界处理器之间传递数据、同步状态",
+   "配合 getflag 指令使用，实现跨处理器的状态同步",
+   "设置后立即生效，同一 tick 内其他处理器执行 getflag 可读取到新值（取决于处理器执行顺序）"
+  ]
+ },
+ {
+  "num": "18",
+  "title": "setprop（设置属性）",
+  "line": 4566,
+  "format": "setprop <type> <of> <value>",
+  "params": [
+   [
+    "type",
+    "Content"
+   ],
+   [
+    "of",
+    "哭建筑引用"
+   ],
+   [
+    "value",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "type 参数可以是物品（@copper 等）、液体（@water 等）或 sensor 属性（@enabled 等）",
+   "此指令直接修改建筑的内部数据，可以绕过正常的物品/液体传输限制",
+   "设置的值会立即生效，无需等待游戏更新"
+  ]
+ },
+ {
+  "num": "19",
+  "title": "playsound（播放音效）",
+  "line": 4621,
+  "format": "playsound <positional> <id> <volume> <pitch> <pan/x> <y> <limit>",
+  "params": [
+   [
+    "positional",
+    "数值"
+   ],
+   [
+    "id",
+    "数值"
+   ],
+   [
+    "volume",
+    "数值"
+   ],
+   [
+    "pitch",
+    "数值"
+   ],
+   [
+    "pan/x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "limit",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "positional 参数决定播放模式：",
+   "id 参数为音效 ID，需要使用有效的音效资源 ID",
+   "频繁播放音效可能影响玩家体验"
+  ]
+ },
+ {
+  "num": "20",
+  "title": "playmusic（播放音乐）",
+  "line": 4679,
+  "format": "playmusic <name> <interrupt>",
+  "params": [
+   [
+    "name",
+    "字符串"
+   ],
+   [
+    "interrupt",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "name 参数为字符串类型的音乐名，需要使用有效的音乐资源名",
+   "音乐会影响所有在线玩家",
+   "频繁切换音乐可能影响玩家体验"
+  ]
+ },
+ {
+  "num": "21",
+  "title": "setmarker（设置标记）",
+  "line": 4727,
+  "format": "setmarker <type> <id> <p1> <p2> <p3>",
+  "params": [
+   [
+    "type",
+    "枚举"
+   ],
+   [
+    "id",
+    "数值"
+   ],
+   [
+    "p1",
+    "数值"
+   ],
+   [
+    "p2",
+    "数值"
+   ],
+   [
+    "p3",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "type 参数为 LMarkerControl 枚举值，必须使用有效值，否则会导致灰色积木",
+   "修改标记前，需要先通过 makemarker 创建该标记",
+   "修改文本类型标记时，需要先用 print 写入缓存"
+  ]
+ },
+ {
+  "num": "22",
+  "title": "makemarker（创建标记）",
+  "line": 4783,
+  "format": "makemarker <type> <id> <x> <y> <replace>",
+  "params": [
+   [
+    "type",
+    "枚举"
+   ],
+   [
+    "id",
+    "数值"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "replace",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "type 参数为标记类型枚举值，必须使用有效值（如 shape/text）",
+   "id 参数为标记的唯一标识，建议使用不同的 ID 避免冲突",
+   "创建标记后，使用 setmarker 修改其颜色、文本等属性",
+   "标记会持续存在直到被替换或游戏重置"
+  ]
+ },
+ {
+  "num": "23",
+  "title": "localeprint（本地化打印）",
+  "line": 4842,
+  "format": "localeprint <value>",
+  "params": [
+   [
+    "value",
+    "字符串"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "value 参数为本地化键名（字符串），如 \"name\" 会显示游戏语言对应的翻译",
+   "写入的文本存储在打印信息缓存中，需要配合 printflush 或 message 指令输出",
+   "本地化文本在客户端渲染时根据客户端语言显示（如果通过 message 发送）",
+   "可以与 print 指令混用，共同构建打印缓存内容"
+  ]
+ },
+ {
+  "num": "24",
+  "title": "sync（同步变量）",
+  "line": 4891,
+  "format": "sync <variable>",
+  "params": [
+   [
+    "variable",
+    "变量名"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，但 sync 指令用于解决客户端同步问题",
+   "用于多人模式下确保变量值在所有客户端一致",
+   "同步的变量在客户端可以被读取（通过 sensor 或直接引用）",
+   "此指令每 tick 最多同步 120 个变量，超出限制的变量不会同步",
+   "变量值同步有网络延迟，不是即时生效"
+  ]
+ },
+ {
+  "num": "25",
+  "title": "query（区域查询）",
+  "line": 4942,
+  "format": "query <shape> <type> <team> <x> <y> <w> <h>",
+  "params": [
+   [
+    "shape",
+    "枚举"
+   ],
+   [
+    "type",
+    "枚举"
+   ],
+   [
+    "team",
+    "Team"
+   ],
+   [
+    "x",
+    "数值"
+   ],
+   [
+    "y",
+    "数值"
+   ],
+   [
+    "w",
+    "数值"
+   ],
+   [
+    "h",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，不存在客户端同步问题",
+   "shape 参数为枚举值（circle/rect），必须使用有效值",
+   "type 参数为枚举值（unit/building），必须使用有效值",
+   "坐标为像素坐标，不是 tile 坐标",
+   "circle 模式下 h 参数无效但需要写出"
+  ]
+ },
+ {
+  "num": "26",
+  "title": "clientdata（客户端数据）",
+  "line": 5001,
+  "format": "clientdata <channel> <value> <reliable>",
+  "params": [
+   [
+    "channel",
+    "字符串"
+   ],
+   [
+    "value",
+    "数值"
+   ],
+   [
+    "reliable",
+    "数值"
+   ]
+  ],
+  "notes": [
+   "此指令为 privileged（特权） 指令，只能在世界处理器上运行",
+   "世界处理器在服务器端执行，但此指令涉及客户端数据传输",
+   "此指令在编辑器中隐藏，需要手动输入",
+   "需要游戏规则 allowLogicData 开启才能使用，否则指令无效",
+   "channel 参数为字符串类型的频道名，用于区分不同的数据通道",
+   "此指令主要用于高级自定义玩法和客户端间通信"
+  ]
+ },
+ {
+  "num": "01",
+  "title": "兵控逻辑分类与绑定规范",
+  "line": 5056,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "02",
+  "title": "单控逻辑",
+  "line": 5220,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "03",
+  "title": "群控逻辑",
+  "line": 5305,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "04",
+  "title": "多控逻辑",
+  "line": 5845,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "05",
+  "title": "挖矿逻辑",
+  "line": 6495,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "06",
+  "title": "单位数量检测",
+  "line": 6859,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "07",
+  "title": "多核优化控制",
+  "line": 6998,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "08",
+  "title": "自定义单位点阵",
+  "line": 7167,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "09",
+  "title": "均衡挖矿系统",
+  "line": 7743,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "10",
+  "title": "搬运逻辑",
+  "line": 10041,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "11",
+  "title": "建筑物品选择逻辑",
+  "line": 11149,
+  "format": "",
+  "params": [],
+  "notes": []
+ },
+ {
+  "num": "12",
+  "title": "变量表完整性检查",
+  "line": 12143,
+  "format": "",
+  "params": [],
+  "notes": []
+ }
+]

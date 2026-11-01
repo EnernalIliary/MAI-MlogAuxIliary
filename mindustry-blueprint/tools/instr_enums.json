@@ -1,0 +1,15 @@
+{
+  "source": "Mindustry v160.7 (out/_server160.jar -> mindustry/logic/{RadarTarget,RadarSort,LLocate,LUnitControl}.class, mindustry/world/meta/BlockFlag.class, mindustry/logic/LAccess.class `controls` array; constants read straight out of the class files by out/_enums.py on 2026-11-01, no javap needed)",
+  "cross_check": "Logic-Docs-v1.1.0.md: uradar chapter :1240-1330 (RadarTarget / RadarSort tables), control chapter :3038-3140 (the five types, one written form each), ulocate chapter :1326-1400 (mode + BlockFlag). tests/docsig/ pins instr_semantics.json against the same doc.",
+  "version": "v160.7",
+  "note": "Slot VALUES only. Slot ORDER/arity lives in instr_semantics.json; this file answers plain-language questions such as 'which words may stand in a radar filter slot'. Anything a statement resolves with Enum.valueOf / a name table goes here; a value that is not in the list is not quietly ignored by the parser, which is why mlogcheck reports it.",
+  "enums": {
+    "RadarTarget": ["any", "enemy", "ally", "player", "attacker", "flying", "boss", "ground"],
+    "RadarSort": ["distance", "health", "shield", "armor", "maxHealth"],
+    "LLocate": ["ore", "building", "spawn", "damaged"],
+    "LUnitControl": ["idle", "stop", "move", "approach", "pathfind", "autoPathfind", "boost", "target", "targetp", "itemDrop", "itemTake", "payDrop", "payTake", "payEnter", "mine", "flag", "build", "deconstruct", "getBlock", "within", "unbind"],
+    "BlockFlag": ["core", "storage", "generator", "turret", "factory", "repair", "battery", "reactor", "extinguisher", "drill", "shield", "launchPad", "unitCargoUnloadPoint", "unitAssembler", "hasFogRadius", "steamVent", "blockRepair", "synced"],
+    "ControlType": ["enabled", "config", "color", "shoot", "shootp"],
+    "ConditionOp": ["equal", "notEqual", "lessThan", "lessThanEq", "greaterThan", "greaterThanEq", "strictEqual", "always"]
+  }
+}

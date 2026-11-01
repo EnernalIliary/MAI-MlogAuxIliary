@@ -1,0 +1,1154 @@
+{
+ "_note": "only fields the source sets are listed; absent ones are the engine default in `defaults`. `abilities.args` is raw source text (they contain arithmetic like `60f*8f`).",
+ "_source": "Mindustry-Source/core/src/mindustry/content/UnitTypes.java",
+ "count": 39,
+ "defaults": {
+  "itemCapacity": "-1",
+  "mineSpeed": "1",
+  "mineTier": "-1",
+  "speed": "1.1"
+ },
+ "units": {
+  "aegires": {
+   "abilities": [
+    {
+     "ability": "EnergyField",
+     "args": [
+      "40f",
+      "65f",
+      "180f"
+     ]
+    }
+   ],
+   "accel": "0.2",
+   "armor": "12",
+   "buildSpeed": "3",
+   "drag": "0.17",
+   "health": "12000",
+   "hitSize": "44",
+   "rotateSpeed": "1.4",
+   "speed": "0.7"
+  },
+  "alpha": {
+   "accel": "0.1",
+   "buildSpeed": "0.5",
+   "drag": "0.05",
+   "flying": "true",
+   "health": "150",
+   "hitSize": "8",
+   "itemCapacity": "30",
+   "lowAltitude": "true",
+   "mineSpeed": "6.5",
+   "mineTier": "1",
+   "rotateSpeed": "15",
+   "speed": "3",
+   "weapons": {
+    "bullet": "LaserBoltBulletType",
+    "bullet_damage": "11",
+    "bullet_speed": "2.5",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LaserBoltBulletType",
+      "damage": "11",
+      "lifetime": "60",
+      "reload": "17",
+      "speed": "2.5"
+     }
+    ],
+    "reload": "17"
+   }
+  },
+  "antumbra": {
+   "accel": "0.04",
+   "armor": "9",
+   "drag": "0.04",
+   "flying": "true",
+   "health": "7200",
+   "hitSize": "46",
+   "lowAltitude": "true",
+   "rotateSpeed": "1.9",
+   "speed": "0.8",
+   "weapons": {
+    "bullet": null,
+    "bullet_damage": null,
+    "bullet_speed": null,
+    "count": 3,
+    "list": [
+     {
+      "reload": "20"
+     },
+     {
+      "reload": "35"
+     },
+     {
+      "bullet": "BasicBulletType",
+      "damage": "55",
+      "lifetime": "25",
+      "reload": "12",
+      "speed": "7"
+     }
+    ],
+    "reload": "20"
+   }
+  },
+  "arkyid": {
+   "armor": "6",
+   "drag": "0.1",
+   "health": "8000",
+   "hitSize": "23",
+   "rotateSpeed": "2.7",
+   "speed": "0.62",
+   "weapons": {
+    "bullet": null,
+    "bullet_damage": null,
+    "bullet_speed": null,
+    "count": 4,
+    "list": [
+     {
+      "reload": "9"
+     },
+     {
+      "reload": "14"
+     },
+     {
+      "reload": "22"
+     },
+     {
+      "ammoMultiplier": "4",
+      "bullet": "ArtilleryBulletType",
+      "damage": "12",
+      "lifetime": "70",
+      "reload": "45",
+      "speed": "2"
+     }
+    ],
+    "reload": "9"
+   }
+  },
+  "atrax": {
+   "armor": "3",
+   "drag": "0.4",
+   "health": "600",
+   "hitSize": "13",
+   "rotateSpeed": "3",
+   "speed": "0.6",
+   "weapons": {
+    "bullet": "LiquidBulletType",
+    "bullet_damage": "13",
+    "bullet_speed": "2.5",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LiquidBulletType",
+      "damage": "13",
+      "lifetime": "57",
+      "reload": "9",
+      "speed": "2.5"
+     }
+    ],
+    "reload": "9"
+   }
+  },
+  "beta": {
+   "accel": "0.1",
+   "buildSpeed": "0.75",
+   "drag": "0.05",
+   "flying": "true",
+   "health": "170",
+   "hitSize": "9",
+   "itemCapacity": "50",
+   "lowAltitude": "true",
+   "mineSpeed": "7",
+   "mineTier": "1",
+   "rotateSpeed": "17",
+   "speed": "3.3",
+   "weapons": {
+    "bullet": "LaserBoltBulletType",
+    "bullet_damage": "11",
+    "bullet_speed": "3",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LaserBoltBulletType",
+      "damage": "11",
+      "lifetime": "60",
+      "reload": "20",
+      "shots": "2",
+      "speed": "3"
+     }
+    ],
+    "reload": "20"
+   }
+  },
+  "block": {
+   "health": "1",
+   "hitSize": "0",
+   "itemCapacity": "0",
+   "rotateSpeed": "360",
+   "speed": "0"
+  },
+  "bryde": {
+   "abilities": [
+    {
+     "ability": "ShieldRegenField",
+     "args": [
+      "20f",
+      "40f",
+      "60f * 4",
+      "60f"
+     ]
+    }
+   ],
+   "accel": "0.2",
+   "armor": "7",
+   "drag": "0.17",
+   "health": "910",
+   "hitSize": "20",
+   "rotateSpeed": "1.8",
+   "speed": "0.85",
+   "weapons": {
+    "bullet": "ArtilleryBulletType",
+    "bullet_damage": "15",
+    "bullet_speed": "3.2",
+    "count": 2,
+    "list": [
+     {
+      "bullet": "ArtilleryBulletType",
+      "damage": "15",
+      "lifetime": "84",
+      "reload": "65",
+      "speed": "3.2"
+     },
+     {
+      "bullet": "MissileBulletType",
+      "damage": "12",
+      "lifetime": "70",
+      "reload": "20",
+      "shots": "2",
+      "speed": "2.7"
+     }
+    ],
+    "reload": "65"
+   }
+  },
+  "corvus": {
+   "armor": "9",
+   "health": "18000",
+   "hitSize": "29",
+   "rotateSpeed": "1.5",
+   "speed": "0.3",
+   "weapons": {
+    "bullet": "LaserBulletType",
+    "bullet_damage": "560",
+    "bullet_speed": null,
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LaserBulletType",
+      "damage": "560",
+      "lifetime": "65",
+      "reload": "350"
+     }
+    ],
+    "reload": "350"
+   }
+  },
+  "crawler": {
+   "health": "150",
+   "hitSize": "8",
+   "range": "40",
+   "speed": "1",
+   "weapons": {
+    "bullet": "BulletType",
+    "bullet_damage": null,
+    "bullet_speed": "0",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "BulletType",
+      "reload": "24",
+      "speed": "0"
+     }
+    ],
+    "reload": "24"
+   }
+  },
+  "cyerce": {
+   "accel": "0.22",
+   "armor": "6",
+   "buildSpeed": "2",
+   "drag": "0.16",
+   "health": "870",
+   "hitSize": "20",
+   "rotateSpeed": "2.6",
+   "speed": "0.86",
+   "weapons": {
+    "bullet": "FlakBulletType",
+    "bullet_damage": "25",
+    "bullet_speed": "2.5",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "FlakBulletType",
+      "damage": "25",
+      "lifetime": "80",
+      "reload": "60",
+      "speed": "2.5"
+     }
+    ],
+    "reload": "60"
+   }
+  },
+  "dagger": {
+   "health": "150",
+   "hitSize": "8",
+   "speed": "0.5",
+   "weapons": {
+    "bullet": "BasicBulletType",
+    "bullet_damage": "9",
+    "bullet_speed": "2.5",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "BasicBulletType",
+      "damage": "9",
+      "lifetime": "60",
+      "reload": "13",
+      "speed": "2.5"
+     }
+    ],
+    "reload": "13"
+   }
+  },
+  "eclipse": {
+   "accel": "0.04",
+   "armor": "13",
+   "drag": "0.04",
+   "flying": "true",
+   "health": "22000",
+   "hitSize": "58",
+   "lowAltitude": "true",
+   "rotateSpeed": "1",
+   "speed": "0.54",
+   "weapons": {
+    "bullet": "LaserBulletType",
+    "bullet_damage": "115",
+    "bullet_speed": null,
+    "count": 3,
+    "list": [
+     {
+      "bullet": "LaserBulletType",
+      "damage": "115",
+      "reload": "45"
+     },
+     {
+      "reload": "9"
+     },
+     {
+      "reload": "12"
+     }
+    ],
+    "reload": "45"
+   }
+  },
+  "flare": {
+   "accel": "0.08",
+   "drag": "0.04",
+   "flying": "true",
+   "health": "70",
+   "hitSize": "9",
+   "itemCapacity": "10",
+   "rotateSpeed": "5",
+   "speed": "2.7",
+   "weapons": {
+    "bullet": "BasicBulletType",
+    "bullet_damage": "9",
+    "bullet_speed": "2.5",
+    "count": 1,
+    "list": [
+     {
+      "ammoMultiplier": "2",
+      "bullet": "BasicBulletType",
+      "damage": "9",
+      "inaccuracy": "4",
+      "lifetime": "32",
+      "reload": "80",
+      "shots": "3",
+      "speed": "2.5"
+     }
+    ],
+    "reload": "80"
+   }
+  },
+  "fortress": {
+   "armor": "9",
+   "health": "900",
+   "hitSize": "13",
+   "rotateSpeed": "3",
+   "speed": "0.43",
+   "weapons": {
+    "bullet": "ArtilleryBulletType",
+    "bullet_damage": "20",
+    "bullet_speed": "2",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "ArtilleryBulletType",
+      "damage": "20",
+      "lifetime": "120",
+      "reload": "60",
+      "speed": "2"
+     }
+    ],
+    "reload": "60"
+   }
+  },
+  "gamma": {
+   "accel": "0.11",
+   "buildSpeed": "1",
+   "drag": "0.05",
+   "flying": "true",
+   "health": "220",
+   "hitSize": "11",
+   "itemCapacity": "70",
+   "lowAltitude": "true",
+   "mineSpeed": "8",
+   "mineTier": "2",
+   "rotateSpeed": "19",
+   "speed": "3.55",
+   "weapons": {
+    "bullet": "LaserBoltBulletType",
+    "bullet_damage": "11",
+    "bullet_speed": "3.5",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LaserBoltBulletType",
+      "damage": "11",
+      "lifetime": "70",
+      "reload": "15",
+      "shots": "2",
+      "speed": "3.5"
+     }
+    ],
+    "reload": "15"
+   }
+  },
+  "horizon": {
+   "accel": "0.08",
+   "armor": "3",
+   "drag": "0.03",
+   "flying": "true",
+   "health": "340",
+   "hitSize": "11",
+   "itemCapacity": "0",
+   "range": "140",
+   "rotateSpeed": "4.5",
+   "speed": "1.65",
+   "weapons": {
+    "bullet": "BombBulletType",
+    "bullet_damage": "25",
+    "bullet_speed": "27",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "BombBulletType",
+      "damage": "25",
+      "reload": "12",
+      "speed": "27"
+     }
+    ],
+    "reload": "12"
+   }
+  },
+  "mace": {
+   "armor": "4",
+   "health": "550",
+   "hitSize": "10",
+   "speed": "0.5",
+   "weapons": {
+    "bullet": "BulletType",
+    "bullet_damage": null,
+    "bullet_speed": null,
+    "count": 1,
+    "list": [
+     {
+      "ammoMultiplier": "3",
+      "bullet": "BulletType",
+      "hitSize": "7",
+      "lifetime": "13",
+      "reload": "22"
+     }
+    ],
+    "reload": "22"
+   }
+  },
+  "mega": {
+   "accel": "0.06",
+   "armor": "3",
+   "buildSpeed": "2.6",
+   "drag": "0.017",
+   "flying": "true",
+   "health": "460",
+   "hitSize": "16.05",
+   "lowAltitude": "true",
+   "mineSpeed": "4",
+   "mineTier": "3",
+   "speed": "2.5",
+   "weapons": {
+    "bullet": "LaserBoltBulletType",
+    "bullet_damage": "10",
+    "bullet_speed": "5.2",
+    "count": 2,
+    "list": [
+     {
+      "bullet": "LaserBoltBulletType",
+      "damage": "10",
+      "lifetime": "35",
+      "reload": "24",
+      "speed": "5.2"
+     },
+     {
+      "bullet": "LaserBoltBulletType",
+      "damage": "8",
+      "lifetime": "35",
+      "reload": "15",
+      "speed": "5.2"
+     }
+    ],
+    "reload": "24"
+   }
+  },
+  "minke": {
+   "accel": "0.3",
+   "armor": "4",
+   "drag": "0.15",
+   "health": "600",
+   "hitSize": "13",
+   "rotateSpeed": "2.6",
+   "speed": "0.9",
+   "weapons": {
+    "bullet": "FlakBulletType",
+    "bullet_damage": "3",
+    "bullet_speed": "4.2",
+    "count": 2,
+    "list": [
+     {
+      "ammoMultiplier": "4",
+      "bullet": "FlakBulletType",
+      "damage": "3",
+      "lifetime": "52.5",
+      "reload": "10",
+      "speed": "4.2"
+     },
+     {
+      "bullet": "ArtilleryBulletType",
+      "damage": "20",
+      "lifetime": "73.5",
+      "reload": "30",
+      "speed": "3"
+     }
+    ],
+    "reload": "10"
+   }
+  },
+  "mono": {
+   "accel": "0.12",
+   "drag": "0.06",
+   "flying": "true",
+   "health": "100",
+   "mineSpeed": "2.5",
+   "mineTier": "1",
+   "range": "50",
+   "speed": "1.5"
+  },
+  "navanax": {
+   "abilities": [
+    {
+     "ability": "SuppressionField"
+    }
+   ],
+   "accel": "0.2",
+   "armor": "16",
+   "buildSpeed": "3.5",
+   "drag": "0.17",
+   "health": "20000",
+   "hitSize": "58",
+   "rotateSpeed": "1.1",
+   "speed": "0.65",
+   "weapons": {
+    "bullet": "EmpBulletType",
+    "bullet_damage": "60",
+    "bullet_speed": "5",
+    "count": 2,
+    "list": [
+     {
+      "bullet": "EmpBulletType",
+      "damage": "60",
+      "lifetime": "60",
+      "reload": "65",
+      "speed": "5"
+     },
+     {
+      "bullet": "ContinuousLaserBulletType",
+      "damage": "27",
+      "lifetime": "155",
+      "reload": "170"
+     }
+    ],
+    "reload": "65"
+   }
+  },
+  "nova": {
+   "abilities": [
+    {
+     "ability": "RepairField",
+     "args": [
+      "10f",
+      "60f * 4",
+      "60f"
+     ]
+    }
+   ],
+   "armor": "1",
+   "boostMultiplier": "1.5",
+   "buildSpeed": "0.3",
+   "canBoost": "true",
+   "health": "120",
+   "hitSize": "8",
+   "speed": "0.55",
+   "weapons": {
+    "bullet": "LaserBoltBulletType",
+    "bullet_damage": "13",
+    "bullet_speed": "5.2",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LaserBoltBulletType",
+      "damage": "13",
+      "lifetime": "30",
+      "reload": "24",
+      "speed": "5.2"
+     }
+    ],
+    "reload": "24"
+   }
+  },
+  "oct": {
+   "abilities": [
+    {
+     "ability": "ForceField",
+     "args": [
+      "140f",
+      "4f",
+      "7000f",
+      "60f * 8",
+      "8",
+      "0f"
+     ]
+    },
+    {
+     "ability": "RepairField",
+     "args": [
+      "130f",
+      "60f * 2",
+      "140f"
+     ]
+    }
+   ],
+   "accel": "0.04",
+   "armor": "16",
+   "buildSpeed": "4",
+   "drag": "0.018",
+   "flying": "true",
+   "health": "24000",
+   "hitSize": "66",
+   "lowAltitude": "true",
+   "rotateSpeed": "1",
+   "speed": "0.8"
+  },
+  "omura": {
+   "accel": "0.19",
+   "armor": "16",
+   "drag": "0.18",
+   "health": "22000",
+   "hitSize": "58",
+   "rotateSpeed": "0.9",
+   "speed": "0.62",
+   "weapons": {
+    "bullet": "RailBulletType",
+    "bullet_damage": "1250",
+    "bullet_speed": null,
+    "count": 1,
+    "list": [
+     {
+      "bullet": "RailBulletType",
+      "damage": "1250",
+      "reload": "110"
+     }
+    ],
+    "reload": "110"
+   }
+  },
+  "oxynoe": {
+   "abilities": [
+    {
+     "ability": "StatusField",
+     "args": [
+      "StatusEffects.overclock",
+      "60f * 6",
+      "60f * 6f",
+      "60f"
+     ]
+    }
+   ],
+   "accel": "0.4",
+   "armor": "4",
+   "buildSpeed": "2",
+   "drag": "0.14",
+   "health": "560",
+   "hitSize": "14",
+   "rotateSpeed": "4",
+   "speed": "0.83",
+   "weapons": {
+    "bullet": "BulletType",
+    "bullet_damage": "23",
+    "bullet_speed": "3.4",
+    "count": 1,
+    "list": [
+     {
+      "ammoMultiplier": "3",
+      "bullet": "BulletType",
+      "damage": "23",
+      "hitSize": "7",
+      "lifetime": "18",
+      "reload": "5",
+      "speed": "3.4"
+     }
+    ],
+    "reload": "5"
+   }
+  },
+  "poly": {
+   "abilities": [
+    {
+     "ability": "RepairField",
+     "args": [
+      "5f",
+      "60f * 8",
+      "50f"
+     ]
+    }
+   ],
+   "accel": "0.1",
+   "buildSpeed": "0.5",
+   "drag": "0.05",
+   "flying": "true",
+   "health": "400",
+   "hitSize": "9",
+   "lowAltitude": "true",
+   "mineSpeed": "3.5",
+   "mineTier": "2",
+   "range": "130",
+   "rotateSpeed": "15",
+   "speed": "2.6",
+   "weapons": {
+    "bullet": "MissileBulletType",
+    "bullet_damage": "12",
+    "bullet_speed": "4",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "MissileBulletType",
+      "damage": "12",
+      "lifetime": "50",
+      "reload": "30",
+      "speed": "4"
+     }
+    ],
+    "reload": "30"
+   }
+  },
+  "pulsar": {
+   "abilities": [
+    {
+     "ability": "ShieldRegenField",
+     "args": [
+      "20f",
+      "40f",
+      "60f * 5",
+      "60f"
+     ]
+    }
+   ],
+   "armor": "4",
+   "boostMultiplier": "1.6",
+   "buildSpeed": "0.5",
+   "canBoost": "true",
+   "health": "320",
+   "hitSize": "11",
+   "mineSpeed": "3",
+   "mineTier": "2",
+   "speed": "0.7",
+   "weapons": {
+    "bullet": "LightningBulletType",
+    "bullet_damage": "15",
+    "bullet_speed": null,
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LightningBulletType",
+      "damage": "15",
+      "reload": "36",
+      "shots": "3"
+     }
+    ],
+    "reload": "36"
+   }
+  },
+  "quad": {
+   "accel": "0.05",
+   "armor": "8",
+   "buildSpeed": "2.5",
+   "drag": "0.017",
+   "flying": "true",
+   "health": "6000",
+   "hitSize": "36",
+   "range": "140",
+   "rotateSpeed": "2",
+   "speed": "1.2",
+   "weapons": {
+    "bullet": "BasicBulletType",
+    "bullet_damage": null,
+    "bullet_speed": "0",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "BasicBulletType",
+      "lifetime": "70",
+      "reload": "55",
+      "speed": "0"
+     }
+    ],
+    "reload": "55"
+   }
+  },
+  "quasar": {
+   "abilities": [
+    {
+     "ability": "ForceField",
+     "args": [
+      "60f",
+      "0.4f",
+      "500f",
+      "60f * 6"
+     ]
+    }
+   ],
+   "armor": "9",
+   "boostMultiplier": "2",
+   "buildSpeed": "1.1",
+   "canBoost": "true",
+   "health": "640",
+   "hitSize": "13",
+   "mineSpeed": "4",
+   "mineTier": "3",
+   "speed": "0.5",
+   "weapons": {
+    "bullet": "LaserBulletType",
+    "bullet_damage": "45",
+    "bullet_speed": null,
+    "count": 1,
+    "list": [
+     {
+      "bullet": "LaserBulletType",
+      "damage": "45",
+      "reload": "55"
+     }
+    ],
+    "reload": "55"
+   }
+  },
+  "reign": {
+   "armor": "18",
+   "health": "24000",
+   "hitSize": "30",
+   "rotateSpeed": "1.65",
+   "speed": "0.4",
+   "weapons": {
+    "bullet": "BasicBulletType",
+    "bullet_damage": "80",
+    "bullet_speed": "13",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "BasicBulletType",
+      "damage": "80",
+      "lifetime": "15",
+      "reload": "9",
+      "speed": "13"
+     }
+    ],
+    "reload": "9"
+   }
+  },
+  "retusa": {
+   "accel": "0.4",
+   "armor": "3",
+   "buildSpeed": "1.5",
+   "drag": "0.14",
+   "health": "270",
+   "hitSize": "11",
+   "range": "100",
+   "rotateSpeed": "5",
+   "speed": "0.9",
+   "weapons": {
+    "bullet": "LaserBoltBulletType",
+    "bullet_damage": "12",
+    "bullet_speed": "5.2",
+    "count": 2,
+    "list": [
+     {
+      "bullet": "LaserBoltBulletType",
+      "damage": "12",
+      "lifetime": "30",
+      "reload": "22",
+      "speed": "5.2"
+     },
+     {
+      "bullet": "BasicBulletType",
+      "hitSize": "22",
+      "inaccuracy": "2",
+      "lifetime": "87",
+      "reload": "90",
+      "shots": "3",
+      "speed": "0.7"
+     }
+    ],
+    "reload": "22"
+   }
+  },
+  "risso": {
+   "accel": "0.4",
+   "armor": "2",
+   "drag": "0.13",
+   "health": "280",
+   "hitSize": "10",
+   "rotateSpeed": "3.3",
+   "speed": "1.1",
+   "weapons": {
+    "bullet": "BasicBulletType",
+    "bullet_damage": "9",
+    "bullet_speed": "2.5",
+    "count": 2,
+    "list": [
+     {
+      "ammoMultiplier": "2",
+      "bullet": "BasicBulletType",
+      "damage": "9",
+      "lifetime": "60",
+      "reload": "13",
+      "speed": "2.5"
+     },
+     {
+      "bullet": "MissileBulletType",
+      "damage": "12",
+      "lifetime": "65",
+      "reload": "25",
+      "speed": "2.7"
+     }
+    ],
+    "reload": "13"
+   }
+  },
+  "scepter": {
+   "abilities": [
+    {
+     "ability": "ShieldRegenField",
+     "args": [
+      "25f",
+      "250f",
+      "60f * 1",
+      "60f"
+     ]
+    }
+   ],
+   "armor": "10",
+   "health": "9000",
+   "hitSize": "22",
+   "rotateSpeed": "2.1",
+   "speed": "0.36",
+   "weapons": {
+    "bullet": "BasicBulletType",
+    "bullet_damage": "70",
+    "bullet_speed": "8",
+    "count": 3,
+    "list": [
+     {
+      "bullet": "BasicBulletType",
+      "damage": "70",
+      "lifetime": "27",
+      "reload": "45",
+      "shots": "3",
+      "speed": "8"
+     },
+     {
+      "reload": "12"
+     },
+     {
+      "reload": "15"
+     }
+    ],
+    "reload": "45"
+   }
+  },
+  "sei": {
+   "accel": "0.2",
+   "armor": "12",
+   "drag": "0.17",
+   "health": "11000",
+   "hitSize": "39",
+   "rotateSpeed": "1.3",
+   "speed": "0.73",
+   "weapons": {
+    "bullet": "MissileBulletType",
+    "bullet_damage": "42",
+    "bullet_speed": "4.2",
+    "count": 2,
+    "list": [
+     {
+      "bullet": "MissileBulletType",
+      "damage": "42",
+      "lifetime": "62",
+      "reload": "45",
+      "shots": "6",
+      "speed": "4.2"
+     },
+     {
+      "bullet": "BasicBulletType",
+      "damage": "57",
+      "lifetime": "35",
+      "reload": "60",
+      "shots": "3",
+      "speed": "7"
+     }
+    ],
+    "reload": "45"
+   }
+  },
+  "spiroct": {
+   "armor": "5",
+   "drag": "0.4",
+   "health": "1000",
+   "hitSize": "15",
+   "rotateSpeed": "3",
+   "speed": "0.54",
+   "weapons": {
+    "bullet": "SapBulletType",
+    "bullet_damage": "23",
+    "bullet_speed": null,
+    "count": 2,
+    "list": [
+     {
+      "bullet": "SapBulletType",
+      "damage": "23",
+      "lifetime": "35",
+      "reload": "14"
+     },
+     {
+      "bullet": "SapBulletType",
+      "damage": "18",
+      "lifetime": "25",
+      "reload": "18"
+     }
+    ],
+    "reload": "14"
+   }
+  },
+  "toxopid": {
+   "armor": "13",
+   "drag": "0.1",
+   "health": "22000",
+   "hitSize": "26",
+   "rotateSpeed": "1.9",
+   "speed": "0.5",
+   "weapons": {
+    "bullet": "ShrapnelBulletType",
+    "bullet_damage": "110",
+    "bullet_speed": null,
+    "count": 2,
+    "list": [
+     {
+      "bullet": "ShrapnelBulletType",
+      "damage": "110",
+      "reload": "30"
+     },
+     {
+      "ammoMultiplier": "4",
+      "bullet": "ArtilleryBulletType",
+      "damage": "50",
+      "lifetime": "80",
+      "reload": "210",
+      "speed": "3"
+     }
+    ],
+    "reload": "30"
+   }
+  },
+  "vela": {
+   "armor": "9",
+   "boostMultiplier": "2.4",
+   "buildSpeed": "3",
+   "canBoost": "true",
+   "health": "8200",
+   "hitSize": "24",
+   "lowAltitude": "true",
+   "rotateSpeed": "1.8",
+   "speed": "0.44",
+   "weapons": {
+    "bullet": "ContinuousLaserBulletType",
+    "bullet_damage": "35",
+    "bullet_speed": null,
+    "count": 1,
+    "list": [
+     {
+      "bullet": "ContinuousLaserBulletType",
+      "damage": "35",
+      "lifetime": "160",
+      "reload": "155"
+     }
+    ],
+    "reload": "155"
+   }
+  },
+  "zenith": {
+   "accel": "0.04",
+   "armor": "5",
+   "drag": "0.016",
+   "flying": "true",
+   "health": "700",
+   "hitSize": "20",
+   "lowAltitude": "true",
+   "range": "140",
+   "speed": "1.7",
+   "weapons": {
+    "bullet": "MissileBulletType",
+    "bullet_damage": "14",
+    "bullet_speed": "3",
+    "count": 1,
+    "list": [
+     {
+      "bullet": "MissileBulletType",
+      "damage": "14",
+      "lifetime": "50",
+      "reload": "40",
+      "shots": "2",
+      "speed": "3"
+     }
+    ],
+    "reload": "40"
+   }
+  }
+ }
+}

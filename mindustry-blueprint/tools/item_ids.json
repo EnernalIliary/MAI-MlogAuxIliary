@@ -1,0 +1,29 @@
+{
+  "source": "Items.java",
+  "note": "Content.id = construction order. Mods append; vanilla ids are stable per game version.",
+  "count": 22,
+  "items": {
+    "0": "copper",
+    "1": "lead",
+    "2": "metaglass",
+    "3": "graphite",
+    "4": "sand",
+    "5": "coal",
+    "6": "titanium",
+    "7": "thorium",
+    "8": "scrap",
+    "9": "silicon",
+    "10": "plastanium",
+    "11": "phase-fabric",
+    "12": "surge-alloy",
+    "13": "spore-pod",
+    "14": "blast-compound",
+    "15": "pyratite",
+    "16": "beryllium",
+    "17": "tungsten",
+    "18": "oxide",
+    "19": "carbide",
+    "20": "fissile-matter",
+    "21": "dormant-cyst"
+  }
+}

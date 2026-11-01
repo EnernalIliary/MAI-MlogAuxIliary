@@ -1,0 +1,346 @@
+{
+ "t2厂": {
+  "blocks": [
+   "additive-reconstructor"
+  ],
+  "files": 11,
+  "precision": 0.2,
+  "tokens": []
+ },
+ "t3厂": {
+  "blocks": [
+   "air-factory"
+  ],
+  "files": 9,
+  "precision": 0.25,
+  "tokens": []
+ },
+ "t4厂": {
+  "blocks": [
+   "exponential-reconstructor"
+  ],
+  "files": 9,
+  "precision": 0.333,
+  "tokens": []
+ },
+ "t5厂": {
+  "blocks": [
+   "tetrative-reconstructor"
+  ],
+  "files": 15,
+  "precision": 1.0,
+  "tokens": []
+ },
+ "世处": {
+  "blocks": [
+   "world-processor"
+  ],
+  "files": 14,
+  "precision": 0.846,
+  "tokens": []
+ },
+ "串联": {
+  "blocks": [
+   "liquid-container"
+  ],
+  "files": 18,
+  "precision": 0.088,
+  "tokens": []
+ },
+ "冲反": {
+  "blocks": [
+   "impact-reactor"
+  ],
+  "files": 39,
+  "precision": 0.929,
+  "tokens": []
+ },
+ "冷冻": {
+  "blocks": [
+   "cryofluid-mixer"
+  ],
+  "files": 13,
+  "precision": 0.062,
+  "tokens": []
+ },
+ "分裂": {
+  "blocks": [
+   "scatter"
+  ],
+  "files": 5,
+  "precision": 1.0,
+  "tokens": []
+ },
+ "力墙": {
+  "blocks": [
+   "force-projector"
+  ],
+  "files": 21,
+  "precision": 0.917,
+  "tokens": []
+ },
+ "厄兆": {
+  "blocks": [
+   "foreshadow"
+  ],
+  "files": 10,
+  "precision": 0.857,
+  "tokens": []
+ },
+ "合金": {
+  "blocks": [
+   "surge-smelter"
+  ],
+  "files": 14,
+  "precision": 0.667,
+  "tokens": []
+ },
+ "塑钢": {
+  "blocks": [
+   "plastanium-compressor"
+  ],
+  "files": 16,
+  "precision": 0.857,
+  "tokens": []
+ },
+ "大墨": {
+  "blocks": [
+   "multi-press"
+  ],
+  "files": 17,
+  "precision": 0.667,
+  "tokens": []
+ },
+ "大硅": {
+  "blocks": [
+   "silicon-crucible"
+  ],
+  "files": 23,
+  "precision": 0.722,
+  "tokens": []
+ },
+ "大超": {
+  "blocks": [
+   "overdrive-dome"
+  ],
+  "files": 52,
+  "precision": 0.686,
+  "tokens": []
+ },
+ "小墨": {
+  "blocks": [
+   "graphite-press"
+  ],
+  "files": 5,
+  "precision": 0.429,
+  "tokens": []
+ },
+ "小硅": {
+  "blocks": [
+   "silicon-smelter"
+  ],
+  "files": 16,
+  "precision": 0.533,
+  "tokens": []
+ },
+ "小超": {
+  "blocks": [
+   "overdrive-projector"
+  ],
+  "files": 72,
+  "precision": 0.872,
+  "tokens": []
+ },
+ "布厂": {
+  "blocks": [
+   "phase-weaver"
+  ],
+  "files": 19,
+  "precision": 0.692,
+  "tokens": []
+ },
+ "幽灵": {
+  "blocks": [
+   "spectre"
+  ],
+  "files": 7,
+  "precision": 1.0,
+  "tokens": []
+ },
+ "抽水": {
+  "blocks": [
+   "water-extractor"
+  ],
+  "files": 109,
+  "precision": 0.902,
+  "tokens": []
+ },
+ "无线": {
+  "blocks": [],
+  "files": 22,
+  "precision": 0.152,
+  "tokens": [
+   "@firstitem"
+  ]
+ },
+ "核心蓝图": {
+  "blocks": [
+   "core-nucleus"
+  ],
+  "files": 21,
+  "precision": 0.857,
+  "tokens": []
+ },
+ "气旋": {
+  "blocks": [
+   "cyclone"
+  ],
+  "files": 14,
+  "precision": 1.0,
+  "tokens": []
+ },
+ "水炮": {
+  "blocks": [
+   "tsunami"
+  ],
+  "files": 18,
+  "precision": 0.9,
+  "tokens": []
+ },
+ "涡轮": {
+  "blocks": [
+   "steam-generator"
+  ],
+  "files": 13,
+  "precision": 0.9,
+  "tokens": []
+ },
+ "温差": {
+  "blocks": [
+   "differential-generator"
+  ],
+  "files": 36,
+  "precision": 0.95,
+  "tokens": []
+ },
+ "火控": {
+  "blocks": [],
+  "files": 24,
+  "precision": 0.244,
+  "tokens": [
+   "radar"
+  ]
+ },
+ "熔毁": {
+  "blocks": [
+   "meltdown"
+  ],
+  "files": 8,
+  "precision": 1.0,
+  "tokens": []
+ },
+ "爆混": {
+  "blocks": [
+   "blast-mixer"
+  ],
+  "files": 5,
+  "precision": 0.444,
+  "tokens": []
+ },
+ "白沙": {
+  "blocks": [
+   "blast-drill"
+  ],
+  "files": 19,
+  "precision": 0.36,
+  "tokens": []
+ },
+ "着陆": {
+  "blocks": [
+   "landing-pad"
+  ],
+  "files": 51,
+  "precision": 0.857,
+  "tokens": []
+ },
+ "硫化": {
+  "blocks": [
+   "pyratite-mixer"
+  ],
+  "files": 9,
+  "precision": 0.139,
+  "tokens": []
+ },
+ "窑炉": {
+  "blocks": [
+   "kiln"
+  ],
+  "files": 14,
+  "precision": 0.818,
+  "tokens": []
+ },
+ "绿带": {
+  "blocks": [
+   "plastanium-conveyor"
+  ],
+  "files": 8,
+  "precision": 0.038,
+  "tokens": []
+ },
+ "自冷": {
+  "blocks": [
+   "cryofluid-mixer"
+  ],
+  "files": 92,
+  "precision": 0.833,
+  "tokens": []
+ },
+ "蜂群": {
+  "blocks": [
+   "swarmer"
+  ],
+  "files": 14,
+  "precision": 0.857,
+  "tokens": []
+ },
+ "质驱": {
+  "blocks": [
+   "mass-driver"
+  ],
+  "files": 54,
+  "precision": 0.92,
+  "tokens": []
+ },
+ "辅助": {
+  "blocks": [
+   "overdrive-dome"
+  ],
+  "files": 12,
+  "precision": 0.143,
+  "tokens": []
+ },
+ "钍反": {
+  "blocks": [
+   "thorium-reactor"
+  ],
+  "files": 21,
+  "precision": 0.778,
+  "tokens": []
+ },
+ "雷光": {
+  "blocks": [
+   "fuse"
+  ],
+  "files": 8,
+  "precision": 1.0,
+  "tokens": []
+ },
+ "黑沙": {
+  "blocks": [
+   "water-extractor"
+  ],
+  "files": 21,
+  "precision": 0.115,
+  "tokens": []
+ }
+}
