@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.20.1";
+    var MOD_VERSION = "0.20.2";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -4625,11 +4625,15 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             // 底栏已经 5 个按钮、600 宽再塞就出界（见下面 d.buttons），所以不开在底栏。
             var chatBar = new Packages.arc.scene.ui.layout.Table();
             chatBar.left();
-            chatBar.button("＋ 新建对话", function(){ openChatDialog(); }).width(130).height(30)
-                   .padRight(6).ellipsis(true).left();
+            // v0.20.2（用户 m03006「左边的新对话窗口太大了已经超出左边了」+ m03017「新对话应该在右边」）：
+            // 这一行原来是「按钮在左、430 宽的说明在右」并且 growX 撑到对话框边缘；
+            // 现在把按钮挪到**最右边**（中间塞一个 growX 弹簧把右边填满），整行收窄到 600（和下面作业列表同宽）。
             chatBar.add("模型可以自己调 mlog 检查 / 游戏数据这些工具；对话不写进处理器")
-                .color(Pal.gray).fontScale(0.85).width(430).left().ellipsis(true);
-            d.cont.add(chatBar).growX().left().row();
+                .color(Pal.gray).fontScale(0.85).width(360).left().ellipsis(true);
+            chatBar.add().growX();
+            chatBar.button("＋ 新建对话", function(){ openChatDialog(); }).width(130).height(30)
+                   .padLeft(6).ellipsis(true).right();
+            d.cont.add(chatBar).width(600).left().row();
             var host = new Packages.arc.scene.ui.layout.Table();
             try{ d.cont.pane(host).height(320).width(600).row(); }catch(e){ d.cont.add(host).row(); }
             var frow = new Packages.arc.scene.ui.layout.Table();
@@ -4672,6 +4676,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                        sending: false, polling: false, pollAt: 0, fails: 0,
                        text: "", single: false, showDetail: false,
                        listW: 240, detailW: 700, availH: 460,
+                       // v0.20.2：listPane/detailPane 是 ScrollPane 本体（Cell.get()），needGeom 触发一次真机排版 dump。
+                       listPane: null, detailPane: null, needGeom: false,
                        busyList: false, busyDetail: false, seq: 0};
 
         // 去首尾空白：不用正则（v160.7 的 Rhino 在个别位置对正则字面量不稳）。
@@ -4702,18 +4708,24 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }
 
         // 对话窗的尺寸预算。入参是 **scene 单位**（和 wsDialogPlan 一样，见 wsSclFactor 的注释）。
-        // 和 wsDialogPlan 的区别只有两处：上下要多留输入行的高度（-210 而不是 -190），
-        // 左栏是「对话选单」比工作区列表更窄（24%，190..260）。
+        // v0.20.2（用户 m03006「左边的新对话窗口太大了已经超出左边了」+ m03017「新对话应该在右边」）：
+        // v0.20.1 的算术把「竖线 2 + 两侧 pad 7+7」和「外壳 pad 3+3」漏在 availW 外面，
+        // 于是 d.cont 里所有格子加起来比 availW 还宽，对话框被内容顶宽、居中之后左右两边都往外溢。
+        // 现在把这三段（gapW 含 2+14，另外 6 是外壳 pad）**先扣掉**再给 detailW，
+        // 保证 listW + gapW + detailW === availW（gapW 之外再留 0）。
+        // 顺带把总宽从 1080 收到 980、左栏从 24%/190..260 收到 21%/168..224（用户说的「太宽」）。
         function chatPlan(sw, sh){
             var w = Number(sw), h = Number(sh);
             if(!(w > 0)){ w = 1280; }
             if(!(h > 0)){ h = 720; }
-            var availW = Math.round(Math.max(520, Math.min(1080, w - 56)));
-            var availH = Math.round(Math.max(300, Math.min(700, h - 210)));
-            var listW = Math.round(Math.max(190, Math.min(260, availW * 0.24)));
-            var detailW = Math.round(Math.max(300, availW - listW - 16));
+            var availW = Math.round(Math.max(520, Math.min(980, w - 80)));
+            var availH = Math.round(Math.max(300, Math.min(680, h - 220)));
+            var listW = Math.round(Math.max(168, Math.min(224, availW * 0.21)));
+            // 22 = 竖线 2 + 两侧 pad 7+7（16）+ 外壳左右 pad 3+3（6）。openChatDialog 按同一份账摆格子。
+            var gapW = 22;
+            var detailW = Math.round(Math.max(300, availW - listW - gapW));
             return {wide: w >= 860, availW: availW, availH: availH, listW: listW,
-                    detailW: detailW, onlyW: Math.round(Math.min(availW, 560))};
+                    detailW: detailW, gapW: gapW, onlyW: Math.round(Math.min(availW, 560))};
         }
 
         // 会话状态只有 running / idle 两档（错误另看 error 字段）。
@@ -4960,11 +4972,20 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var host = CHAT_UI.listHost;
             if(host === null || host === undefined){ return; }
             try{ host.clear(); }catch(e){ return; }
-            var iw = Math.max(170, Number(CHAT_UI.listW) - 22);
-            var top = wsT();
-            top.left();
-            top.button("＋ 新对话", function(){ chatNew(); }).height(32).width(Math.max(100, iw - 4)).ellipsis(true).left();
-            host.add(top).growX().padBottom(4).row();
+            // v0.20.2：栏宽先夹一遍（NaN / 0 都不能传给 Cell.width，否则整行宽度算不出来）。
+            var lw = Number(CHAT_UI.listW);
+            if(!(lw > 0)){ lw = 220; }
+            var iw = Math.max(150, Math.min(420, lw - 22));
+            // v0.20.2（用户 m03682「现在的「＋ 新对话」按钮占满了整个左边的屏幕」）：
+            // 这个按钮原来是 `width(iw - 4)`（≈ 整栏宽），外层又 growX，看上去就是一条横贯左栏的大按钮。
+            // 现在并到「会话列表」标题行右侧，宽度固定 132，不再随栏宽拉伸；标题行整行锁死 iw。
+            var head = wsT();
+            head.left();
+            head.add("会话列表").color(Pal.gray).fontScale(0.8)
+                .width(Math.max(80, iw - 140)).left().ellipsis(true);
+            head.button("＋ 新对话", function(){ chatNew(); }).height(28).width(132)
+                .padLeft(6).ellipsis(true).right();
+            host.add(head).width(iw).left().padBottom(4).row();
             if(String(CHAT_UI.loadError === null || CHAT_UI.loadError === undefined ? "" : CHAT_UI.loadError) !== ""){
                 host.add(String(CHAT_UI.loadError)).color(Pal.remove).width(iw).left().ellipsis(true).row();
             }
@@ -5019,8 +5040,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     chatRefreshAll();
                 }).height(32).padBottom(4).left().ellipsis(true).row();
             }
+            // v0.20.2：右栏第一行写明它是「对话内容」，没选会话时还给一个**在右栏直接开新对话**的按钮
+            // （用户 m03017「新对话应该在右边」：入口不再只长在左栏顶部）。
+            dp.add("对话内容").color(Pal.gray).fontScale(0.8).width(iw).left().ellipsis(true).row();
             if(CHAT_UI.sel === null || CHAT_UI.sel === undefined || String(CHAT_UI.sel) === ""){
-                dp.add("← 左边选一段对话，或者点「＋ 新对话」开一段").color(Pal.gray).width(iw)
+                dp.button("＋ 在这里开一段新对话", function(){ chatNew(); }).height(32).width(210)
+                    .left().ellipsis(true).padBottom(4).row();
+                dp.add("或者在左边「会话列表」里点一段接着聊").color(Pal.gray).width(iw)
                     .left().ellipsis(true).row();
                 dp.add("· 纯文本对话：不往任何处理器写代码").color(Pal.gray).fontScale(0.85)
                     .width(iw).left().ellipsis(true).row();
@@ -5119,19 +5145,28 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     + " list=" + String(plan.listW) + " detail=" + String(plan.detailW) + " wide=" + String(wide));
             }catch(e1){ }
             var listT = wsT(), detailT = wsT();
+            // v0.20.2：两栏的宽度账 = listW + gapW + detailW === plan.availW（gapW 见 chatPlan）。
+            // 这里把 pane 的 Cell 也存一份（.get() 拿 ScrollPane 本体），Trigger.draw 里 chatGeomDump 用它报真机宽高。
+            CHAT_UI.listPane = null;
+            CHAT_UI.detailPane = null;
             if(wide){
                 try{
-                    d.cont.pane(listT).width(plan.listW).height(availH);
+                    var cellL = d.cont.pane(listT).width(plan.listW).height(availH);
+                    try{ CHAT_UI.listPane = cellL.get(); }catch(eg1){ }
                     // v0.20.0（用户 m02455「对话选单和右侧对话详情的分隔也加回去」）：两栏之间画一条 2px 竖线。
-                    // atlas 没起来（无头/异常）就退回 14px 空白，别让整行布局崩掉。
+                    // atlas 没起来（无头/异常）就退回 14px 空白，别让整行布局崩掉（两种都是 22 里的 2+14+6 的一部分）。
                     try{ d.cont.image(Tex.whiteui).width(2).height(availH).color(Pal.gray).padLeft(7).padRight(7); }
                     catch(es){ d.cont.add(new Packages.arc.scene.ui.layout.Table()).width(14).height(availH); }
-                    d.cont.pane(detailT).width(plan.detailW).height(availH).row();
+                    var cellR = d.cont.pane(detailT).width(plan.detailW).height(availH).row();
+                    try{ CHAT_UI.detailPane = cellR.get(); }catch(eg2){ }
                 }catch(e2){ log("chat two-pane failed: " + e2); d.cont.add(listT).row(); }
                 CHAT_UI.listW = plan.listW;
                 CHAT_UI.detailW = plan.detailW;
             }else{
-                try{ d.cont.pane(listT).height(availH).width(plan.onlyW).row(); }catch(e3){ d.cont.add(listT).row(); }
+                try{
+                    var cellOnly = d.cont.pane(listT).height(availH).width(plan.onlyW).row();
+                    try{ CHAT_UI.listPane = cellOnly.get(); }catch(eg3){ }
+                }catch(e3){ d.cont.add(listT).row(); }
                 CHAT_UI.listW = plan.onlyW;
                 CHAT_UI.detailW = plan.onlyW;
             }
@@ -5146,10 +5181,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 tf.setTextFieldListener(function(field, c){
                     try{ CHAT_UI.text = String(field.getText()); }catch(e4){ CHAT_UI.text = ""; }
                 });
-                inRow.add(tf).width(Math.max(220, Number(plan.availW) - 150)).height(34).padRight(6).left();
+                // 160 = 「发送」110 + padRight 6 + 外壳左右 pad 3+3 + 余量；cell 宽度用 availW-6（扣掉外壳 3+3），
+                // 这样输入行和上面两栏一样宽，不会把对话框顶宽。
+                inRow.add(tf).width(Math.max(220, Number(plan.availW) - 160)).height(34).padRight(6).left();
                 inRow.button("发送", function(){ chatSend(); }).width(110).height(34).ellipsis(true).left();
             }catch(e5){ log("chat input row failed: " + e5); }
-            d.cont.add(inRow).growX().left().row();
+            d.cont.add(inRow).width(Math.max(200, Number(plan.availW) - 6)).left().row();
             CHAT_UI.open = true;
             CHAT_UI.d = d;
             CHAT_UI.single = !wide;
@@ -5159,10 +5196,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             CHAT_UI.tf = tf;
             CHAT_UI.fails = 0;
             CHAT_UI.text = "";
-            d.buttons.button("新对话", function(){ chatNew(); }).height(34).padLeft(4).ellipsis(true);
-            d.buttons.button("删除这段", function(){ chatAskDelete(); }).height(34).padLeft(4).ellipsis(true);
-            d.buttons.button("刷新", function(){ chatReloadList(); }).height(34).padLeft(4).ellipsis(true);
-            d.buttons.button("关闭", function(){ d.hide(); }).height(34).padLeft(4).ellipsis(true);
+            // v0.20.2（用户 m03017「新对话应该在右边」）：底栏右对齐，把「新对话」放到**最右**，
+            // 顺序反过来排（关闭 / 刷新 / 删除这段 / 新对话），这样最常用的「新对话」贴着右下角。
+            try{ d.buttons.right(); }catch(eb0){ }
+            d.buttons.button("关闭", function(){ d.hide(); }).height(34).padRight(4).ellipsis(true);
+            d.buttons.button("刷新", function(){ chatReloadList(); }).height(34).padRight(4).ellipsis(true);
+            d.buttons.button("删除这段", function(){ chatAskDelete(); }).height(34).padRight(4).ellipsis(true);
+            d.buttons.button("新对话", function(){ chatNew(); }).height(34).ellipsis(true);
             // 关窗必须停轮询、松开两个 host 引用（关掉之后回调还会回来一次，别往已销毁的表里画）。
             d.hidden(function(){
                 CHAT_UI.open = false;
@@ -5170,9 +5210,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 CHAT_UI.listHost = null;
                 CHAT_UI.detailHost = null;
                 CHAT_UI.tf = null;
+                CHAT_UI.listPane = null;
+                CHAT_UI.detailPane = null;
+                CHAT_UI.needGeom = false;
             });
             d.closeOnBack();
             d.show();
+            // 窗口要等第一帧 validate 之后才有真实宽高，交给 Trigger.draw 里的 chatGeomDump 打一次日志。
+            CHAT_UI.needGeom = true;
             chatRefreshAll();
             chatReloadList();
             return "chat dialog";
@@ -5967,6 +6012,54 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 log("ws geom: dialog(" + dlg + ") title(" + titleLine + ") pane(" + pane + ") host(" + wsGeomOne(host) + ") "
                     + parts.join(" | "));
             }catch(e3){ log("ws geom failed: " + e3); }
+        }
+
+        // v0.20.2：对话窗的真机排版自检，和 wsGeomDump 同一套路（但用 CHAT_UI 自己的 host/pane）。
+        // 用户 m03006/m03017 报的「左栏太宽、超出左边、新对话跑到左边」都是纯排版问题，
+        // 下一轮如果还不对，直接看 last_log.txt 里的 `[mai] chat geom:` 数字，别再靠截图猜。
+        function chatGeomDump(){
+            if(CHAT_UI.needGeom !== true){ return; }
+            var d = CHAT_UI.d;
+            if(d === null || d === undefined){ return; }
+            var dw = 0;
+            try{ dw = Number(d.getWidth()); }catch(e0){ return; }
+            if(!(dw > 0)){ return; }
+            CHAT_UI.needGeom = false;
+            try{
+                var sc = "?";
+                try{
+                    sc = String(Math.round(Number(Packages.arc.Core.scene.getWidth()))) + "x"
+                       + String(Math.round(Number(Packages.arc.Core.scene.getHeight())));
+                }catch(e1){ }
+                var parts = [];
+                parts.push("listW=" + String(CHAT_UI.listW) + " detailW=" + String(CHAT_UI.detailW));
+                if(CHAT_UI.listPane !== null && CHAT_UI.listPane !== undefined){ parts.push("listPane(" + wsGeomOne(CHAT_UI.listPane) + ")"); }
+                if(CHAT_UI.detailPane !== null && CHAT_UI.detailPane !== undefined){ parts.push("detailPane(" + wsGeomOne(CHAT_UI.detailPane) + ")"); }
+                if(CHAT_UI.tf !== null && CHAT_UI.tf !== undefined){ parts.push("input(" + wsGeomOne(CHAT_UI.tf) + ")"); }
+                var host = CHAT_UI.listHost;
+                if(host !== null && host !== undefined){
+                    parts.push("host(" + wsGeomOne(host) + ")");
+                    try{
+                        var kids = host.getChildren();
+                        var n = Number(kids.size);
+                        for(var i = 0; i < n && i < 10; i++){
+                            var line = "#" + String(i) + " " + wsGeomOne(kids.get(i));
+                            try{
+                                var sub = kids.get(i).getChildren();
+                                var sn = Number(sub.size);
+                                for(var j = 0; j < sn && j < 6; j++){ line += " [" + wsGeomOne(sub.get(j)) + "]"; }
+                            }catch(e2){ }
+                            parts.push(line);
+                        }
+                    }catch(e3){ }
+                }
+                var titleLine = "?";
+                try{
+                    var tt = d.titleTable;
+                    titleLine = wsGeomOne(tt) + " [" + wsGeomOne(tt.getChildren().get(0)) + "]";
+                }catch(e4){ }
+                log("chat geom: dialog(" + wsGeomOne(d) + ") title(" + titleLine + ") scene=" + sc + " " + parts.join(" | "));
+            }catch(e5){ log("chat geom failed: " + e5); }
         }
 
         // W4：蓝图列表。无头环境 Vars.schematics 是 null，必须能吃 null 回空数组。
@@ -8312,12 +8405,20 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var notes = [];
             var counts = "";
             try{
+                // v0.20.2：预算改了（总宽 980、左栏 21%/168..224、gapW=22），这里的期望值跟着改，
+                // 并新增一条恒等式断言：listW + gapW + detailW 必须正好等于 availW（上一版多了 6 就外溢）。
                 var p = chatPlan(1366, 768);
                 if(p.wide !== true){ notes.push("wide"); }
-                if(p.availW !== 1080){ notes.push("availW:" + String(p.availW)); }
-                if(p.listW !== 259 || p.detailW !== 805){ notes.push("size:" + String(p.listW) + "x" + String(p.detailW)); }
+                if(p.availW !== 980){ notes.push("availW:" + String(p.availW)); }
+                if(p.listW !== 206 || p.detailW !== 752){ notes.push("size:" + String(p.listW) + "x" + String(p.detailW)); }
+                if(p.gapW !== 22){ notes.push("gapW:" + String(p.gapW)); }
+                if(p.listW + p.gapW + p.detailW !== p.availW){ notes.push("budget:" + String(p.listW + p.gapW + p.detailW) + "/" + String(p.availW)); }
+                if(p.detailW < 300){ notes.push("detail-small"); }
+                var p2 = chatPlan(920, 760);
+                if(p2.availW !== 840 || p2.listW !== 176 || p2.detailW !== 642){ notes.push("plan920:" + String(p2.availW) + "/" + String(p2.listW) + "/" + String(p2.detailW)); }
+                if(p2.listW + p2.gapW + p2.detailW !== p2.availW){ notes.push("budget920"); }
                 if(chatPlan(800, 600).wide !== false){ notes.push("narrow"); }
-                if(chatPlan(0, 0).availW !== 1080){ notes.push("default:" + String(chatPlan(0, 0).availW)); }
+                if(chatPlan(0, 0).availW !== 980){ notes.push("default:" + String(chatPlan(0, 0).availW)); }
                 if(chatStateCn("running", "") !== "思考中"){ notes.push("state-running"); }
                 if(chatStateCn("idle", "") !== "就绪"){ notes.push("state-idle"); }
                 if(chatStateCn("idle", "boom") !== "出错"){ notes.push("state-error"); }
@@ -8446,6 +8547,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 try{ drawWorkspaceGhosts(); }catch(e2){ /* 同上 */ }
                 // v0.19.5：布局跑完之后 dump 一次真实宽度（只 dump 一次，见 wsGeomDump）。
                 try{ wsGeomDump(); }catch(e3){ /* 同上 */ }
+                // v0.20.2：对话窗的同一套自检（用户 m03006/m03017 的排版问题要靠这些数字定位）。
+                try{ chatGeomDump(); }catch(e4){ /* 同上 */ }
             });
         }catch(e){ log("Trigger.draw hook failed: " + e); }
 

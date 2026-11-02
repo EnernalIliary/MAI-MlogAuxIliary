@@ -1296,6 +1296,33 @@ def main():
                          'the workspace dialog lost its chat entry again')):
         if needle not in code_only:
             problems.append('v0.20.1: ' + why)
+    # v0.20.2（用户 m03006「左边的新对话窗口太大了已经超出左边了」/ m03017「新对话应该在右边」/
+    # m03682「现在的「＋ 新对话」按钮占满了整个左边的屏幕」）：
+    # ① 宽度预算必须自洽（listW+gapW+detailW === availW，上一版漏了外壳 pad 3+3 就外溢）；
+    # ② 「新对话」入口并到「会话列表」标题行、宽度固定，不再随栏宽拉伸；
+    # ③ 底栏右对齐，新对话在最右；④ 对话窗也要有和 ws 一样的真机排版 dump。
+    for needle, why in (('var gapW = 22;',
+                         'the chat width budget no longer reserves the separator + shell pads'),
+                         ('p.listW + p.gapW + p.detailW',
+                         'the chat width budget identity is gone (the panes overflow again)'),
+                         ('head.button("＋ 新对话"',
+                         'the new-chat button is back to spanning the whole list column'),
+                         ('＋ 在这里开一段新对话',
+                         'the transcript pane lost its right-hand new-chat entry'),
+                         ('d.buttons.right();',
+                         'the chat dialog footer is no longer right-aligned'),
+                         ('function chatGeomDump(',
+                         'the chat dialog lost its real-layout dump (chatGeomDump)'),
+                         ('CHAT_UI.needGeom = true;',
+                         'nothing asks for the one-shot chat geometry dump any more')):
+        if needle not in code_only:
+            problems.append('v0.20.2: ' + why)
+    for needle, why in (('width(Math.max(100, iw - 4))',
+                         'the new-chat button is stretched across the list column again'),
+                         ('d.cont.add(chatBar).growX()',
+                         'the manager chat bar is stretched to the dialog edge again')):
+        if needle in code_only:
+            problems.append('v0.20.2: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
