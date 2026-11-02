@@ -80,11 +80,12 @@ import msch                    # noqa: E402
 import jobqueue                # noqa: E402  (imports us back lazily, one-way edge)
 import mlogprovider           # noqa: E402  (prompt / reply parsing / model call; offline at import)
 import aigenerated             # noqa: E402  (the hidden @aigenerated signature)
+import chats                   # noqa: E402  (v0.20.0 free-form chats; imports us back lazily)
 
 PROTOCOL = 1
 # The sidecar is what gets restarted when a fix ships, and a stale process answers
 # /health with 200 all day, so let the answer say which build it is (v0.12.3).
-SIDECAR_VERSION = '0.19.6'
+SIDECAR_VERSION = '0.20.0'
 GAME = 'mindustry v160.7 (executor jar out/_server160.jar)'
 
 #: v0.14.2: every program this sidecar hands out is signed before it is analyzed
@@ -1270,6 +1271,17 @@ class Handler(BaseHTTPRequestHandler):
                             self._send(200, {'ok': True, 'jobs': jobs, 'count': len(jobs)})
             elif path == '/llm':
                 self._send(200, llm_state())
+            elif path == '/chats':
+                q = self._query()
+                want_all = str(q.get('all') or '').strip().lower() in ('1', 'true', 'yes')
+                self._send(200, chats.list_chats(q.get('limit') or 50, want_all))
+            elif path == '/chat':
+                try:
+                    self._send(200, chats.get_chat(self._query().get('id')))
+                except chats.NotFound as exc:
+                    self._send(404, {'ok': False, 'error': str(exc)})
+                except ValueError as exc:
+                    self._send(400, {'ok': False, 'error': str(exc)})
             else:
                 self._send(404, {'ok': False, 'error': 'no such endpoint: ' + path})
         except Exception as exc:
@@ -1352,6 +1364,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, fetch_models(murl, mkey, mto))
                 except ValueError as exc:
                     self._send(400, {'ok': False, 'error': str(exc)})
+            elif path == '/chat':
+                try:
+                    self._send(200, chats.start(req))
+                except ValueError as exc:
+                    self._send(400, {'ok': False, 'error': str(exc)})
             elif path == '/jobs':
                 body = req.get('job') if isinstance(req.get('job'), dict) else req
                 try:
@@ -1369,6 +1386,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         path = self.path.split('?')[0]
         try:
+            if path == '/chat':
+                try:
+                    self._send(200, chats.delete_chat(self._query().get('id')))
+                except chats.NotFound as exc:
+                    self._send(404, {'ok': False, 'error': str(exc)})
+                except ValueError as exc:
+                    self._send(400, {'ok': False, 'error': str(exc)})
+                return
             if path != '/jobs':
                 self._send(404, {'ok': False, 'error': 'no such endpoint: ' + path})
                 return
@@ -1402,6 +1427,12 @@ def jobs_queue():
     return JOBS
 
 
+def chats_store():
+    """v0.20.0: the chat store is lazy too, so a sidecar started only for jobs
+    never creates out/jobs/chats."""
+    return chats.store()
+
+
 def serve(host, port, idle_exit=0):
     srv = ThreadingHTTPServer((host, port), Handler)
     real = srv.server_address
@@ -1416,8 +1447,9 @@ def serve(host, port, idle_exit=0):
                 # the idle window on a slow endpoint, and losing it would waste the call.
                 busy = True
                 try:
-                    busy = any(j.get('state') in ('queued', 'claimed', 'running')
-                               for j in jobs_queue().list(None))
+                    busy = (any(j.get('state') in ('queued', 'claimed', 'running')
+                                for j in jobs_queue().list(None))
+                            or chats.running() > 0)
                 except Exception:
                     busy = True
                 if not busy:
@@ -1446,6 +1478,8 @@ def main(argv=None):
     ap.add_argument('--plan', metavar='TEXT', help='route one intent, print the JSON result, exit')
     ap.add_argument('--jobs-dir', metavar='DIR',
                     help='where job files live (default out/jobs, or $MLOG_JOBS_DIR)')
+    ap.add_argument('--chats-dir', metavar='DIR',
+                    help='where chat files live (default <jobs-dir>/chats, or $MLOG_CHATS_DIR)')
     ap.add_argument('--jobs-provider', choices=('none', 'template', 'fake', 'llm'),
                     default='none',
                     help='none = 未配置模型, the product default since v0.14.4; '
@@ -1501,6 +1535,8 @@ def main(argv=None):
     JOB_WORKERS = max(1, int(getattr(a, 'jobs_workers', None) or JOB_WORKERS))
     JOBS = jobqueue.Queue(jobqueue.Store(a.jobs_dir), provider=provider,
                           workers=JOB_WORKERS)
+    if getattr(a, 'chats_dir', None):
+        chats.store(a.chats_dir)
     if a.jobs_drain:
         JOBS.drain()
         JOBS.stop()

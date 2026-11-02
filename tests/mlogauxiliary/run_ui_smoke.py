@@ -359,6 +359,9 @@ def main():
     "print('MAIWS2:' + maiWorkspace2Probe());",
     # v0.19.0: the workspace UI (filter/sort/detail model/world ghost boxes/release confirm).
     "print('MAIWS3:' + maiWorkspace3Probe());",
+    # v0.20.0 (user m02407/m02414/m02455): the free-chat dialog -- size budget, state wording,
+    # list sub-line, tool trace line, whitespace helpers. Pure functions only (no Vars.ui).
+    "print('MAICHATUI:' + maiChatUiProbe());",
     # v0.16.0 B1: 存蓝图在无头环境（Vars.schematics 为 null）必须先守住，不能抛。
     "print('MAIBP:' + maiBlueprintSaveProbe(JSON.stringify({x1:10, y1:10, x2:20, y2:20})));",
     # v0.16.1 B2/B4: 签名 payload v2 的 meta 要能在游戏里解出来（Java Base64 + zlib）。
@@ -399,7 +402,7 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAIBP:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIBP:',
                               'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:', 'MAITHEME:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
@@ -571,6 +574,12 @@ def main():
         problems.append('v0.19.0: the workspace UI helpers are broken '
                         '(want MAIWS3:ok ...): %r'
                         % [l for l in lines if l.startswith('MAIWS3:')][:1])
+    # v0.20.0 (user m02407/m02414/m02455): the chat dialog is one screen with a chat list, a
+    # 2px separator and a transcript; the plan/state/summary helpers must stay deterministic.
+    if 'MAICHATUI:ok' not in joined:
+        problems.append('v0.20.0: the chat UI helpers are broken '
+                        '(want MAICHATUI:ok ...): %r'
+                        % [l for l in lines if l.startswith('MAICHATUI:')][:1])
     if 'MAIJOBPANELDIAG:ok why=1 ev=2' not in joined:
         problems.append('v0.15.0: the job panel does not explain a failed call '
                         '(want MAIJOBPANELDIAG:ok why=1 ev=2): %r'
@@ -1262,6 +1271,22 @@ def main():
                          'the filter chips are long enough to get truncated again')):
         if needle not in code_only:
             problems.append('v0.19.6: ' + why)
+    # v0.20.0 (user m02407 / m02414 / m02455): the manager grows a "new chat" entry, the chat
+    # dialog is list | 2px separator | transcript, and a running turn is polled from the frame hook.
+    for needle, why in (('function openChatDialog(',
+                         'the free-chat dialog is gone'),
+                        ('d.cont.image(Tex.whiteui).width(2)',
+                         'the separator between the chat list and the transcript is gone'),
+                        ('function chatTick(',
+                         'nothing polls a running chat turn any more'),
+                        ('httpJson("POST", "/chat"',
+                         'the dialog no longer posts a turn to the sidecar'),
+                        ('＋ 新建对话',
+                         'the manager lost its new-chat entry'),
+                        ('CHAT_UI.polling',
+                         'the chat polling flag is gone')):
+        if needle not in code_only:
+            problems.append('v0.20.0: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
@@ -1930,7 +1955,7 @@ def main():
         print('  batch write: ' + wm[:170])
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
-                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:',
+                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
                         'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:', 'MAITHEME:',
                         'MAIJOBTHINK2:')):

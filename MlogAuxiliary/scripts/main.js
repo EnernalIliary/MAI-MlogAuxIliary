@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.19.6";
+    var MOD_VERSION = "0.20.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -4620,6 +4620,16 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
             var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 作业管理 v" + MOD_VERSION);
             d.cont.defaults().pad(4).left();
+            // v0.20.0（用户 m02407「允许在MAI中新建纯文本对话，但是要能调用工具」+
+            // m02414「就是在MAI管理面板中新建对话」）：入口放内容区顶部。
+            // 底栏已经 5 个按钮、600 宽再塞就出界（见下面 d.buttons），所以不开在底栏。
+            var chatBar = new Packages.arc.scene.ui.layout.Table();
+            chatBar.left();
+            chatBar.button("＋ 新建对话", function(){ openChatDialog(); }).width(130).height(30)
+                   .padRight(6).ellipsis(true).left();
+            chatBar.add("模型可以自己调 mlog 检查 / 游戏数据这些工具；对话不写进处理器")
+                .color(Pal.gray).fontScale(0.85).width(430).left().ellipsis(true);
+            d.cont.add(chatBar).growX().left().row();
             var host = new Packages.arc.scene.ui.layout.Table();
             try{ d.cont.pane(host).height(320).width(600).row(); }catch(e){ d.cont.add(host).row(); }
             var frow = new Packages.arc.scene.ui.layout.Table();
@@ -4650,6 +4660,523 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return "job manager";
         }
 
+        // ------------------------------------------------ 自由对话（v0.20.0）
+        // 用户 m02407「允许在MAI中新建纯文本对话，但是要能调用工具」，m02414「就是在MAI管理面板中新建对话」，
+        // m02455「对话选单和右侧对话详情的分隔也加回去」。
+        // 分工：侧车 tools/chats.py 负责落盘 + OpenAI tools 循环；模组这边只管三件事 ——
+        // 双栏窗口（左选单 / 2px 竖线 / 右详情）、POST /chat 之后按 900ms 轮询 GET /chat?id=、
+        // 把 messages 画成 transcript。对话不往处理器写代码，所以没有撤销/写入这些动作。
+        var CHAT_POLL_MS = 900;
+        var CHAT_UI = {open: false, d: null, listHost: null, detailHost: null, tf: null,
+                       sel: null, chats: [], full: null, loadError: "",
+                       sending: false, polling: false, pollAt: 0, fails: 0,
+                       text: "", single: false, showDetail: false,
+                       listW: 240, detailW: 700, availH: 460,
+                       busyList: false, busyDetail: false, seq: 0};
+
+        // 去首尾空白：不用正则（v160.7 的 Rhino 在个别位置对正则字面量不稳）。
+        function chatStrip(s){
+            var a = String(s === null || s === undefined ? "" : s);
+            var b = 0, e = a.length;
+            while(b < e && (a.charAt(b) === " " || a.charAt(b) === "\t" || a.charAt(b) === "\n" || a.charAt(b) === "\r")){ b++; }
+            while(e > b && (a.charAt(e - 1) === " " || a.charAt(e - 1) === "\t" || a.charAt(e - 1) === "\n" || a.charAt(e - 1) === "\r")){ e--; }
+            return a.substring(b, e);
+        }
+
+        // 多行文本压成一行（列表副行/工具轨迹行用，labelWrap 之外的地方必须单行）。
+        function chatFlat(s){
+            var a = String(s === null || s === undefined ? "" : s);
+            a = a.split("\r").join(" ").split("\n").join(" ").split("\t").join(" ");
+            while(a.indexOf("  ") >= 0){ a = a.split("  ").join(" "); }
+            return a;
+        }
+
+        function chatIdSafe(id){
+            return String(id === null || id === undefined ? "" : id)
+                   .split(" ").join("").split("&").join("").split("?").join("").split("#").join("").split("\"").join("");
+        }
+
+        function chatArrLen(a){
+            if(a === null || a === undefined || a.length === undefined){ return 0; }
+            return Number(a.length);
+        }
+
+        // 对话窗的尺寸预算。入参是 **scene 单位**（和 wsDialogPlan 一样，见 wsSclFactor 的注释）。
+        // 和 wsDialogPlan 的区别只有两处：上下要多留输入行的高度（-210 而不是 -190），
+        // 左栏是「对话选单」比工作区列表更窄（24%，190..260）。
+        function chatPlan(sw, sh){
+            var w = Number(sw), h = Number(sh);
+            if(!(w > 0)){ w = 1280; }
+            if(!(h > 0)){ h = 720; }
+            var availW = Math.round(Math.max(520, Math.min(1080, w - 56)));
+            var availH = Math.round(Math.max(300, Math.min(700, h - 210)));
+            var listW = Math.round(Math.max(190, Math.min(260, availW * 0.24)));
+            var detailW = Math.round(Math.max(300, availW - listW - 16));
+            return {wide: w >= 860, availW: availW, availH: availH, listW: listW,
+                    detailW: detailW, onlyW: Math.round(Math.min(availW, 560))};
+        }
+
+        // 会话状态只有 running / idle 两档（错误另看 error 字段）。
+        function chatStateCn(state, err){
+            if(String(err === null || err === undefined ? "" : err) !== ""){ return "出错"; }
+            var s = String(state === null || state === undefined ? "" : state);
+            if(s === "running"){ return "思考中"; }
+            return "就绪";
+        }
+
+        // 选单里每段对话的副行：「N 条 · 工具 M 次 · 时间」。
+        function chatCardSub(brief){
+            var b = (brief === null || brief === undefined) ? {} : brief;
+            var parts = [];
+            parts.push(String(Number(b.msgs || 0)) + " 条");
+            parts.push("工具 " + String(Number(b.tools || 0)) + " 次");
+            parts.push(String(wsTimeText(b.updated)));
+            var st = chatStateCn(b.state, b.error);
+            if(st !== "就绪"){ parts.push(st); }
+            return parts.join(" · ");
+        }
+
+        // 模型调工具时留在 transcript 里的一行：「🔧 名字  参数摘要」。
+        function chatToolLine(name, args){
+            var n = String(name === null || name === undefined || name === "" ? "?" : name);
+            var a = chatFlat(args === null || args === undefined ? "" : args);
+            if(a.length > 60){ a = a.substring(0, 60) + "…"; }
+            return "🔧 " + n + (a === "" ? "" : "  " + a);
+        }
+
+        // 侧车错误翻成一句人话（httpJson 的 code=-1 表示连不上/超时）。
+        function chatErrText(code, text){
+            var c = Number(code);
+            var doc = parse(String(text === null || text === undefined ? "" : text));
+            if(doc !== null && doc !== undefined && doc.error !== undefined && String(doc.error) !== ""){
+                // 侧车对「上一轮还没答完」用的精确值就是 busy（见 chats.py 契约）。
+                if(String(doc.error) === "busy"){ return "上一条还没答完，等它说完再发"; }
+                return String(doc.error);
+            }
+            if(c === -1){ return "侧车没连上（" + chatFlat(text).substring(0, 60) + "）"; }
+            if(c === 0){ return "侧车没回话"; }
+            return "HTTP " + String(c);
+        }
+
+        // ---- 数据：GET /chats（列表）/ GET /chat?id=（全文）/ POST /chat（起一轮）/ DELETE /chat?id=
+        function chatReloadList(){
+            CHAT_UI.seq = Number(CHAT_UI.seq || 0) + 1;
+            var want = CHAT_UI.seq;
+            httpJson("GET", "/chats?limit=50", null, function(code, text){
+                if(want !== CHAT_UI.seq){ return; }
+                var doc = parse(text);
+                if(code !== 200 || doc === null || doc === undefined || doc.ok !== true){
+                    CHAT_UI.chats = [];
+                    CHAT_UI.loadError = chatErrText(code, text);
+                    chatRefreshAll();
+                    return;
+                }
+                var arr = doc.chats;
+                CHAT_UI.chats = (arr === null || arr === undefined) ? [] : arr;
+                CHAT_UI.loadError = "";
+                chatRefreshAll();
+            });
+        }
+
+        function chatSelect(id){
+            CHAT_UI.sel = String(id);
+            CHAT_UI.full = null;
+            CHAT_UI.showDetail = true;
+            CHAT_UI.loadError = "";
+            chatRefreshAll();
+            var want = CHAT_UI.sel;
+            httpJson("GET", "/chat?id=" + chatIdSafe(want), null, function(code, text){
+                if(String(CHAT_UI.sel) !== want){ return; }
+                var doc = parse(text);
+                if(code !== 200 || doc === null || doc === undefined || doc.ok !== true
+                   || doc.chat === null || doc.chat === undefined){
+                    CHAT_UI.full = null;
+                    CHAT_UI.loadError = chatErrText(code, text);
+                    chatRefreshAll();
+                    return;
+                }
+                CHAT_UI.loadError = "";
+                CHAT_UI.full = doc.chat;
+                CHAT_UI.sending = (String(doc.chat.state || "") === "running");
+                CHAT_UI.polling = CHAT_UI.sending;
+                CHAT_UI.pollAt = 0;
+                CHAT_UI.fails = 0;
+                chatRefreshAll();
+            });
+        }
+
+        function chatSend(){
+            if(CHAT_UI.sending === true){ hint("上一条还在答，等它说完"); return; }
+            var txt = chatStrip(CHAT_UI.text);
+            if(txt === ""){ hint("先说点什么再点发送"); return; }
+            var id = (CHAT_UI.sel === null || CHAT_UI.sel === undefined) ? "" : String(CHAT_UI.sel);
+            // 没选会话时不带 id：让侧车新建一段，返回的 id 就是新会话。
+            var body = (id === "") ? JSON.stringify({text: txt})
+                                   : JSON.stringify({id: id, text: txt});
+            CHAT_UI.sending = true;
+            CHAT_UI.polling = false;
+            chatRefreshAll();
+            httpJson("POST", "/chat", body, function(code, text){
+                var doc = parse(text);
+                if(code !== 200 || doc === null || doc === undefined || doc.ok !== true){
+                    CHAT_UI.sending = false;
+                    CHAT_UI.polling = false;
+                    hint("发不出去：" + chatErrText(code, text));
+                    chatRefreshAll();
+                    return;
+                }
+                CHAT_UI.sel = String(doc.id === null || doc.id === undefined ? id : doc.id);
+                CHAT_UI.showDetail = true;
+                CHAT_UI.sending = true;
+                CHAT_UI.polling = true;
+                CHAT_UI.pollAt = 0;
+                CHAT_UI.fails = 0;
+                CHAT_UI.text = "";
+                try{ if(CHAT_UI.tf !== null && CHAT_UI.tf !== undefined){ CHAT_UI.tf.setText(""); } }catch(ec){ }
+                chatRefreshAll();
+                chatPoll();
+                chatReloadList();
+            });
+        }
+
+        function chatPoll(){
+            var id = CHAT_UI.sel;
+            if(id === null || id === undefined || String(id) === ""){
+                CHAT_UI.polling = false; CHAT_UI.sending = false; return;
+            }
+            var want = String(id);
+            httpJson("GET", "/chat?id=" + chatIdSafe(want), null, function(code, text){
+                if(String(CHAT_UI.sel) !== want){ return; }
+                var doc = parse(text);
+                if(code !== 200 || doc === null || doc === undefined || doc.ok !== true
+                   || doc.chat === null || doc.chat === undefined){
+                    CHAT_UI.fails = Number(CHAT_UI.fails || 0) + 1;
+                    // 连不上/超时（-1、0）继续等下一拍；404 之类直接收工，别无限轮询。
+                    if(code !== -1 && code !== 0){
+                        CHAT_UI.polling = false;
+                        CHAT_UI.sending = false;
+                        CHAT_UI.loadError = chatErrText(code, text);
+                        chatRefreshAll();
+                        return;
+                    }
+                    if(CHAT_UI.fails >= 20){
+                        CHAT_UI.polling = false;
+                        CHAT_UI.sending = false;
+                        hint("侧车没回话，这一轮先放弃");
+                        chatRefreshAll();
+                    }
+                    return;
+                }
+                CHAT_UI.fails = 0;
+                CHAT_UI.loadError = "";
+                CHAT_UI.full = doc.chat;
+                var running = (String(doc.chat.state || "") === "running");
+                var errText = String(doc.chat.error === null || doc.chat.error === undefined ? "" : doc.chat.error);
+                CHAT_UI.sending = running;
+                CHAT_UI.polling = running;
+                chatRefreshAll();
+                if(running !== true){
+                    chatReloadList();
+                    if(errText !== ""){ hint("对话出错：" + errText); }
+                }
+            });
+        }
+
+        // 每帧钩子（Events.run(Trigger.update) 里调）：只在「这一轮还没答完」时轮询，900ms 一拍。
+        function chatTick(){
+            if(CHAT_UI.open !== true){ return; }
+            if(CHAT_UI.polling !== true){ return; }
+            var now = 0;
+            try{ now = Number(Packages.java.lang.System.currentTimeMillis()); }catch(e){ now = 0; }
+            if(now > 0 && CHAT_UI.pollAt > 0 && (now - CHAT_UI.pollAt) < CHAT_POLL_MS){ return; }
+            CHAT_UI.pollAt = now;
+            chatPoll();
+        }
+
+        function chatNew(){
+            CHAT_UI.sel = null;
+            CHAT_UI.full = null;
+            CHAT_UI.sending = false;
+            CHAT_UI.polling = false;
+            CHAT_UI.loadError = "";
+            CHAT_UI.text = "";
+            CHAT_UI.showDetail = false;
+            try{ if(CHAT_UI.tf !== null && CHAT_UI.tf !== undefined){ CHAT_UI.tf.setText(""); } }catch(ec){ }
+            chatRefreshAll();
+            try{ if(CHAT_UI.tf !== null && CHAT_UI.tf !== undefined && Core.scene !== null){ Core.scene.setKeyboardFocus(CHAT_UI.tf); } }catch(ef){ }
+        }
+
+        function chatAskDelete(){
+            var id = CHAT_UI.sel;
+            if(id === null || id === undefined || String(id) === ""){ hint("先在左边选一段对话"); return; }
+            var name = "";
+            try{ if(CHAT_UI.full !== null && CHAT_UI.full !== undefined){ name = String(CHAT_UI.full.title || ""); } }catch(en){ }
+            var doIt = function(){
+                CHAT_UI.sel = null;
+                CHAT_UI.full = null;
+                CHAT_UI.polling = false;
+                CHAT_UI.sending = false;
+                chatRefreshAll();
+                httpJson("DELETE", "/chat?id=" + chatIdSafe(String(id)), null, function(code, text){
+                    if(code !== 200){ hint("删不掉：" + chatErrText(code, text)); }
+                    chatReloadList();
+                });
+            };
+            try{
+                if(Vars.ui === null || Vars.ui === undefined){ doIt(); return; }
+                Vars.ui.showConfirm("删除对话", "删掉这段对话（" + name + "）？聊天记录不再留存，也不能恢复。", doIt);
+            }catch(e){ log("chat delete confirm failed: " + e); doIt(); }
+        }
+
+        // ---- 画：左选单 / 右详情（transcript）
+        function chatRefreshAll(){
+            if(CHAT_UI.single === true){
+                if(CHAT_UI.showDetail === true){ chatRefreshDetail(); }else{ chatRefreshList(); }
+                return;
+            }
+            chatRefreshList();
+            chatRefreshDetail();
+        }
+
+        function chatCardColor(c){
+            var b = (c === null || c === undefined) ? {} : c;
+            var id = String(b.id === null || b.id === undefined ? "" : b.id);
+            if(CHAT_UI.sel !== null && CHAT_UI.sel !== undefined && String(CHAT_UI.sel) === id){ return themeColor(); }
+            if(String(b.error === null || b.error === undefined ? "" : b.error) !== ""){ return Pal.remove; }
+            if(String(b.state === null || b.state === undefined ? "" : b.state) === "running"){ return Pal.accent; }
+            return Pal.gray;
+        }
+
+        function chatRefreshList(){
+            if(CHAT_UI.busyList === true){ return; }
+            CHAT_UI.busyList = true;
+            var err = "";
+            try{ chatRefreshListBody(); }catch(e){ err = String(e); }
+            CHAT_UI.busyList = false;
+            if(err !== ""){ log("chat list refresh failed: " + err); }
+        }
+
+        function chatRefreshListBody(){
+            var host = CHAT_UI.listHost;
+            if(host === null || host === undefined){ return; }
+            try{ host.clear(); }catch(e){ return; }
+            var iw = Math.max(170, Number(CHAT_UI.listW) - 22);
+            var top = wsT();
+            top.left();
+            top.button("＋ 新对话", function(){ chatNew(); }).height(32).width(Math.max(100, iw - 4)).ellipsis(true).left();
+            host.add(top).growX().padBottom(4).row();
+            if(String(CHAT_UI.loadError === null || CHAT_UI.loadError === undefined ? "" : CHAT_UI.loadError) !== ""){
+                host.add(String(CHAT_UI.loadError)).color(Pal.remove).width(iw).left().ellipsis(true).row();
+            }
+            var rows = CHAT_UI.chats;
+            if(rows === null || rows === undefined || rows.length === undefined || rows.length === 0){
+                host.add("还没有对话。点上面的「＋ 新对话」开一段。").color(Pal.gray).width(iw)
+                    .left().ellipsis(true).row();
+                return;
+            }
+            host.add("共 " + String(rows.length) + " 段对话").color(Pal.gray).width(iw)
+                .left().ellipsis(true).padBottom(2).row();
+            for(var i = 0; i < rows.length; i++){
+                (function(c){
+                    try{
+                        // v0.20.0：卡片和 v0.19.6 的工作区卡片同构 —— Arc 的 cell.align 不继承表
+                        // （Table.java:1243 `align = c.align;`），所以每个格子都要显式 .left()，副行 colspan(2)。
+                        var id = String(c.id === null || c.id === undefined ? "" : c.id);
+                        var card = new Packages.arc.scene.ui.Button();
+                        card.left().top();
+                        var col = chatCardColor(c);
+                        try{ card.image(Tex.whiteui).width(4).height(26).color(col).left(); }catch(e4){ }
+                        card.add((String(CHAT_UI.sel) === id ? "▸ " : "")
+                                 + String(c.title === null || c.title === undefined || c.title === "" ? "(未命名对话)" : c.title))
+                            .color(col).left().padLeft(6).width(Math.max(80, iw - 34)).ellipsis(true);
+                        card.row();
+                        card.add(String(chatCardSub(c))).color(Pal.gray).left().padLeft(12).colspan(2)
+                            .fontScale(0.85).width(Math.max(80, iw - 40)).ellipsis(true);
+                        card.changed(function(){ chatSelect(id); });
+                        host.add(card).growX().padTop(2).padBottom(4).row();
+                    }catch(e5){ log("chat card failed: " + e5); }
+                })(rows[i]);
+            }
+        }
+
+        function chatRefreshDetail(){
+            if(CHAT_UI.busyDetail === true){ return; }
+            CHAT_UI.busyDetail = true;
+            var err = "";
+            try{ chatRefreshDetailBody(); }catch(e){ err = String(e); }
+            CHAT_UI.busyDetail = false;
+            if(err !== ""){ log("chat detail refresh failed: " + err); }
+        }
+
+        function chatRefreshDetailBody(){
+            var dp = CHAT_UI.detailHost;
+            if(dp === null || dp === undefined){ return; }
+            try{ dp.clear(); }catch(e){ return; }
+            var iw = Math.max(200, Number(CHAT_UI.detailW) - 22);
+            if(CHAT_UI.single === true){
+                dp.button("← 返回选单", function(){
+                    CHAT_UI.showDetail = false;
+                    chatRefreshAll();
+                }).height(32).padBottom(4).left().ellipsis(true).row();
+            }
+            if(CHAT_UI.sel === null || CHAT_UI.sel === undefined || String(CHAT_UI.sel) === ""){
+                dp.add("← 左边选一段对话，或者点「＋ 新对话」开一段").color(Pal.gray).width(iw)
+                    .left().ellipsis(true).row();
+                dp.add("· 纯文本对话：不往任何处理器写代码").color(Pal.gray).fontScale(0.85)
+                    .width(iw).left().ellipsis(true).row();
+                dp.add("· 模型自己决定调不调工具（mlog 检查 / 求值 / 打包 / 游戏数据查询）")
+                    .color(Pal.gray).fontScale(0.85).width(iw).left().ellipsis(true).row();
+                dp.add("· 每一段对话都落盘在侧车的 chats 目录里，随时回来接着聊")
+                    .color(Pal.gray).fontScale(0.85).width(iw).left().ellipsis(true).row();
+                return;
+            }
+            var m = CHAT_UI.full;
+            if(m === null || m === undefined || String(m.id) !== String(CHAT_UI.sel)){
+                dp.add("正在读取这段对话…").color(Pal.gray).width(iw).left().ellipsis(true).row();
+                return;
+            }
+            var st = chatStateCn(m.state, m.error);
+            var col = (st === "出错") ? Pal.remove : (st === "思考中" ? Pal.accent : themeColor());
+            var head = wsT();
+            head.left();
+            head.add(String(m.title === null || m.title === undefined || m.title === "" ? "(未命名对话)" : m.title))
+                .color(col).left().width(Math.max(90, iw - 96)).ellipsis(true);
+            head.add("  " + String(st)).color(col).fontScale(0.85).width(86).ellipsis(true).left();
+            dp.add(head).growX().left().row();
+            var degrade = (String(m.tools_supported === null || m.tools_supported === undefined ? "" : m.tools_supported) === "false");
+            dp.add("工具 " + String(chatArrLen(m.tools)) + " 次 · 轮次 " + String(Number(m.rounds || 0))
+                   + (degrade ? " · 端点不支持工具（已降级成纯文本）" : ""))
+                .color(Pal.gray).fontScale(0.85).width(iw).left().ellipsis(true).row();
+            dp.add("────────────────").color(Pal.gray).fontScale(0.85).width(iw).left().ellipsis(true).row();
+            var msgs = (m.messages === null || m.messages === undefined) ? [] : m.messages;
+            var start = 0;
+            if(chatArrLen(msgs) > 60){ start = chatArrLen(msgs) - 60; }
+            if(start > 0){
+                dp.add("（更早的 " + String(start) + " 条已省略）").color(Pal.gray).fontScale(0.85)
+                    .width(iw).left().ellipsis(true).row();
+            }
+            for(var i = start; i < chatArrLen(msgs); i++){
+                var msg = msgs[i] || {};
+                var role = String(msg.role === null || msg.role === undefined ? "" : msg.role);
+                var content = String(msg.content === null || msg.content === undefined ? "" : msg.content);
+                if(content.length > 4000){ content = content.substring(0, 4000) + "\n…（后面截掉了）"; }
+                if(role === "user"){
+                    dp.add("你").color(themeColor()).fontScale(0.85).left().row();
+                    chatWrap(dp, content, iw);
+                }else if(role === "assistant"){
+                    var calls = msg.tool_calls;
+                    for(var t = 0; t < chatArrLen(calls); t++){
+                        var fn = (calls[t] !== null && calls[t] !== undefined && calls[t].function !== undefined) ? calls[t].function : {};
+                        dp.add(chatToolLine(fn.name, fn.arguments)).color(Pal.gray).fontScale(0.85)
+                            .width(iw).left().ellipsis(true).row();
+                    }
+                    if(chatStrip(content) !== ""){
+                        dp.add("MAI").color(themeColor()).fontScale(0.85).left().row();
+                        chatWrap(dp, content, iw);
+                    }
+                }else if(role === "tool"){
+                    var tn = String(msg.name === null || msg.name === undefined ? "工具" : msg.name);
+                    var flat = chatFlat(content);
+                    if(flat.length > 70){ flat = flat.substring(0, 70) + "…"; }
+                    dp.add("· " + tn + " → " + flat).color(Pal.gray).fontScale(0.8)
+                        .width(iw).left().ellipsis(true).row();
+                }
+            }
+            if(CHAT_UI.sending === true){
+                dp.add("MAI 正在想…").color(Pal.accent).fontScale(0.9).width(iw).left().ellipsis(true).row();
+            }
+            var errText = String(m.error === null || m.error === undefined ? "" : m.error);
+            if(errText !== ""){
+                dp.add("出错：" + chatFlat(errText)).color(Pal.remove).width(iw).left().ellipsis(true).row();
+            }
+        }
+
+        // 长文本：能 labelWrap 就折行，不能（无头/样式缺）就退回单行省略 —— 绝不抛。
+        function chatWrap(dp, text, iw){
+            try{ dp.labelWrap(String(text)).width(iw).left().row(); }
+            catch(e){ dp.add(chatFlat(text)).width(iw).left().ellipsis(true).row(); }
+        }
+
+        function openChatDialog(){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 自由对话 v" + MOD_VERSION);
+            d.cont.defaults().pad(3).left();
+            try{ d.cont.left().top(); }catch(e00){ }
+            try{ d.title.setAlignment(Packages.arc.util.Align.left); }catch(e0){ }
+            try{
+                d.titleTable.clearChildren();
+                d.titleTable.left();
+                d.titleTable.add(d.title).left().padLeft(2);
+            }catch(e0b){ }
+            try{ d.buttons.left(); }catch(e0c){ }
+            var scr = wsScreenSize();
+            var plan = chatPlan(scr.w, scr.h);
+            var wide = plan.wide;
+            var availH = plan.availH;
+            try{
+                log("chat dialog: screen=" + String(scr.w) + "x" + String(scr.h) + " scl=" + String(scr.scl)
+                    + " plan=" + String(plan.availW) + "x" + String(plan.availH)
+                    + " list=" + String(plan.listW) + " detail=" + String(plan.detailW) + " wide=" + String(wide));
+            }catch(e1){ }
+            var listT = wsT(), detailT = wsT();
+            if(wide){
+                try{
+                    d.cont.pane(listT).width(plan.listW).height(availH);
+                    // v0.20.0（用户 m02455「对话选单和右侧对话详情的分隔也加回去」）：两栏之间画一条 2px 竖线。
+                    // atlas 没起来（无头/异常）就退回 14px 空白，别让整行布局崩掉。
+                    try{ d.cont.image(Tex.whiteui).width(2).height(availH).color(Pal.gray).padLeft(7).padRight(7); }
+                    catch(es){ d.cont.add(new Packages.arc.scene.ui.layout.Table()).width(14).height(availH); }
+                    d.cont.pane(detailT).width(plan.detailW).height(availH).row();
+                }catch(e2){ log("chat two-pane failed: " + e2); d.cont.add(listT).row(); }
+                CHAT_UI.listW = plan.listW;
+                CHAT_UI.detailW = plan.detailW;
+            }else{
+                try{ d.cont.pane(listT).height(availH).width(plan.onlyW).row(); }catch(e3){ d.cont.add(listT).row(); }
+                CHAT_UI.listW = plan.onlyW;
+                CHAT_UI.detailW = plan.onlyW;
+            }
+            // 输入行固定在两栏下面：刷新列表/详情不会重建它，打了一半的字不会丢。
+            var tf = null;
+            var inRow = wsT();
+            inRow.left();
+            try{
+                tf = new Packages.arc.scene.ui.TextField();
+                tf.setMessageText("说点什么（纯文本；模型可以调用工具）");
+                tf.setMaxLength(2000);
+                tf.setTextFieldListener(function(field, c){
+                    try{ CHAT_UI.text = String(field.getText()); }catch(e4){ CHAT_UI.text = ""; }
+                });
+                inRow.add(tf).width(Math.max(220, Number(plan.availW) - 150)).height(34).padRight(6).left();
+                inRow.button("发送", function(){ chatSend(); }).width(110).height(34).ellipsis(true).left();
+            }catch(e5){ log("chat input row failed: " + e5); }
+            d.cont.add(inRow).growX().left().row();
+            CHAT_UI.open = true;
+            CHAT_UI.d = d;
+            CHAT_UI.single = !wide;
+            CHAT_UI.showDetail = false;
+            CHAT_UI.listHost = listT;
+            CHAT_UI.detailHost = wide ? detailT : listT;
+            CHAT_UI.tf = tf;
+            CHAT_UI.fails = 0;
+            CHAT_UI.text = "";
+            d.buttons.button("新对话", function(){ chatNew(); }).height(34).padLeft(4).ellipsis(true);
+            d.buttons.button("删除这段", function(){ chatAskDelete(); }).height(34).padLeft(4).ellipsis(true);
+            d.buttons.button("刷新", function(){ chatReloadList(); }).height(34).padLeft(4).ellipsis(true);
+            d.buttons.button("关闭", function(){ d.hide(); }).height(34).padLeft(4).ellipsis(true);
+            // 关窗必须停轮询、松开两个 host 引用（关掉之后回调还会回来一次，别往已销毁的表里画）。
+            d.hidden(function(){
+                CHAT_UI.open = false;
+                CHAT_UI.polling = false;
+                CHAT_UI.listHost = null;
+                CHAT_UI.detailHost = null;
+                CHAT_UI.tf = null;
+            });
+            d.closeOnBack();
+            d.show();
+            chatRefreshAll();
+            chatReloadList();
+            return "chat dialog";
+        }
         // ------------------------------------------------ 工作区界面（v0.14.1，W2/W3/W4）
         // 仿蓝图对话框：上面是列表（进行中在前，已归档在后），点一行看预览，
         // 预览里有「恢复选框 / 归档或恢复 / 释放 / 改名 / 导出 JSON / 继续改进」。
@@ -7766,6 +8293,42 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return notes.length === 0 ? ("ok " + counts) : ("bad " + notes.join(","));
         };
 
+        // v0.20.0（用户 m02407/m02414/m02455）：自由对话窗的无头探针。
+        // 窗口本身要 Vars.ui，所以这里只断言纯函数：尺寸预算 / 状态中文 / 副行 / 工具行 /
+        // 单行压平 / 去空白。确认这套东西在无头引擎里也不炸、数值可预期。
+        api.maiChatUiProbe = function(){
+            var notes = [];
+            var counts = "";
+            try{
+                var p = chatPlan(1366, 768);
+                if(p.wide !== true){ notes.push("wide"); }
+                if(p.availW !== 1080){ notes.push("availW:" + String(p.availW)); }
+                if(p.listW !== 259 || p.detailW !== 805){ notes.push("size:" + String(p.listW) + "x" + String(p.detailW)); }
+                if(chatPlan(800, 600).wide !== false){ notes.push("narrow"); }
+                if(chatPlan(0, 0).availW !== 1080){ notes.push("default:" + String(chatPlan(0, 0).availW)); }
+                if(chatStateCn("running", "") !== "思考中"){ notes.push("state-running"); }
+                if(chatStateCn("idle", "") !== "就绪"){ notes.push("state-idle"); }
+                if(chatStateCn("idle", "boom") !== "出错"){ notes.push("state-error"); }
+                var sub = chatCardSub({msgs: 4, tools: 2, updated: 0, state: "idle", error: ""});
+                if(sub.indexOf("4 条") < 0 || sub.indexOf("工具 2 次") < 0){ notes.push("card-sub:" + sub); }
+                var line = chatToolLine("mlog_check", JSON.stringify({code: "set n 1"}));
+                if(line.indexOf("mlog_check") < 0){ notes.push("tool-name"); }
+                if(line.indexOf("\n") >= 0){ notes.push("tool-line-multiline"); }
+                if(chatFlat("a\n\nb\tc") !== "a b c"){ notes.push("flat:" + chatFlat("a\n\nb\tc")); }
+                if(chatStrip("  x  ") !== "x"){ notes.push("strip"); }
+                if(chatIdSafe("a b&c?d#e") !== "abcde"){ notes.push("id-safe:" + chatIdSafe("a b&c?d#e")); }
+                if(chatErrText(-1, "").indexOf("侧车") < 0){ notes.push("err-conn"); }
+                if(chatErrText(404, JSON.stringify({ok: false, error: "no such chat"})) !== "no such chat"){ notes.push("err-body"); }
+                if(chatArrLen(null) !== 0 || chatArrLen([1, 2]) !== 2){ notes.push("arr-len"); }
+                counts = "plan=" + String(p.availW) + "x" + String(p.availH)
+                       + " list=" + String(p.listW) + " detail=" + String(p.detailW)
+                       + " sub=" + String(sub) + " poll=" + String(CHAT_POLL_MS);
+            }catch(e){
+                notes.push("throw:" + e);
+            }
+            return notes.length === 0 ? ("ok " + counts) : ("bad " + notes.join(","));
+        };
+
 
         // 挂到脚本作用域（控制台里能直接敲），并读回自检
         // v0.14.4（用户 2026-11-01）：「sidcar应该随游戏启动而启动」——不再等 F3 才拉；
@@ -7810,6 +8373,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     sidecarPing();  // v0.15.0：心跳，sidecar 收不到 45 s 就自己退出
                     jobButtonsClick(); // v0.14.2：框右下角的「查看 / 取消」两个按钮
                     blueprintTick(); // v0.16.1：蓝图页入口、「详细」页续聊、蓝图对话轮询
+                    chatTick();     // v0.20.0：自由对话这一轮还没答完就 900ms 轮询一次
                     // 「设置 → Mlog辅助」这一栏只在 Vars.ui 建好之后能注册。脚本加载时
                     // UI 往往还没建（真机日志里是在 ClientLoadEvent 前），所以这里补一次
                     // 有界重试：每 60 帧试一次、最多 600 次（≈10 s @60fps），成功即停。

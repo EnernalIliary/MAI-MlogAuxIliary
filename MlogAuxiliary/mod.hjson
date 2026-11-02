@@ -2,7 +2,7 @@ name: "mlog-auxiliary"
 displayName: "Mlog辅助"
 author: "Iliary艾铭&DeepSeek"
 description: "在一次选框中创建Mlog工作区并开始VibecodeingMlog。"
-version: "0.19.6"
+version: "0.20.0"
 minGameVersion: "146"
 # hidden: true —— 自用模组：不上报给服务器（Mods.getModStrings 只收 !meta.hidden），
 # 联机不会被 "Incompatible mods 第一次启动会弹出欢迎与快速配置页：先确认后端可用，再填模型地址、密钥、模型（可拉端点列表、可测试），完成并重启游戏；「稍后再说」也记一次，之后从设置页「大模型」段重新打开。" 踢；hidden 只跳过 loadContent()（不能注册新方块/单位），

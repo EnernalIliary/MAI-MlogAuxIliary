@@ -1506,6 +1506,212 @@ def test_llm():
     return checks
 
 
+# ---------------------------------------------------------------- half A4: chats (v0.20.0)
+
+class _ChatStub:
+    """An OpenAI endpoint that asks for one mlog_check and then answers.
+
+    Which reply it sends is decided by the conversation, not by a request counter:
+    a prompt that already carries a tool result gets the final sentence. That also
+    makes it usable for the continuation check, where the same endpoint must answer
+    a second turn of the same chat.
+    """
+
+    def __init__(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        self.posts = []
+        self.delay = 0.6          # long enough that the next POST sees state=running
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                n = int(self.headers.get('Content-Length') or 0)
+                raw = self.rfile.read(n) if n else b'{}'
+                try:
+                    body = json.loads(raw.decode('utf-8'))
+                except ValueError:
+                    body = {}
+                outer.posts.append(body)
+                if outer.delay:
+                    time.sleep(outer.delay)
+                messages = body.get('messages') or []
+                if any(m.get('role') == 'tool' for m in messages):
+                    message = {'role': 'assistant', 'content': '检查完了：没有问题。'}
+                else:
+                    message = {'role': 'assistant', 'content': '',
+                               'tool_calls': [{'id': 'call_abc', 'type': 'function',
+                                               'function': {
+                                                   'name': 'mlog_check',
+                                                   'arguments': '{"code":"jump 0 always"}'}}]}
+                payload = {'model': 'stub',
+                           'choices': [{'message': message, 'finish_reason': 'stop'}]}
+                data = json.dumps(payload).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    @property
+    def chat_url(self):
+        return 'http://127.0.0.1:%d/v1/chat/completions' % self.port
+
+    def close(self):
+        try:
+            self.httpd.shutdown()
+        except Exception:
+            pass
+
+
+def test_chats():
+    """v0.20.0: POST /chat answers at once, and a tool round trip shows up in the chat.
+
+    The module polls GET /chat every 900 ms and renders the messages array, so this
+    pins the OpenAI shape, the brief list (counts, no payload), the busy refusal, the
+    continuation context and DELETE. The stub lives on 127.0.0.1 on purpose: the
+    sidecar must bypass the machine proxy for loopback or none of this connects.
+    """
+    checks = 0
+    stub = _ChatStub()
+    tmp = tempfile.mkdtemp(prefix='logicd-chats-')
+    srv = Server(['--jobs-dir', os.path.join(tmp, 'jobs'),
+                  '--chats-dir', os.path.join(tmp, 'chats')])
+
+    def wait_idle(cid, timeout=30):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            code, doc = srv.get('/chat?id=' + cid)
+            need(code == 200 and doc.get('ok') is True,
+                 'GET /chat failed: %r %r' % (code, doc))
+            chat = doc['chat']
+            if chat.get('state') != 'running':
+                return chat
+            time.sleep(0.15)
+        raise Fail('chat %r never left running' % cid)
+
+    try:
+        # 1. h) before a model is configured the player gets a clear 400
+        code, doc = srv.post('/chat', {'text': '你好'})
+        need(code == 400, 'POST /chat without a model answered %r' % (code,))
+        need('模型' in str(doc.get('error') or ''),
+             'the refusal does not mention the model: %r' % (doc,))
+        checks += 1
+
+        # 2. b) point the sidecar at the stub
+        code, doc = srv.post('/llm', {'kind': 'llm', 'url': stub.chat_url, 'model': 'stub'})
+        need(code == 200 and doc.get('kind') == 'llm',
+             'POST /llm refused the stub: %r %r' % (code, doc))
+        checks += 1
+
+        # 3. c) bad text is refused; a good line answers 'running' immediately
+        code, doc = srv.post('/chat', {'text': '   '})
+        need(code == 400, 'blank text answered %r' % (code,))
+        code, doc = srv.post('/chat', {'text': 'x' * 8001})
+        need(code == 400, 'oversized text answered %r' % (code,))
+        code, doc = srv.post('/chat', {'id': 'nosuch1', 'text': '你好'})
+        need(code == 400, 'an unknown id answered %r' % (code,))
+        code, doc = srv.post('/chat', {'text': '帮我看看 jump 0 always 有没有问题'})
+        need(code == 200 and doc.get('ok') is True,
+             'POST /chat was refused: %r %r' % (code, doc))
+        need(doc.get('state') == 'running',
+             'POST /chat did not answer running: %r' % (doc,))
+        cid = doc.get('id')
+        need(isinstance(cid, str) and cid, 'POST /chat returned no id: %r' % (doc,))
+        need(doc.get('title'), 'POST /chat returned no title: %r' % (doc,))
+        checks += 1
+
+        # 4. a second line while the first is still running is 'busy'
+        code, doc = srv.post('/chat', {'id': cid, 'text': '再问一句'})
+        need(code == 400 and doc.get('error') == 'busy',
+             'a second line while running answered %r %r' % (code, doc))
+        checks += 1
+
+        chat = wait_idle(cid)
+        need(chat.get('state') == 'idle' and not chat.get('error'),
+             'the run ended badly: %r' % (chat.get('error'),))
+        roles = [m.get('role') for m in chat.get('messages') or []]
+        need(roles[:4] == ['user', 'assistant', 'tool', 'assistant'],
+             'the transcript is not user/assistant/tool/assistant: %r' % (roles,))
+        called = (chat['messages'][1].get('tool_calls') or [{}])[0]
+        need(called.get('function', {}).get('name') == 'mlog_check',
+             'the assistant turn did not keep its tool_calls: %r' % (called,))
+        need(chat['messages'][2].get('tool_call_id') == called.get('id'),
+             'the tool reply does not point at its call: %r' % (chat['messages'][2],))
+        need('语句数' in str(chat['messages'][2].get('content') or ''),
+             'the tool output does not look like mlog_check: %r' % (chat['messages'][2],))
+        need(chat.get('tools_supported') is True,
+             'tools_supported is %r' % (chat.get('tools_supported'),))
+        need(chat.get('reply') == '检查完了：没有问题。', 'reply: %r' % (chat.get('reply'),))
+        last = chat.get('last') or {}
+        tools = last.get('tools') or []
+        need(len(tools) == 1 and tools[0].get('name') == 'mlog_check',
+             'last.tools did not record the call: %r' % (tools,))
+        need(tools[0].get('ok') is True and isinstance(tools[0].get('ms'), int),
+             'last.tools row is incomplete: %r' % (tools[0],))
+        need('\n' not in str(tools[0].get('summary') or ''),
+             'the tool summary is not one line: %r' % (tools[0],))
+        checks += 1
+
+        # 5. the second model request carried the tool result back
+        need(len(stub.posts) >= 2, 'the model was called %d time(s)' % len(stub.posts))
+        second = stub.posts[1].get('messages') or []
+        need(any(m.get('role') == 'tool' for m in second),
+             'the tool result was not sent back: %r' % ([m.get('role') for m in second],))
+        checks += 1
+
+        # 6. e) GET /chats is the list window: counts only, no payload
+        code, doc = srv.get('/chats?limit=50')
+        need(code == 200 and doc.get('ok') is True and doc.get('count') >= 1,
+             'GET /chats: %r %r' % (code, doc))
+        brief = [c for c in doc.get('chats') or [] if c.get('id') == cid]
+        need(len(brief) == 1, 'the chat is missing from GET /chats: %r' % (doc,))
+        b = brief[0]
+        need(b.get('msgs') == len(chat['messages'])
+             and b.get('messages') == len(chat['messages']),
+             'brief message count: %r' % (b,))
+        need('last' not in b, 'the brief carries the full last block: %r' % (b,))
+        need(b.get('state') == 'idle' and b.get('tools') == 1,
+             'brief state/tools: %r' % (b,))
+        checks += 1
+
+        # 7. f) continuing the chat keeps the earlier turn in the prompt
+        before = len(stub.posts)
+        code, doc = srv.post('/chat', {'id': cid, 'text': '那再看看 set n 0 呢'})
+        need(code == 200 and doc.get('id') == cid,
+             'the continuation was refused: %r %r' % (code, doc))
+        chat = wait_idle(cid)
+        need(chat.get('state') == 'idle', 'the continuation ended in %r' % (chat.get('state'),))
+        need(len(chat['messages']) > 4, 'the continuation appended nothing')
+        sent = [m for q in stub.posts[before:] for m in (q.get('messages') or [])]
+        need(any(m.get('role') == 'assistant' and '检查完了' in str(m.get('content') or '')
+                 for m in sent), 'the earlier reply was not in the continuation prompt')
+        checks += 1
+
+        # 8. g) delete is final; a missing id is 400, an unknown one 404
+        code, doc = srv.delete('/chat?id=' + cid)
+        need(code == 200 and doc.get('deleted') is True, 'DELETE /chat: %r %r' % (code, doc))
+        code, doc = srv.get('/chat?id=' + cid)
+        need(code == 404, 'a deleted chat still answers %r' % (code,))
+        code, doc = srv.get('/chat')
+        need(code == 400, 'GET /chat without ?id= answered %r' % (code,))
+        code, doc = srv.delete('/chat?id=' + cid)
+        need(code == 404, 'deleting a missing chat answered %r' % (code,))
+        checks += 1
+    finally:
+        srv.close()
+        stub.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+    return checks
+
+
 def test_diag():
     """v0.15.0: every refusal carries a class, every job keeps the evidence.
 
@@ -1831,6 +2037,15 @@ def main(argv=None):
         return 1
     except Exception as exc:
         print('FAIL llm: %s: %s' % (type(exc).__name__, exc))
+        return 1
+    try:
+        n = test_chats()
+        print('chats: %d check(s) passed' % n)
+    except Fail as exc:
+        print('FAIL chats: %s' % exc)
+        return 1
+    except Exception as exc:
+        print('FAIL chats: %s: %s' % (type(exc).__name__, exc))
         return 1
     try:
         n = test_diag()
