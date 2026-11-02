@@ -362,6 +362,9 @@ def main():
     # v0.20.0 (user m02407/m02414/m02455): the free-chat dialog -- size budget, state wording,
     # list sub-line, tool trace line, whitespace helpers. Pure functions only (no Vars.ui).
     "print('MAICHATUI:' + maiChatUiProbe());",
+    # v0.21.0 档1（用户 m04199「能直接把工作区快照并入MAI对话里面吗」）：两个窗口共用一个外壳，
+    # 标题行右侧是「对话 / 工作区」分段开关，开一个就关掉另一个。纯状态探针，窗口本身要真机看。
+    "print('MAIDUAL:' + maiDualProbe());",
     # v0.16.0 B1: 存蓝图在无头环境（Vars.schematics 为 null）必须先守住，不能抛。
     "print('MAIBP:' + maiBlueprintSaveProbe(JSON.stringify({x1:10, y1:10, x2:20, y2:20})));",
     # v0.16.1 B2/B4: 签名 payload v2 的 meta 要能在游戏里解出来（Java Base64 + zlib）。
@@ -402,7 +405,7 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIBP:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIBP:',
                               'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:', 'MAITHEME:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
@@ -584,6 +587,12 @@ def main():
         problems.append('v0.15.0: the job panel does not explain a failed call '
                         '(want MAIJOBPANELDIAG:ok why=1 ev=2): %r'
                         % [l for l in lines if l.startswith('MAIJOBPANELDIAG:')][:1])
+    # v0.21.0 档1: the two dialogs share one shell (title row segmented switch), so the mode
+    # list and the default mode must stay deterministic.
+    if 'MAIDUAL:ok' not in joined:
+        problems.append('v0.21.0: the shared dialog shell lost its mode switch '
+                        '(want MAIDUAL:ok modes=chat,ws ...): %r'
+                        % [l for l in lines if l.startswith('MAIDUAL:')][:1])
     if '为什么：端点回了空内容' not in joined:
         problems.append('v0.15.0: the failure explanation lost its wording: %r'
                         % [l for l in lines if l.startswith('MAIJOBPANELDIAG:')][:1])
@@ -1344,6 +1353,35 @@ def main():
                          'the detail pane is added straight to cont again (second full-width row wins the column)')):
         if needle in code_only:
             problems.append('v0.20.3: ' + why)
+    # v0.21.0 档1（用户 m04199「能直接把工作区快照并入MAI对话里面吗」/ m04211「先做档1」）：
+    # 两个窗口必须共用一套外壳 —— 标题左对齐 + 标题行右侧「对话 / 工作区」分段开关 + 开一个关另一个；
+    # 各自的 new Dialog(...) / titleTable 重建不许再抄一份（v0.19.4 / v0.19.6 / v0.20.2 三次事故都是抄出两份）。
+    for needle, why in (('function dualDialog(',
+                         'the two dialogs no longer share one shell constructor'),
+                         ('function dualChrome(',
+                         'the shared title bar (left title + mode switch) is gone'),
+                         ('function dualSwitch(',
+                         'the mode switch no longer closes the other dialog'),
+                         ('function dualHideOthers(',
+                         'nothing hides the sibling dialog before opening one'),
+                         ('var d = dualDialog("自由对话", "chat");',
+                         'the chat dialog builds its own frame again'),
+                         ('var d = dualDialog("工作区快照", "ws");',
+                         'the workspace dialog builds its own frame again'),
+                         ('seg.button("对话"',
+                         'the title row lost its chat segment button'),
+                         ('seg.button("工作区"',
+                         'the title row lost the workspace segment button'),
+                         ('dualChrome(d, mode);',
+                         'the shared frame is built but never decorated')):
+        if needle not in code_only:
+            problems.append('v0.21.0: ' + why)
+    for needle, why in (('new Packages.arc.scene.ui.Dialog("Mlog辅助 · 自由对话 v"',
+                         'the chat dialog is back to a hand-rolled Dialog (a second copy of the title fix)'),
+                         ('new Packages.arc.scene.ui.Dialog("Mlog辅助 · 工作区快照 v"',
+                         'the workspace dialog is back to a hand-rolled Dialog')):
+        if needle in code_only:
+            problems.append('v0.21.0: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
@@ -2012,7 +2050,7 @@ def main():
         print('  batch write: ' + wm[:170])
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
-                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:',
+                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
                         'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:', 'MAITHEME:',
                         'MAIJOBTHINK2:')):

@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.20.3";
+    var MOD_VERSION = "0.21.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -5123,18 +5123,58 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             catch(e){ dp.add(chatFlat(text)).width(iw).left().ellipsis(true).row(); }
         }
 
-        function openChatDialog(){
-            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
-            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 自由对话 v" + MOD_VERSION);
-            d.cont.defaults().pad(3).left();
-            try{ d.cont.left().top(); }catch(e00){ }
+        // ------------------------------------------------ 共用双栏壳（v0.21.0 档1）
+        // 用户 m04199：想把「工作区快照」并进对话窗。档1 的做法是两个窗口共用同一套外壳：
+        // 标题左对齐 + 标题行右侧「对话 / 工作区」分段开关 + 开一个就关掉另一个（靠各自 hidden() 清理状态）。
+        // 各窗自己的分栏宽度仍由 chatPlan() / wsDialogPlan() 决定（两者已有探针断言，本版不动）。
+        // 为什么要共用：v0.19.4 / v0.19.6 / v0.20.2 三次排版事故都是「同一段初始化抄了两份、只改了一份」。
+        var DUAL = { last: "chat" };
+        function dualModes(){ return ["chat", "ws"]; }
+        function dualModeCn(mode){ if(mode === "ws"){ return "工作区"; } return "对话"; }
+        function dualHideOthers(mode){
+            try{
+                if(mode !== "chat" && CHAT_UI.open === true && CHAT_UI.d !== null && CHAT_UI.d !== undefined){ CHAT_UI.d.hide(); }
+            }catch(e1){ }
+            try{
+                if(mode !== "ws" && wsUI.open === true && wsUI.d !== null && wsUI.d !== undefined){ wsUI.d.hide(); }
+            }catch(e2){ }
+        }
+        function dualSwitch(mode){
+            DUAL.last = mode;
+            dualHideOthers(mode);
+            if(mode === "ws"){ return openWorkspaceDialog(); }
+            return openChatDialog();
+        }
+        function dualChrome(d, mode){
             try{ d.title.setAlignment(Packages.arc.util.Align.left); }catch(e0){ }
+            // Dialog 标题行是 add(titleTable).growX()，titleTable 里又是 expandX().fillX()（Dialog.java:78-79），
+            // 标题 cell 一旦被撑满整行，下面的行也跟着拉宽 —— 这里重建 titleTable 让 cell 取自然宽度并靠左。
             try{
                 d.titleTable.clearChildren();
                 d.titleTable.left();
                 d.titleTable.add(d.title).left().padLeft(2);
+                var seg = wsT();
+                seg.left();
+                var bChat = seg.button("对话", function(){ dualSwitch("chat"); }).height(22).width(64).padLeft(6);
+                if(mode === "chat"){ bChat.disabled(true); }
+                var bWs = seg.button("工作区", function(){ dualSwitch("ws"); }).height(22).width(64).padLeft(6);
+                if(mode === "ws"){ bWs.disabled(true); }
+                d.titleTable.add(seg).left().padLeft(10);
             }catch(e0b){ }
-            try{ d.buttons.left(); }catch(e0c){ }
+        }
+        function dualDialog(titleCn, mode, hideOthers){
+            if(hideOthers !== false){ dualHideOthers(mode); }
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · " + titleCn + " v" + MOD_VERSION);
+            d.cont.defaults().pad(3).left();
+            try{ d.cont.left().top(); }catch(e00){ }
+            try{ d.closeOnBack(); }catch(e0d){ }
+            dualChrome(d, mode);
+            return d;
+        }
+
+        function openChatDialog(){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var d = dualDialog("自由对话", "chat");
             var scr = wsScreenSize();
             var plan = chatPlan(scr.w, scr.h);
             var wide = plan.wide;
@@ -6727,22 +6767,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
         function openWorkspaceDialog(){
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
-            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 工作区快照 v" + MOD_VERSION);
-            d.cont.defaults().pad(3).left();
-            try{ d.cont.left().top(); }catch(e00){ }
-            // v0.19.4（用户 m01690「你把工作区的标题居中了」）：标题明确左对齐。
-            // Arc 的 Dialog 标题行是 add(titleTable).growX()，Label 默认 left 但一旦被居中，
-            // 整行会按标题宽度撑开，下面的按钮行（fillX）跟着变宽 —— 直接钉死左对齐 + 底部按钮靠左。
-            try{ d.title.setAlignment(Packages.arc.util.Align.left); }catch(e0){ }
-            // v0.19.6（用户 m02101「标题还是居中的」）：Dialog 的标题是 add(titleTable).growX()（Dialog.java:79），
-            // titleTable 里又是 add(title).expandX().fillX()（Dialog.java:78）—— Label 被撑满整行时，
-            // 只要样式对齐不是 left，文字就飘到中间；而且这个 cell 一旦被撑开，下面的行也跟着拉宽。
-            // 这里把 titleTable 重建：cell 用自然宽度 + 左对齐，标题钉死在左上。
-            try{
-                d.titleTable.clearChildren();
-                d.titleTable.left();
-                d.titleTable.add(d.title).left().padLeft(2);
-            }catch(e0b){ }
+            var d = dualDialog("工作区快照", "ws");
             try{ d.buttons.left(); }catch(e0c){ }
             // v0.19.0：宽屏双栏（左列表 / 右详情），窄屏单栏靠「← 返回列表」翻。
             // v0.19.1：尺寸按屏幕算，不再写死 300/440×430。
@@ -8253,6 +8278,17 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         api.maiJobBadge = function(){ return jobBadgeText(); };
         api.maiJobManager = function(){ return openJobManager(); };
         api.maiWorkspaceDialog = function(){ return openWorkspaceDialog(); };
+        // v0.21.0 档1（用户 m04199/m04211「先做档1」）：对话窗与工作区窗共用一套外壳 —— 标题行左侧标题、
+        // 右侧「对话 / 工作区」分段开关，开一个就关掉另一个。这里只验纯状态（无头 Vars.ui === null 也能跑）。
+        api.maiDualProbe = function(){
+            var modes = dualModes();
+            var ok = (modes.length === 2 && modes[0] === "chat" && modes[1] === "ws"
+                      && dualModeCn("chat") === "对话" && dualModeCn("ws") === "工作区"
+                      && DUAL.last === "chat");
+            return (ok ? "ok " : "bad ") + "modes=" + modes.join(",")
+                   + " cn=" + dualModeCn("chat") + "/" + dualModeCn("ws")
+                   + " last=" + String(DUAL.last);
+        };
         api.maiWorkspaceExport = function(id){ return wsExportText(String(id)); };
         api.maiWorkspaceExportDisk = function(id){ return wsExportToDisk(String(id)); };
         api.maiWorkspaceImport = function(text){ return wsImportText(String(text)); };

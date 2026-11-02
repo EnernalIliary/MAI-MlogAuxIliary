@@ -85,7 +85,7 @@ import chats                   # noqa: E402  (v0.20.0 free-form chats; imports u
 PROTOCOL = 1
 # The sidecar is what gets restarted when a fix ships, and a stale process answers
 # /health with 200 all day, so let the answer say which build it is (v0.12.3).
-SIDECAR_VERSION = '0.20.3'
+SIDECAR_VERSION = '0.21.0'
 GAME = 'mindustry v160.7 (executor jar out/_server160.jar)'
 
 #: v0.14.2: every program this sidecar hands out is signed before it is analyzed
