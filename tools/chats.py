@@ -37,6 +37,13 @@ DETAIL_MAX = 1200
 #: hard ceiling for one whole turn, however the per-call timeouts add up
 OVERALL_TIMEOUT = 180.0
 
+# v0.22.0（档3）：模组每一轮把工作区快照一起发过来，侧车只做只读工具 —— 写代码仍由玩家在窗口里点。
+# 快照全量落进对话文件是为了「模型中途再查一次」也能查到，但必须夹住体积，不然一段对话就几 MB。
+WS_MAX = 40             # 一段对话最多记多少个工作区
+WS_PROCS_MAX = 40       # 每个工作区最多记多少台处理器
+WS_CODE_MAX = 6000      # 每台处理器最多留多少字符代码
+WS_NOTE_MAX = 500       # 备注最多留多少字符
+
 #: copied from jobqueue.Store: a write can lose a race on Windows and is retried
 SAVE_TRIES = 6
 SAVE_WAIT = 0.03
@@ -51,6 +58,10 @@ SYSTEM_PROMPT = (
     '调用 game_lookup，不要编造名字。\n'
     '- 玩家想要一份能直接用的代码时，可以先用 mlog_template 起个头，再按需求改。\n'
     '- 回答用简体中文，简短直接；代码放在三反引号里。不要长篇大论。\n'
+    '- 玩家提到「工作区」时，用 ws_list / ws_get / ws_search 去看他存在工作区里的东西；'
+    '那是模组每轮发过来的只读快照，不要编工作区里有什么。\n'
+    '- 工作区里的代码要改，就在回答里写清「哪个工作区、哪台处理器（坐标）、改成什么」，'
+    '让玩家自己贴进去；你没有写入权限，不要说「我已经改好了」。\n'
     '- 只调用上面列出的工具，不要假装还有别的工具。'
 )
 
@@ -131,6 +142,45 @@ TOOLS = [
                     'params': {'type': 'object', 'description': '模板参数'},
                 },
                 'required': ['template'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'ws_list',
+            'description': '列出玩家当前工作区（id、名字、状态、地图、处理器数、备注开头）；'
+                           '不确定用哪个工作区时先调这个',
+            'parameters': {
+                'type': 'object',
+                'properties': {},
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'ws_get',
+            'description': '取一个工作区的全部处理器与它们的代码（可以给 id、名字或名字的一部分）',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'string', 'description': '工作区 id 或名字；省略时取第一个'},
+                },
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'ws_search',
+            'description': '在工作区的名字、备注和处理器代码里搜一段文字，返回命中的行',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'q': {'type': 'string', 'description': '要找的文字'},
+                },
+                'required': ['q'],
             },
         },
     },
@@ -292,6 +342,10 @@ _RUNNING = set()
 _RUN_LOCK = threading.RLock()
 _GONE = set()
 
+# v0.22.0：工作区快照跟着「这一轮的对话」走 —— 每段对话在自己的线程里跑，用 thread-local 传进去，
+# 不动 _run_tool 的签名（那边是一堆按名字分派的纯函数，加参数会把所有工具都牵连一遍）。
+_CTX = threading.local()
+
 
 def store(path=None):
     """The process-wide store; main() may point it at --chats-dir once."""
@@ -341,6 +395,7 @@ def _brief(chat):
         'model': chat.get('model') or '',
         'tools_supported': chat.get('tools_supported'),
         'error': chat.get('error') or '',
+        'ws': len(chat.get('workspaces') or []),
     }
 
 
@@ -376,6 +431,9 @@ def _full(chat):
         'reply': reply,
         'tools': tools,
         'rounds': rounds,
+        'ws': len(chat.get('workspaces') or []),
+        'ws_at': chat.get('ws_at') or 0,
+        'ws_map': chat.get('ws_map') or '',
     }
 
 
@@ -475,6 +533,11 @@ def start(req):
         chat['state'] = 'running'
         chat['error'] = ''
         chat['model'] = str(state.get('model') or '')
+        # v0.22.0：模组每轮把当前工作区快照一并送过来；只读，落盘前先夹体积。
+        if 'workspaces' in req:
+            chat['workspaces'] = _ws_norm(req.get('workspaces'))
+            chat['ws_at'] = now
+            chat['ws_map'] = _cut(req.get('map') or '', 120)
         chat['updated'] = now
         _RUNNING.add(cid)
         try:
@@ -536,7 +599,76 @@ def _clip(text):
     return text
 
 
+def _cut(text, limit):
+    """Clip to `limit` characters with a visible tail; never raises on junk input."""
+    text = str(text if text is not None else '')
+    if limit <= 0:
+        return ''
+    if len(text) <= limit:
+        return text
+    return text[:limit] + '…（截断）'
+
+
+def _int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ws_norm(raw):
+    """Normalize the workspace snapshot the mod posts with each turn (v0.22.0).
+
+    The mod owns the real files; this is a read-only copy so the model can answer
+    "我第三个工作区那段代码有什么问题" without the player pasting anything. Every
+    field is optional and everything is clipped: a hostile or broken payload must
+    not be able to blow up the chat file.
+    """
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        wid = _cut(str(item.get('id') or '').strip(), 40)
+        if not wid:
+            continue
+        procs = []
+        rows = item.get('procs')
+        if isinstance(rows, list):
+            for row in rows[:WS_PROCS_MAX]:
+                if not isinstance(row, dict):
+                    continue
+                code = row.get('code')
+                procs.append({'x': _int(row.get('x')),
+                              'y': _int(row.get('y')),
+                              'block': _cut(row.get('block') or '', 60),
+                              'desc': _cut(row.get('desc') or '', 200),
+                              'code': _cut(code if isinstance(code, str) else '', WS_CODE_MAX)})
+        jobs = []
+        jl = item.get('jobs')
+        if isinstance(jl, list):
+            for job in jl[:12]:
+                if not isinstance(job, dict):
+                    continue
+                jobs.append({'id': _cut(job.get('id') or '', 40),
+                             'state': _cut(job.get('state') or '', 20)})
+        out.append({'id': wid,
+                    'name': _cut(item.get('name') or '', 120),
+                    'state': 'archived' if str(item.get('state') or '') == 'archived' else 'active',
+                    'map': _cut(item.get('map') or '', 120),
+                    'notes': _cut(item.get('notes') or '', WS_NOTE_MAX),
+                    'updated': _int(item.get('updated')),
+                    'procs': procs, 'jobs': jobs})
+        if len(out) >= WS_MAX:
+            break
+    return out
+
+
 def _run_loop(chat):
+    # v0.22.0：把这一轮的工作区快照挂到本线程，工具实现自己来取。
+    _CTX.ws = [w for w in (chat.get('workspaces') or []) if isinstance(w, dict)]
+    _CTX.map = str(chat.get('ws_map') or '')
     msgs = [{'role': 'system', 'content': SYSTEM_PROMPT}]
     for m in chat.get('messages') or []:
         msgs.append(dict(m))
@@ -772,6 +904,12 @@ def _run_tool(name, args):
         return _game_lookup(args)
     if name == 'mlog_template':
         return _mlog_template(args)
+    if name == 'ws_list':
+        return _ws_list(args)
+    if name == 'ws_get':
+        return _ws_get(args)
+    if name == 'ws_search':
+        return _ws_search(args)
     return False, '没有这个工具：%s' % (name or '（空）')
 
 
@@ -795,6 +933,145 @@ def _mlog_template(args):
         refs = ['container1', 'message1']
     note = '\n\n（这里的 %s 等是占位链接名，按你的处理器实际链接改名）' % '/'.join(refs)
     return True, code + note
+
+
+# ---------------------------------------------------------------- workspace tools (v0.22.0)
+
+def _ws_ctx():
+    """The snapshot the mod attached to this turn (empty when it sent none)."""
+    ws = getattr(_CTX, 'ws', None)
+    if not isinstance(ws, list):
+        return []
+    return [w for w in ws if isinstance(w, dict)]
+
+
+def _ws_state_cn(state):
+    return '已归档' if str(state or '') == 'archived' else '进行中'
+
+
+def _ws_line(ws):
+    procs = [r for r in (ws.get('procs') or []) if isinstance(r, dict)]
+    notes = _one_line(ws.get('notes') or '')
+    if len(notes) > 60:
+        notes = notes[:60] + '…'
+    bits = ['「%s」' % (ws.get('name') or '?'),
+            'id=%s' % (ws.get('id') or '?'),
+            _ws_state_cn(ws.get('state')),
+            '%d 台' % len(procs)]
+    if ws.get('map'):
+        bits.append('地图 %s' % ws['map'])
+    line = ' · '.join(bits)
+    if notes:
+        line += ' · 备注：' + notes
+    return line
+
+
+def _ws_list(args):
+    ws = _ws_ctx()
+    if not ws:
+        return False, ('玩家这一轮没有提供工作区快照（可能是他一个工作区都没有，'
+                       '或者这次是旧版模组）。不要编工作区，直接说没看到。')
+    lines = ['共 %d 个工作区：' % len(ws)]
+    for i, one in enumerate(ws):
+        lines.append('%d. %s' % (i + 1, _ws_line(one)))
+    return True, _clip('\n'.join(lines))
+
+
+def _ws_find(ws, key):
+    """id 精确 -> 名字精确 -> id/名字包含；都没命中返回 None。"""
+    key = str(key or '').strip()
+    if not key:
+        return ws[0] if ws else None
+    low = key.lower()
+    for one in ws:
+        if str(one.get('id') or '').lower() == low:
+            return one
+    for one in ws:
+        if str(one.get('name') or '').strip().lower() == low:
+            return one
+    for one in ws:
+        if low in str(one.get('name') or '').lower() or low in str(one.get('id') or '').lower():
+            return one
+    return None
+
+
+def _ws_get(args):
+    ws = _ws_ctx()
+    if not ws:
+        return False, '玩家这一轮没有提供工作区快照，看不到工作区里的代码'
+    key = _str_arg(args, 'id').strip()
+    one = _ws_find(ws, key)
+    if one is None:
+        names = '、'.join('「%s」' % (w.get('name') or w.get('id') or '?') for w in ws)
+        return False, '没有这个工作区：%s；现在有：%s' % (key, names)
+    procs = [r for r in (one.get('procs') or []) if isinstance(r, dict)]
+    jobs = [j for j in (one.get('jobs') or []) if isinstance(j, dict)]
+    out = ['工作区 %s' % _ws_line(one)]
+    notes = str(one.get('notes') or '').strip()
+    if notes:
+        out.append('备注：' + notes)
+    if jobs:
+        out.append('作业：' + '、'.join('#%s %s' % (j.get('id') or '?', j.get('state') or '?')
+                                       for j in jobs[-5:]))
+    if not procs:
+        out.append('这个工作区里没有处理器。')
+        return True, _clip('\n'.join(out))
+    out.append('处理器 %d 台：' % len(procs))
+    for i, row in enumerate(procs):
+        head = '%d) @%s,%s %s' % (i + 1, row.get('x', 0), row.get('y', 0),
+                                  row.get('block') or '处理器')
+        if row.get('desc'):
+            head += ' —— ' + str(row['desc'])[:80]
+        out.append(head)
+        code = str(row.get('code') or '')
+        if not code.strip():
+            out.append('   （这台还没写过代码）')
+            continue
+        rows = code.split('\n')
+        out.append('   代码（%d 行）：' % len(rows))
+        for line in rows:
+            out.append('   ' + line)
+    return True, _clip('\n'.join(out))
+
+
+def _ws_search(args):
+    ws = _ws_ctx()
+    if not ws:
+        return False, '玩家这一轮没有提供工作区快照，搜不了工作区'
+    q = _str_arg(args, 'q').strip()
+    if not q:
+        return False, 'q 不能为空'
+    if len(q) > 200:
+        return False, 'q 太长了（最多 200 字符）'
+    low = q.lower()
+    hits = []
+    for one in ws:
+        name = str(one.get('name') or '')
+        if low in name.lower():
+            hits.append('工作区「%s」的名字里命中' % (name or one.get('id') or '?'))
+        notes = str(one.get('notes') or '')
+        if low in notes.lower():
+            hits.append('工作区「%s」的备注里命中：%s'
+                        % (name or '?', _one_line(notes)[:120]))
+        for row in (one.get('procs') or []):
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get('code') or '')
+            if low not in code.lower():
+                continue
+            for n, line in enumerate(code.split('\n')):
+                if low in line.lower():
+                    hits.append('工作区「%s」@%s,%s 第 %d 行：%s'
+                                % (name or '?', row.get('x', 0), row.get('y', 0),
+                                   n + 1, line.strip()[:160]))
+                    break
+            if len(hits) >= 20:
+                break
+        if len(hits) >= 20:
+            break
+    if not hits:
+        return False, '工作区里没有找到「%s」' % q
+    return True, _clip('找到 %d 处：\n%s' % (len(hits), '\n'.join(hits)))
 
 
 # ---------------------------------------------------------------- bundled data

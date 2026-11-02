@@ -1517,10 +1517,13 @@ class _ChatStub:
     a second turn of the same chat.
     """
 
-    def __init__(self):
+    def __init__(self, tool=None, args=None, reply=None):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         self.posts = []
         self.delay = 0.6          # long enough that the next POST sees state=running
+        self.tool = tool or 'mlog_check'
+        self.args = args if args is not None else '{"code":"jump 0 always"}'
+        self.reply = reply or '检查完了：没有问题。'
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -1539,13 +1542,13 @@ class _ChatStub:
                     time.sleep(outer.delay)
                 messages = body.get('messages') or []
                 if any(m.get('role') == 'tool' for m in messages):
-                    message = {'role': 'assistant', 'content': '检查完了：没有问题。'}
+                    message = {'role': 'assistant', 'content': outer.reply}
                 else:
                     message = {'role': 'assistant', 'content': '',
                                'tool_calls': [{'id': 'call_abc', 'type': 'function',
                                                'function': {
-                                                   'name': 'mlog_check',
-                                                   'arguments': '{"code":"jump 0 always"}'}}]}
+                                                   'name': outer.tool,
+                                                   'arguments': outer.args}}]}
                 payload = {'model': 'stub',
                            'choices': [{'message': message, 'finish_reason': 'stop'}]}
                 data = json.dumps(payload).encode('utf-8')
@@ -1695,7 +1698,58 @@ def test_chats():
                  for m in sent), 'the earlier reply was not in the continuation prompt')
         checks += 1
 
-        # 8. g) delete is final; a missing id is 400, an unknown one 404
+        # 8. v0.22.0 档3：工作区快照随 POST /chat 一起到，ws_* 工具在侧车这边只读地看它
+        ws_stub = _ChatStub(tool='ws_get', args='{"id":"备料"}', reply='看完了：那台处理器在空转。')
+        try:
+            code, doc = srv.post('/llm', {'url': ws_stub.chat_url, 'model': 'stub'})
+            need(code == 200, 'pointing the sidecar at the workspace stub answered %r' % (code,))
+            snapshot = [
+                {'id': 'ws1', 'name': '区域 A', 'state': 'active', 'map': '区域',
+                 'notes': '传送带头', 'updated': 11,
+                 'procs': [{'x': 1, 'y': 2, 'block': '处理器', 'code': 'set n 0'}],
+                 'jobs': [{'id': 'job1', 'state': 'done'}]},
+                {'id': 'ws2', 'name': '备料', 'state': 'archived', 'map': '区域',
+                 'procs': [{'x': 12, 'y': 34, 'block': '处理器', 'desc': '老逻辑',
+                            'code': 'set n 0\njump 0 always'}],
+                 'jobs': []},
+            ]
+            code, doc = srv.post('/chat', {'text': '备料那个工作区的代码在干嘛',
+                                           'workspaces': snapshot, 'map': '区域'})
+            need(code == 200 and doc.get('state') == 'running',
+                 'POST /chat with a snapshot answered %r %r' % (code, doc))
+            wcid = doc.get('id')
+            chat = wait_idle(wcid)
+            need(not chat.get('error'), 'the workspace run ended badly: %r' % (chat.get('error'),))
+            tool_msg = [m for m in chat.get('messages') or [] if m.get('role') == 'tool']
+            need(len(tool_msg) == 1, 'expected one workspace tool reply, got %r' % (len(tool_msg),))
+            body = str(tool_msg[0].get('content') or '')
+            need('@12,34' in body and 'jump 0 always' in body,
+                 'ws_get did not render the processor code: %r' % (body[:200],))
+            need(str(tool_msg[0].get('name')) == 'ws_get',
+                 'the tool reply is not named ws_get: %r' % (tool_msg[0].get('name'),))
+            need(chat.get('ws') == 2 and chat.get('ws_map') == '区域',
+                 'the snapshot was not kept on the chat: ws=%r map=%r'
+                 % (chat.get('ws'), chat.get('ws_map')))
+            sent = ws_stub.posts[0].get('messages') or []
+            need(any('ws_list' in str(m.get('content') or '') and m.get('role') == 'system'
+                     for m in sent), 'the system prompt does not advertise the workspace tools')
+            need('ws_list' in json.dumps(ws_stub.posts[0].get('tools') or [], ensure_ascii=False),
+                 'the workspace tools were not offered to the model')
+            checks += 1
+
+            # a second turn without a snapshot must not keep serving stale workspaces
+            code, doc = srv.post('/chat', {'id': wcid, 'text': '那先不聊工作区了'})
+            need(code == 200, 'the plain continuation was refused: %r %r' % (code, doc))
+            chat = wait_idle(wcid)
+            need(chat.get('ws') == 2, 'a turn without a snapshot dropped the old one')
+            checks += 1
+            code, doc = srv.delete('/chat?id=' + wcid)
+            need(code == 200 and doc.get('deleted') is True,
+                 'deleting the workspace chat: %r %r' % (code, doc))
+        finally:
+            ws_stub.close()
+
+        # 9. g) delete is final; a missing id is 400, an unknown one 404
         code, doc = srv.delete('/chat?id=' + cid)
         need(code == 200 and doc.get('deleted') is True, 'DELETE /chat: %r %r' % (code, doc))
         code, doc = srv.get('/chat?id=' + cid)

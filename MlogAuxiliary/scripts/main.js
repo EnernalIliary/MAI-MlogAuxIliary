@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.21.1";
+    var MOD_VERSION = "0.22.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -4823,8 +4823,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(txt === ""){ hint("先说点什么再点发送"); return; }
             var id = (CHAT_UI.sel === null || CHAT_UI.sel === undefined) ? "" : String(CHAT_UI.sel);
             // 没选会话时不带 id：让侧车新建一段，返回的 id 就是新会话。
-            var body = (id === "") ? JSON.stringify({text: txt})
-                                   : JSON.stringify({id: id, text: txt});
+            // v0.22.0：同一次请求把工作区快照带上（侧车的 ws_list/ws_get/ws_search 靠它）。
+            var req = {text: txt};
+            if(id !== ""){ req.id = id; }
+            try{ req.workspaces = wsDigest(); req.map = wsMapName(); }catch(ew){ }
+            var body = JSON.stringify(req);
             CHAT_UI.sending = true;
             CHAT_UI.polling = false;
             chatRefreshAll();
@@ -5073,6 +5076,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             dp.add("工具 " + String(chatArrLen(m.tools)) + " 次 · 轮次 " + String(Number(m.rounds || 0))
                    + (degrade ? " · 端点不支持工具（已降级成纯文本）" : ""))
                 .color(Pal.gray).fontScale(0.85).width(iw).left().ellipsis(true).row();
+            // v0.22.0：这一段对话里助手能看到几个工作区（快照随每轮请求发过去，侧车只读）。
+            if(Number(m.ws || 0) > 0){
+                dp.add("助手能看到 " + String(Number(m.ws)) + " 个工作区（ws_list / ws_get / ws_search，只读）")
+                    .color(Pal.gray).fontScale(0.8).width(iw).left().ellipsis(true).row();
+            }
             dp.add("────────────────").color(Pal.gray).fontScale(0.85).width(iw).left().ellipsis(true).row();
             var msgs = (m.messages === null || m.messages === undefined) ? [] : m.messages;
             var start = 0;
@@ -5515,6 +5523,51 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 if(obj !== null && obj !== undefined){ out.push(obj); }
             }
             return out;
+        }
+
+        // ------------------------------------------------ 工作区快照 -> 侧车（v0.22.0 档3）
+        // 对话每一轮把工作区快照随请求发过去，侧车的 ws_list / ws_get / ws_search 就有东西可看。
+        // 是**只读**快照：助手只能看你工作区里有什么、帮你改代码给建议，写进去仍要你自己点。
+        // 体积必须夹住 —— 侧车要把它整段存进对话文件，一段对话几十个工作区就是几 MB。
+        function wsDigestOf(all, map, budget){
+            var list = (all === null || all === undefined) ? [] : all;
+            var cap = Number(budget || 120000);
+            if(!(cap > 0)){ cap = 120000; }
+            var out = [], total = 0, i, k;
+            for(i = 0; i < list.length && out.length < 40; i++){
+                var ws = list[i];
+                if(ws === null || ws === undefined){ continue; }
+                var procs = [], rows = ws.procs || [];
+                for(k = 0; k < rows.length && procs.length < 40; k++){
+                    var row = rows[k];
+                    if(row === null || row === undefined){ continue; }
+                    var code = String(row.code || "");
+                    if(code.length > 6000){ code = code.substring(0, 6000); }
+                    if(total + code.length > cap){ code = ""; }
+                    total += code.length;
+                    procs.push({x: Number(row.x || 0), y: Number(row.y || 0),
+                                block: String(row.block || ""),
+                                desc: String(row.desc || "").substring(0, 200),
+                                code: code});
+                }
+                var jobs = [], jl = ws.jobs || [];
+                for(k = jl.length - 1; k >= 0 && jobs.length < 12; k--){
+                    var j = jl[k];
+                    if(j === null || j === undefined){ continue; }
+                    jobs.push({id: String(j.id || ""), state: String(j.state || "")});
+                }
+                jobs.reverse();
+                out.push({id: String(ws.id || ""), name: String(ws.name || ""),
+                          state: String(ws.state || "active"), map: String(ws.map || ""),
+                          notes: String(ws.notes || "").substring(0, 500),
+                          updated: Number(ws.updated || 0), procs: procs, jobs: jobs});
+            }
+            return out;
+        }
+
+        function wsDigest(){
+            try{ return wsDigestOf(wsAll(), wsMapName(), 120000); }
+            catch(ew){ return []; }
         }
 
         function wsLastJobText(ws){
@@ -8291,6 +8344,30 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         api.maiWorkspaceDialog = function(){ return openWorkspaceDialog(); };
         // v0.21.0 档1（用户 m04199/m04211「先做档1」）：对话窗与工作区窗共用一套外壳 —— 标题行左侧标题、
         // 右侧「对话 / 工作区」分段开关，开一个就关掉另一个。这里只验纯状态（无头 Vars.ui === null 也能跑）。
+        // v0.22.0（档3）：工作区快照的压缩逻辑是纯函数，无头环境直接喂假数据验一遍 ——
+        // 真机上它读的是 wsAll() 的落盘文件，测试里不碰磁盘。
+        api.maiWsDigestProbe = function(){
+            var fake = [
+                {id: "w1", name: "甲", state: "active", map: "区域", notes: "备注", updated: 5,
+                 procs: [{x: 1, y: 2, block: "处理器", desc: "d", code: "set n 0"}],
+                 jobs: [{id: "j1", state: "done"}]},
+                {id: "w2", name: "乙", state: "archived", map: "?",
+                 procs: [{x: 3, y: 4, block: "处理器", code: "1111111111"}], jobs: []}
+            ];
+            var tight = wsDigestOf(fake, "区域", 12);
+            var wide = wsDigestOf(fake, "区域", 120000);
+            var ok = (tight.length === 2 && wide.length === 2
+                      && String(wide[0].procs[0].code) === "set n 0"
+                      && String(wide[1].procs[0].code) === "1111111111"
+                      && String(tight[1].procs[0].code) === ""
+                      && Number(tight[1].procs[0].x) === 3
+                      && tight[0].jobs.length === 1 && String(tight[0].jobs[0].id) === "j1"
+                      && String(tight[1].state) === "archived");
+            return (ok ? "ok " : "bad ") + "ws=" + String(wide.length)
+                   + " procs=" + String(wide[0].procs.length) + "+" + String(wide[1].procs.length)
+                   + " clipped=" + String(tight[1].procs[0].code.length)
+                   + " kept=" + String(wide[1].procs[0].code.length);
+        };
         api.maiDualProbe = function(){
             var modes = dualModes();
             var ok = (modes.length === 2 && modes[0] === "chat" && modes[1] === "ws"

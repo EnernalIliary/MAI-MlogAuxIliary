@@ -365,6 +365,9 @@ def main():
     # v0.21.0 档1（用户 m04199「能直接把工作区快照并入MAI对话里面吗」）：两个窗口共用一个外壳，
     # 标题行右侧是「对话 / 工作区」分段开关，开一个就关掉另一个。纯状态探针，窗口本身要真机看。
     "print('MAIDUAL:' + maiDualProbe());",
+    # v0.22.0 档3（用户 m04334「完成之后继续做档3」）：工作区快照随 POST /chat 一起下发，
+    # 侧车只读地用 ws_list / ws_get / ws_search 看它。这里只验纯函数的裁剪与预算。
+    "print('MAIWSDIGEST:' + maiWsDigestProbe());",
     # v0.16.0 B1: 存蓝图在无头环境（Vars.schematics 为 null）必须先守住，不能抛。
     "print('MAIBP:' + maiBlueprintSaveProbe(JSON.stringify({x1:10, y1:10, x2:20, y2:20})));",
     # v0.16.1 B2/B4: 签名 payload v2 的 meta 要能在游戏里解出来（Java Base64 + zlib）。
@@ -405,7 +408,7 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIBP:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIWSDIGEST:', 'MAIBP:',
                               'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:', 'MAITHEME:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
@@ -593,6 +596,12 @@ def main():
         problems.append('v0.21.0: the shared dialog shell lost its mode switch '
                         '(want MAIDUAL:ok modes=chat,ws ...): %r'
                         % [l for l in lines if l.startswith('MAIDUAL:')][:1])
+    # v0.22.0 档3: the workspace snapshot that rides on POST /chat must be trimmed to a budget --
+    # full code on every processor of every workspace would blow up the request.
+    if 'MAIWSDIGEST:ok' not in joined:
+        problems.append('v0.22.0: the workspace digest lost its budget/trim rules '
+                        '(want MAIWSDIGEST:ok ws=2 ...): %r'
+                        % [l for l in lines if l.startswith('MAIWSDIGEST:')][:1])
     if '为什么：端点回了空内容' not in joined:
         problems.append('v0.15.0: the failure explanation lost its wording: %r'
                         % [l for l in lines if l.startswith('MAIJOBPANELDIAG:')][:1])
@@ -1411,6 +1420,21 @@ def main():
                          'the segments are back to a 64px fixed width, so 「工作区」wraps onto two lines'),):
         if needle in code_only:
             problems.append('v0.21.1: ' + why)
+    # v0.22.0 档3（用户 m04334「完成之后继续做档3」）：工作区快照随每轮对话下行，侧车只读地看它。
+    # ① 快照必须裁剪（每台代码 6000、总预算 120000、作业只留最近 12 条），否则一次请求能到几十 MB；
+    # ② 每轮 POST /chat 都要带上 workspaces + map；③ 对话面板要说明助手能看到几个工作区。
+    for needle, why in (('function wsDigestOf(',
+                         'the workspace digest (budget + trim) is gone: the request would carry every byte'),
+                         ('req.workspaces = wsDigest()',
+                         'a chat turn no longer carries the workspace snapshot'),
+                         ('req.map = wsMapName()',
+                         'a chat turn no longer tells the sidecar which map the workspaces belong to'),
+                         ('api.maiWsDigestProbe',
+                         'the digest probe is gone (the budget rules are untested)'),
+                         ('个工作区（ws_list / ws_get / ws_search，只读）',
+                         'the transcript no longer says how many workspaces the assistant can see')):
+        if needle not in code_only:
+            problems.append('v0.22.0: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
@@ -2079,7 +2103,7 @@ def main():
         print('  batch write: ' + wm[:170])
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
-                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:',
+                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIWSDIGEST:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
                         'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:', 'MAITHEME:',
                         'MAIJOBTHINK2:')):
