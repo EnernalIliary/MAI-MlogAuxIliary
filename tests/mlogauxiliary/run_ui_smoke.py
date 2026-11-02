@@ -1275,7 +1275,7 @@ def main():
     # dialog is list | 2px separator | transcript, and a running turn is polled from the frame hook.
     for needle, why in (('function openChatDialog(',
                          'the free-chat dialog is gone'),
-                        ('d.cont.image(Tex.whiteui).width(2)',
+                        ('body.image(Tex.whiteui).width(2)',
                          'the separator between the chat list and the transcript is gone'),
                         ('function chatTick(',
                          'nothing polls a running chat turn any more'),
@@ -1323,6 +1323,27 @@ def main():
                          'the manager chat bar is stretched to the dialog edge again')):
         if needle in code_only:
             problems.append('v0.20.2: ' + why)
+    # v0.20.3（用户 m03832「还是不对」）：Arc 的 Table 列宽是**跨行共享**的 —— 两栏行 + 输入行落在
+    # 同一个 cont 里时，输入行（全宽 974）会把第 0 列顶成 980，三列相加 1754 ⇒ 窗口 1768、左栏贴左、
+    # 底栏出屏。两栏必须包进只有一条列的 wrapper（body），输入行和 body 同属 cont 的唯一一列。
+    for needle, why in (('var body = wsT();',
+                         'the chat panes are no longer wrapped in a single-column table'),
+                        ('body.pane(listT).width(plan.listW).height(availH).left()',
+                         'the chat list pane lost its fixed width / left alignment'),
+                        ('d.cont.add(body).width(Math.max(200, Number(plan.availW) - 6))',
+                         'the chat pane row is no longer pinned to the dialog width budget'),
+                        ('cols=',
+                         'the chat geometry dump no longer reports the cont column count'),
+                        ('budget=',
+                         'the chat geometry dump no longer reports the width budget')):
+        if needle not in code_only:
+            problems.append('v0.20.3: ' + why)
+    for needle, why in (('d.cont.pane(listT).width(plan.listW).height(availH);',
+                         'the two panes are direct cont cells again (three columns, a 1768-wide window)'),
+                        ('var cellR = d.cont.pane(detailT)',
+                         'the detail pane is added straight to cont again (second full-width row wins the column)')):
+        if needle in code_only:
+            problems.append('v0.20.3: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),

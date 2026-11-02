@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.20.2";
+    var MOD_VERSION = "0.20.3";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -5150,16 +5150,26 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             CHAT_UI.listPane = null;
             CHAT_UI.detailPane = null;
             if(wide){
+                // v0.20.3（用户 m03832「还是不对」）：两栏这一行必须先包进**只有一条列**的 wrapper。
+                // 原来两栏 + 分隔线是 cont 同一行里的三个 cell ⇒ cont 变成三列；下面输入行又是另一条
+                // 只占第 0 列的全宽行（974）。Arc 的 Table 列宽跨行共享（Table.java computeSize 里
+                // columnPrefWidth[column] 取各行同一列的最大值），第 0 列就被顶成 980，
+                // 三列相加 980+16+758 = 1754 ⇒ 窗口被撑到 1768（真机 dump 实测），左栏贴左、底栏出屏。
+                // 包成 body 之后 cont 只有一列（body 行和输入行都 974），窗口宽 = availW + 外壳 pad。
+                var body = wsT();
+                body.left().top();
                 try{
-                    var cellL = d.cont.pane(listT).width(plan.listW).height(availH);
+                    var cellL = body.pane(listT).width(plan.listW).height(availH).left();
                     try{ CHAT_UI.listPane = cellL.get(); }catch(eg1){ }
                     // v0.20.0（用户 m02455「对话选单和右侧对话详情的分隔也加回去」）：两栏之间画一条 2px 竖线。
-                    // atlas 没起来（无头/异常）就退回 14px 空白，别让整行布局崩掉（两种都是 22 里的 2+14+6 的一部分）。
-                    try{ d.cont.image(Tex.whiteui).width(2).height(availH).color(Pal.gray).padLeft(7).padRight(7); }
-                    catch(es){ d.cont.add(new Packages.arc.scene.ui.layout.Table()).width(14).height(availH); }
-                    var cellR = d.cont.pane(detailT).width(plan.detailW).height(availH).row();
+                    // atlas 没起来（无头/异常）就退回 14px 空白，别让整行布局崩掉（两种都是 gapW 里的 2+14）。
+                    try{ body.image(Tex.whiteui).width(2).height(availH).color(Pal.gray).padLeft(7).padRight(7); }
+                    catch(es){ body.add(new Packages.arc.scene.ui.layout.Table()).width(14).height(availH); }
+                    var cellR = body.pane(detailT).width(plan.detailW).height(availH).left().row();
                     try{ CHAT_UI.detailPane = cellR.get(); }catch(eg2){ }
-                }catch(e2){ log("chat two-pane failed: " + e2); d.cont.add(listT).row(); }
+                    // body 内部三列合计 = listW + 16 + detailW = availW - 6，正好和下面的输入行同宽。
+                    d.cont.add(body).width(Math.max(200, Number(plan.availW) - 6)).left().row();
+                }catch(e2){ log("chat two-pane failed: " + e2); d.cont.add(listT).row(); CHAT_UI.listPane = null; CHAT_UI.detailPane = null; }
                 CHAT_UI.listW = plan.listW;
                 CHAT_UI.detailW = plan.detailW;
             }else{
@@ -5186,6 +5196,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 inRow.add(tf).width(Math.max(220, Number(plan.availW) - 160)).height(34).padRight(6).left();
                 inRow.button("发送", function(){ chatSend(); }).width(110).height(34).ellipsis(true).left();
             }catch(e5){ log("chat input row failed: " + e5); }
+            // v0.20.3：输入行与 body 行同处 cont 的唯一一条列（都 974），不会再产生第二列把窗口顶宽。
             d.cont.add(inRow).width(Math.max(200, Number(plan.availW) - 6)).left().row();
             CHAT_UI.open = true;
             CHAT_UI.d = d;
@@ -6033,6 +6044,17 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 }catch(e1){ }
                 var parts = [];
                 parts.push("listW=" + String(CHAT_UI.listW) + " detailW=" + String(CHAT_UI.detailW));
+                // v0.20.3：把 cont 的列数与预算一起打出来 —— 窗口被撑宽的根因就是 cont 出现多条列，
+                // 下次真机日志里看 cols 是否 1、dialog 宽是否等于 budget 就能一眼判定。
+                try{
+                    var ccols = 0;
+                    try{ ccols = Number(d.cont.getColumns()); }catch(c1){ ccols = -1; }
+                    var cpref = 0;
+                    try{ cpref = Math.round(Number(d.cont.getPrefWidth())); }catch(c2){ cpref = -1; }
+                    var budget = Math.round(Number(CHAT_UI.listW) + 22 + Number(CHAT_UI.detailW));
+                    parts.push("cont(" + wsGeomOne(d.cont) + " cols=" + String(ccols) + " pref=" + String(cpref)
+                        + " budget=" + String(budget) + " dw=" + String(Math.round(Number(d.getWidth()))) + ")");
+                }catch(c0){ }
                 if(CHAT_UI.listPane !== null && CHAT_UI.listPane !== undefined){ parts.push("listPane(" + wsGeomOne(CHAT_UI.listPane) + ")"); }
                 if(CHAT_UI.detailPane !== null && CHAT_UI.detailPane !== undefined){ parts.push("detailPane(" + wsGeomOne(CHAT_UI.detailPane) + ")"); }
                 if(CHAT_UI.tf !== null && CHAT_UI.tf !== undefined){ parts.push("input(" + wsGeomOne(CHAT_UI.tf) + ")"); }
