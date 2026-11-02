@@ -1299,12 +1299,16 @@ def main():
     # v0.20.1 (user m02850 "没有看到哪里更新了"): the chat dialog used to be reachable only from the
     # job manager, which itself needs a submitted job -- add a direct entry on the blueprint page and in
     # the workspace snapshot dialog, so the new feature is actually visible.
+    # v0.21.1（用户 m04334「合并控制面板和MAI对话吧」）：这两个入口已合成一个 —— 只查合并后的那个，
+    # 原来的「MAI 对话」按钮与工作区底栏「＋ 对话」必须消失（改由标题行的模式分段开关承担）。
+    if 'btns.button("MAI " + LOGIC_NAME' not in code_only:
+        problems.append('v0.21.1: the blueprint page lost the merged logic-assistant entry')
     for needle, why in (('btns.button("MAI 对话"',
-                         'the blueprint page lost its direct chat entry again'),
+                         'the old separate "MAI 对话" button is back next to the merged entry'),
                          ('d.buttons.button("＋ 对话"',
-                         'the workspace dialog lost its chat entry again')):
-        if needle not in code_only:
-            problems.append('v0.20.1: ' + why)
+                         'the workspace footer got its own chat button back (the mode switch replaces it)')):
+        if needle in code_only:
+            problems.append('v0.21.1: ' + why)
     # v0.20.2（用户 m03006「左边的新对话窗口太大了已经超出左边了」/ m03017「新对话应该在右边」/
     # m03682「现在的「＋ 新对话」按钮占满了整个左边的屏幕」）：
     # ① 宽度预算必须自洽（listW+gapW+detailW === availW，上一版漏了外壳 pad 3+3 就外溢）；
@@ -1364,24 +1368,49 @@ def main():
                          'the mode switch no longer closes the other dialog'),
                          ('function dualHideOthers(',
                          'nothing hides the sibling dialog before opening one'),
-                         ('var d = dualDialog("自由对话", "chat");',
+                         ('var d = dualDialog("chat");',
                          'the chat dialog builds its own frame again'),
-                         ('var d = dualDialog("工作区快照", "ws");',
+                         ('var d = dualDialog("ws");',
                          'the workspace dialog builds its own frame again'),
-                         ('seg.button("对话"',
+                         ('seg.button(dualModeCn("chat")',
                          'the title row lost its chat segment button'),
-                         ('seg.button("工作区"',
+                         ('seg.button(dualModeCn("ws")',
                          'the title row lost the workspace segment button'),
                          ('dualChrome(d, mode);',
                          'the shared frame is built but never decorated')):
         if needle not in code_only:
             problems.append('v0.21.0: ' + why)
-    for needle, why in (('new Packages.arc.scene.ui.Dialog("Mlog辅助 · 自由对话 v"',
+    for needle, why in (('new Packages.arc.scene.ui.Dialog("Mlog辅助 · 逻辑助手"',
+                         'a dialog is hand-rolled again instead of going through dualDialog()'),
+                         ('new Packages.arc.scene.ui.Dialog("Mlog辅助 · 自由对话 v"',
                          'the chat dialog is back to a hand-rolled Dialog (a second copy of the title fix)'),
                          ('new Packages.arc.scene.ui.Dialog("Mlog辅助 · 工作区快照 v"',
                          'the workspace dialog is back to a hand-rolled Dialog')):
         if needle in code_only:
             problems.append('v0.21.0: ' + why)
+    # v0.21.1（用户 m04334：①「工作区的按钮宽度不够，被换行了」②「合并控制面板和MAI对话」③「合并之后要加个逻辑标志并染上主题色」）
+    # ① 分段按钮的宽度必须按字数给（64 装不下「工作区」+ 内边距 ⇒ Label 折行），并配 ellipsis 兜底；
+    # ② 只剩一个入口 openLogicAssistant()，按上次用的模式打开；③ 标题行与入口按钮前各有一个主题色方块当逻辑标志。
+    for needle, why in (('function dualSegWidth(',
+                         'the mode segments go back to one fixed width (the 3-char label wraps again)'),
+                         ('width(dualSegWidth("ws"))',
+                         'the workspace segment no longer sizes itself by its label'),
+                         ('LOGIC_NAME = "逻辑助手"',
+                         'the merged window lost its single name'),
+                         ('d.titleTable.image(Tex.whiteui, themeColor())',
+                         'the logic mark in the title row is gone (or no longer theme-coloured)'),
+                         ('btns.image(Tex.whiteui, themeColor())',
+                         'the entry button lost the theme-coloured logic mark'),
+                         ('function openLogicAssistant(',
+                         'the single entry point (open last mode) is gone'),
+                         ('api.maiLogicAssistant',
+                         'the console probe for the merged entry is gone')):
+        if needle not in code_only:
+            problems.append('v0.21.1: ' + why)
+    for needle, why in (('width(64).padLeft(6)',
+                         'the segments are back to a 64px fixed width, so 「工作区」wraps onto two lines'),):
+        if needle in code_only:
+            problems.append('v0.21.1: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
@@ -1527,7 +1556,7 @@ def main():
              'v0.16.1: the zlib branch of the payload decoder is gone'),
             ('function blueprintCtxOf(name){',
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
-            ('btns.button("MAI 控制面板", function(){ openWorkspaceDialog(); }).width(150);',
+            ('btns.button("MAI " + LOGIC_NAME, function(){',
              'v0.18.1: the blueprint page entry button is gone'),
             ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
              'v0.17.1: the schematic info page MAI button is gone'),
@@ -1549,7 +1578,7 @@ def main():
              'v0.16.1: the zlib branch of the payload decoder is gone'),
             ('function blueprintCtxOf(name){',
              'v0.16.1: reading a blueprint context out of its tiles is gone'),
-            ('btns.button("MAI 控制面板", function(){ openWorkspaceDialog(); }).width(150);',
+            ('btns.button("MAI " + LOGIC_NAME, function(){',
              'v0.18.1: the blueprint page entry button is gone'),
             ('info.buttons.button("MAI", function(){ openBlueprintChat(nm); }).width(110);',
              'v0.17.1: the schematic info page MAI button is gone'),

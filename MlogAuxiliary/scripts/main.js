@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.21.0";
+    var MOD_VERSION = "0.21.1";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -5123,14 +5123,19 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             catch(e){ dp.add(chatFlat(text)).width(iw).left().ellipsis(true).row(); }
         }
 
-        // ------------------------------------------------ 共用双栏壳（v0.21.0 档1）
-        // 用户 m04199：想把「工作区快照」并进对话窗。档1 的做法是两个窗口共用同一套外壳：
-        // 标题左对齐 + 标题行右侧「对话 / 工作区」分段开关 + 开一个就关掉另一个（靠各自 hidden() 清理状态）。
-        // 各窗自己的分栏宽度仍由 chatPlan() / wsDialogPlan() 决定（两者已有探针断言，本版不动）。
+        // ------------------------------------------------ 共用外壳（v0.21.0 档1 / v0.21.1 合并入口）
+        // 用户 m04199：把「工作区快照」并进对话窗；m04211「先做档1」；m04334「合并控制面板和MAI对话，
+        // 合并之后要加个逻辑标志并染上主题色」。
+        // 所以「控制面板」（= 工作区）与「MAI 对话」现在是同一个窗口的两种模式，统一叫「逻辑助手」，
+        // 标题行最左是主题色小方块（逻辑标志），当前模式那一段是灰的、点不动。
         // 为什么要共用：v0.19.4 / v0.19.6 / v0.20.2 三次排版事故都是「同一段初始化抄了两份、只改了一份」。
         var DUAL = { last: "chat" };
+        var LOGIC_NAME = "逻辑助手";
         function dualModes(){ return ["chat", "ws"]; }
         function dualModeCn(mode){ if(mode === "ws"){ return "工作区"; } return "对话"; }
+        // v0.21.1（用户 m04334「工作区的按钮宽度不够，被换行了」）：64px 装不下 3 个汉字 + 按钮内边距，
+        // 固定宽度下 Label 会把「工作区」折成两行；这里按字数给宽度并加 ellipsis 兜底（大字号只省略、不折行）。
+        function dualSegWidth(mode){ if(mode === "ws"){ return 88; } return 72; }
         function dualHideOthers(mode){
             try{
                 if(mode !== "chat" && CHAT_UI.open === true && CHAT_UI.d !== null && CHAT_UI.d !== undefined){ CHAT_UI.d.hide(); }
@@ -5152,29 +5157,38 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             try{
                 d.titleTable.clearChildren();
                 d.titleTable.left();
+                // v0.21.1：逻辑标志 —— 主题色小方块（随设置里的主题色走，见 themeColor()）。
+                try{ d.titleTable.image(Tex.whiteui, themeColor()).size(10).padLeft(2).padRight(6); }catch(em){ }
                 d.titleTable.add(d.title).left().padLeft(2);
                 var seg = wsT();
                 seg.left();
-                var bChat = seg.button("对话", function(){ dualSwitch("chat"); }).height(22).width(64).padLeft(6);
+                var bChat = seg.button(dualModeCn("chat"), function(){ dualSwitch("chat"); })
+                    .height(22).width(dualSegWidth("chat")).padLeft(6).ellipsis(true);
                 if(mode === "chat"){ bChat.disabled(true); }
-                var bWs = seg.button("工作区", function(){ dualSwitch("ws"); }).height(22).width(64).padLeft(6);
+                var bWs = seg.button(dualModeCn("ws"), function(){ dualSwitch("ws"); })
+                    .height(22).width(dualSegWidth("ws")).padLeft(6).ellipsis(true);
                 if(mode === "ws"){ bWs.disabled(true); }
                 d.titleTable.add(seg).left().padLeft(10);
             }catch(e0b){ }
         }
-        function dualDialog(titleCn, mode, hideOthers){
+        function dualDialog(mode, hideOthers){
             if(hideOthers !== false){ dualHideOthers(mode); }
-            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · " + titleCn + " v" + MOD_VERSION);
+            var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · " + LOGIC_NAME + " v" + MOD_VERSION);
             d.cont.defaults().pad(3).left();
             try{ d.cont.left().top(); }catch(e00){ }
             try{ d.closeOnBack(); }catch(e0d){ }
             dualChrome(d, mode);
             return d;
         }
+        // v0.21.1（用户 m04334「合并控制面板和MAI对话」）：对外只剩一个入口，按上次用的模式打开。
+        function openLogicAssistant(){
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            return dualSwitch(DUAL.last);
+        }
 
         function openChatDialog(){
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
-            var d = dualDialog("自由对话", "chat");
+            var d = dualDialog("chat");
             var scr = wsScreenSize();
             var plan = chatPlan(scr.w, scr.h);
             var wide = plan.wide;
@@ -6600,14 +6614,14 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             try{ btns = Vars.ui.schematics.buttons; }catch(e){ btns = null; }
             if(btns === null || btns === undefined){ return; }
             try{
-                // v0.18.3（用户 m11124）：「MAI 控制面板按钮是用来管理工作区的，替代以前的查看页面」。
-                btns.button("MAI 控制面板", function(){ openWorkspaceDialog(); }).width(150);
-                // v0.20.1（用户 m02850「没有看到哪里更新了」）：对话窗也能从蓝图页一键打开，
-                // 不然平时（没投过作业时）根本够不着「作业管理」里的「＋ 新建对话」。
-                btns.button("MAI 对话", function(){
-                    try{ openChatDialog(); }
-                    catch(e3){ hint("对话窗口打不开：" + e3); }
-                }).width(130);
+                // v0.21.1（用户 m04334「合并控制面板和MAI对话吧。对了，合并之后要加个逻辑标志并染上主题色」）：
+                // 原来这里有两个按钮（「MAI 控制面板」= 工作区、「MAI 对话」），其实是同一个窗口的两种模式，
+                // 合成一个入口；按钮左边的主题色小方块就是逻辑标志（和标题行里那个同色同形）。
+                try{ btns.image(Tex.whiteui, themeColor()).width(8).height(18).padLeft(6); }catch(eb){ }
+                btns.button("MAI " + LOGIC_NAME, function(){
+                    try{ openLogicAssistant(); }
+                    catch(e3){ hint("逻辑助手打不开：" + e3); }
+                }).width(150).padLeft(6);
                 BP_BTN_ADDED = true;
             }catch(e2){ log("blueprint page button failed: " + e2); }
         }
@@ -6767,7 +6781,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
 
         function openWorkspaceDialog(){
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
-            var d = dualDialog("工作区快照", "ws");
+            var d = dualDialog("ws");
             try{ d.buttons.left(); }catch(e0c){ }
             // v0.19.0：宽屏双栏（左列表 / 右详情），窄屏单栏靠「← 返回列表」翻。
             // v0.19.1：尺寸按屏幕算，不再写死 300/440×430。
@@ -6819,12 +6833,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 if(Vars.ui !== null && Vars.ui !== undefined){ Vars.ui.showText("Mlog辅助 · 撤销", String(undoInfo())); }
             }).height(34).padLeft(4).ellipsis(true);
             d.buttons.button("从蓝图创建", function(){ renderBlueprintPicker(listOf(), d); }).height(34).padLeft(4).ellipsis(true);
-            // v0.20.1（用户 m02850）：对话入口原来只在作业管理窗里（要先投作业、再点作业框「查看」），
-            // 平时看不见。这里在工作区快照底栏再挂一个，蓝图页 →「MAI 控制面板」一步就能进对话。
-            d.buttons.button("＋ 对话", function(){
-                try{ openChatDialog(); }
-                catch(e3){ hint("对话窗口打不开：" + e3); }
-            }).height(34).padLeft(4).ellipsis(true);
+            // v0.21.1：原来这里还有个「＋ 对话」（v0.20.1 的入口），现在切模式用标题行的分段开关就够了，
+            // 底栏只留工作区自己的动作（合并入口见蓝图页的「MAI 逻辑助手」）。
             d.buttons.button("关闭", function(){ d.hide(); }).height(34).padLeft(4).ellipsis(true);
             // 关窗必须清 open，否则世界层会一直画细框（drawWorkspaceGhosts 只认这个标志）。
             d.hidden(function(){ wsUI.open = false; wsUI.ghosts = []; wsUI.needGeom = false; });
@@ -8277,6 +8287,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         };
         api.maiJobBadge = function(){ return jobBadgeText(); };
         api.maiJobManager = function(){ return openJobManager(); };
+        api.maiLogicAssistant = function(){ return openLogicAssistant(); };
         api.maiWorkspaceDialog = function(){ return openWorkspaceDialog(); };
         // v0.21.0 档1（用户 m04199/m04211「先做档1」）：对话窗与工作区窗共用一套外壳 —— 标题行左侧标题、
         // 右侧「对话 / 工作区」分段开关，开一个就关掉另一个。这里只验纯状态（无头 Vars.ui === null 也能跑）。
@@ -8287,7 +8298,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                       && DUAL.last === "chat");
             return (ok ? "ok " : "bad ") + "modes=" + modes.join(",")
                    + " cn=" + dualModeCn("chat") + "/" + dualModeCn("ws")
-                   + " last=" + String(DUAL.last);
+                   + " last=" + String(DUAL.last) + " name=" + LOGIC_NAME
+                   + " seg=" + String(dualSegWidth("chat")) + "/" + String(dualSegWidth("ws"));
         };
         api.maiWorkspaceExport = function(id){ return wsExportText(String(id)); };
         api.maiWorkspaceExportDisk = function(id){ return wsExportToDisk(String(id)); };
