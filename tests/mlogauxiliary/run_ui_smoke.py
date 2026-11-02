@@ -1208,6 +1208,20 @@ def main():
                          'headless probe for the workspace UI')):
         if needle not in code_only:
             problems.append('v0.19.0: ' + why)
+    # v0.19.3（用户 m01237「按钮太宽把标题挤到右边」）：像素和 scene 单位必须换算，
+    # 对话框宽度必须按 scene 单位算；这两条掉了就会再退回「对话框比窗口宽 Scl 倍」。
+    for needle, why in (('function wsSclFactor(',
+                         'pixels are no longer converted to scene units'),
+                        ('function wsScreenSize(',
+                         'the dialog size is back to raw pixel width'),
+                        ('function wsSceneUnits(',
+                         'the pixel-to-scene conversion helper is gone'),
+                        ('function wsDialogPlan(',
+                         'the dialog size planner is gone'),
+                        ('wsUI.busyList',
+                         're-entrant list refreshes can stack two sets of widgets')):
+        if needle not in code_only:
+            problems.append('v0.19.3: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
