@@ -163,6 +163,13 @@ def main() -> int:
                         break
         if ('MAI ' + P.mod_version()) not in vt or ('sidecar ' + P.sidecar_version()) not in vt:
             problems.append('VERSION.txt does not name both versions')
+        # v0.19.0: the mod retires a sidecar whose /health version != MOD_VERSION
+        # (main.js:sidecarVersionMismatch), so equal numbers are a hard requirement,
+        # not a style choice -- 0.18.4 shipped without this check and v0.19.0 first
+        # built a package whose bundled backend the mod would refuse to use.
+        if P.mod_version() != P.sidecar_version():
+            problems.append('mod %s != sidecar %s: main.js retires a mismatched sidecar'
+                            % (P.mod_version(), P.sidecar_version()))
         print('PACK:version MAI=%s sidecar=%s hashes=%d'
               % (P.mod_version(), P.sidecar_version(), len(listed)))
 

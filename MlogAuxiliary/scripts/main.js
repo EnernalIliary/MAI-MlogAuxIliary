@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.18.3";
+    var MOD_VERSION = "0.19.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -3390,6 +3390,66 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return out;
         }
 
+        // v0.18.4（用户 m13036）：「为什么不能查看当时的思考内容，而只能看到工作状态」。
+        // 思考其实一直都在作业里（sidecar 的 job.reasoning，非流式 ⇒ 作业收尾那一刻才落盘），
+        // 但以前只有两个隐蔽详情窗显示开头 16 行 × 40 字，终态点「查看」只看得到代码/一行状态。
+        // 这里补三个口子：全量文本、复制全量、可滚动的思考原文窗。
+        function jobThinkAll(job){
+            return jobReasoningText(job);
+        }
+
+        function jobThinkCopy(job){
+            var t = jobThinkAll(job);
+            if(t.length === 0){
+                hint("这个作业没有思考内容（端点没返回 reasoning_content）");
+                return "no reasoning";
+            }
+            try{ Core.app.setClipboardText(t); }
+            catch(e){ hint("复制失败：" + e); return "clipboard failed: " + e; }
+            hint("已复制思考（" + t.length + " 字符）");
+            return "copied " + t.length;
+        }
+
+        // 整段摊开（最多 100000 行 × 60 字符，reasoning 本体上限 20000 字符）。
+        function openThinkDialog(job){
+            var t = jobThinkAll(job);
+            if(t.length === 0){ return "no reasoning"; }
+            if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
+            var d = new Packages.arc.scene.ui.Dialog("MAI · 模型思考（" + t.length + " 字符）");
+            try{ d.addCloseButton(); }catch(e0){ }
+            try{ d.closeOnBack(); }catch(e1){ }
+            var host = new Packages.arc.scene.ui.layout.Table();
+            try{ d.cont.pane(host).width(640).height(420).row(); }
+            catch(e2){ d.cont.add(host).growX().row(); }
+            var rows = jobReasoningLines(job, 100000, 60);
+            for(var i = 0; i < rows.length; i++){ host.add(rows[i]).left().row(); }
+            try{
+                d.buttons.defaults().pad(4);
+                d.buttons.button("复制全部", function(){ jobThinkCopy(job); }).width(140);
+                if(String(job.state) === "done" && String(job.code || "").length > 0){
+                    d.buttons.button("看代码", function(){ d.hide(); previewLogic(job); }).width(140);
+                }
+                d.buttons.button("关闭", function(){ d.hide(); }).width(140);
+            }catch(e3){ log("think dialog buttons failed: " + e3); }
+            d.show();
+            return "shown " + t.length;
+        }
+
+        // 作业列表接口故意剥掉 reasoning（tools/logicd.py 的 BRIEF_DROP），
+        // 所以从「作业管理」点进来的行要按 id 再拉一次全量作业，才有思考可看。
+        function jobThinkFetchOpen(job){
+            if(job === null || job === undefined){ return "no job"; }
+            if(jobReasoningText(job).length > 0){ return openThinkDialog(job); }
+            jobGet(String(job.id), function(full, why){
+                if(full === null){ hint("读不到思考：" + why); return; }
+                var r = openThinkDialog(full);
+                if(r === "no reasoning"){
+                    hint("这个作业没有思考内容（端点没返回 reasoning_content）");
+                }
+            });
+            return "fetching";
+        }
+
         // v0.13.2：作业视图以前只给 findings/代码。两样东西一直存在但没人看得见：
         // 模型的 assumptions（它替玩家假定的前提，错了就是「生成的逻辑不对」的源头）
         // 和 cost 报告（里面有 UNREACHABLE 段落——永远执行不到的语句）。
@@ -3451,6 +3511,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     d.buttons.clearChildren();
                     d.buttons.defaults().pad(4);
                     d.buttons.button("写入", function(){ hint(writeBuild(b, res)); d.hide(); }).width(140);
+                    // v0.18.4：整段思考 + 复制全部（面板里只摊开头 16 行）。
+                    d.buttons.button("思考", function(){ openThinkDialog(job); }).width(110);
                     d.buttons.button("关闭", function(){ d.hide(); }).width(140);
                 }
                 return;
@@ -3467,6 +3529,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 if(ev.length > 0){
                     host.add("--- 诊断 ---").row();
                     for(var ei = 0; ei < ev.length; ei++){ host.add("  " + ev[ei]).row(); }
+                }
+                // v0.18.4：失败/被拒恰恰是最想看思考的时候，以前这里一个按钮都没有。
+                if(d !== null && d !== undefined){
+                    d.buttons.clearChildren();
+                    d.buttons.defaults().pad(4);
+                    d.buttons.button("思考", function(){ openThinkDialog(job); }).width(110);
+                    d.buttons.button("关闭", function(){ d.hide(); }).width(140);
                 }
                 return;
             }
@@ -3931,13 +4000,19 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 return;
             }
             var state = String(job.state);
-            if(state === "done"){
-                var why = previewLogic(job);
-                if(why !== ""){ hint(why); }
-                return;
-            }
             if(isJobTerminal(state)){
-                hint("作业" + stateCn(state) + "：" + jobProgressText(job));
+                // v0.18.4：终态以前 done 只弹代码预览、失败只弹一行状态，思考看不到。
+                // 现在先开思考窗（全量 + 复制全部）；端点没给思考才退回老行为。
+                var tr = openThinkDialog(job);
+                if(tr === "no reasoning" || tr === "no ui"){
+                    if(state === "done"){
+                        var why = previewLogic(job);
+                        if(why !== ""){ hint(why); }
+                    }else{
+                        hint("作业" + stateCn(state) + "：" + jobProgressText(job)
+                             + "（端点没返回思考内容）");
+                    }
+                }
                 return;
             }
             if(!chatLocalSay("MAI · " + jobProgressText(job))){
@@ -4486,6 +4561,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     });
                 }).width(280).row();
             }
+            // v0.18.4：列表接口不带 reasoning，按钮里按 id 再拉一次全量作业。
+            (function(jb){
+                var n = jobReasoningText(jb).length;
+                host.button(n > 0 ? ("思考（" + n + " 字符）") : "思考（读取全文）", function(){
+                    jobThinkFetchOpen(jb);
+                }).width(280).row();
+            })(job);
             host.button("返回列表", function(){ renderManager(host, d); }).width(280).row();
         }
 
@@ -4745,75 +4827,447 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return "已投 " + String(targets.length) + " 个改进作业（工作区「" + String(ws.name) + "」）";
         }
 
-        function renderWorkspaceDetail(host, d, ws){
-            managerSeq++;
-            try{ host.clear(); }catch(e){ return; }
-            host.add("工作区「" + String(ws.name) + "」  "
-                     + (String(ws.state) === "archived" ? "已归档" : "进行中")).row();
-            host.add(wsBoundsText(ws)).row();
-            host.add("创建 " + wsTimeText(ws.created) + " · 更新 " + wsTimeText(ws.updated)).row();
-            if(String(ws.notes || "").length > 0){ host.add("备注：" + String(ws.notes)).row(); }
-            host.add("--- 处理器（" + String((ws.procs || []).length) + " 台）---").row();
-            var pl = wsProcLines(ws, 8), i;
-            for(i = 0; i < pl.length; i++){ host.add(pl[i]).row(); }
-            host.add("--- 最近的作业 ---").row();
-            var jl = wsJobLines(ws, 3);
-            for(i = 0; i < jl.length; i++){ host.add(jl[i]).row(); }
-            host.button("恢复选框", function(){
-                hint(wsRestoreBox(ws.id));
-                d.hide();
-            }).width(160);
-            host.button("继续改进", function(){
-                hint(wsImproveBatch(ws.id, "在上一版的基础上继续改进"));
-                d.hide();
-            }).width(160);
-            host.button("存成蓝图", function(){
-                blueprintSaveBoxAsk(ws);
-            }).width(160).row();   // v0.16.0 B1
-            host.button(String(ws.state) === "archived" ? "取消归档" : "归档", function(){
-                hint(String(ws.state) === "archived" ? wsRestore(ws.id) : wsArchive(ws.id));
-                renderWorkspaces(host, d);
-            }).width(160);
-            host.button("释放", function(){
+        // ------------------------------------------------ 工作区界面 v0.19.0（A+C 改版）
+        // 方案：docs/Mlog辅助-工作区快照-界面改版-方案.md
+        // 左列表（搜索/过滤/排序 + 卡片行）/ 右详情（处理器表 + 作业时间线 + 动作分层），
+        // 世界层再画一层矩形（drawWorkspaceGhosts），选中与「⌖ 定位」联动镜头。
+        // 无头环境（Vars.ui === null）不建窗口，纯函数照跑，测试走 api.maiWorkspace3Probe。
+
+        var wsUI = {open: false, d: null, host: null, listHost: null, detailHost: null,
+                    sel: null, q: "", filter: "all", sort: "updated",
+                    single: false, showDetail: false, ghosts: []};
+
+        function wsMapName(){
+            try{ return String(mapName); }catch(e){ return "?"; }
+        }
+
+        // 三态：进行中 / 已归档 / 地图不符（只有能确定当前地图时才判不符）
+        function wsStatusOf(ws, mapName){
+            var st = (String((ws === null || ws === undefined ? "" : ws.state) || "active") === "active")
+                   ? "active" : "archived";
+            var cur = String(mapName || "");
+            var map = String((ws === null || ws === undefined ? "" : ws.map) || "");
+            if(cur.length > 0 && cur !== "?" && map.length > 0 && map !== "?" && map !== cur){
+                return "mismatch";
+            }
+            return st;
+        }
+
+        function wsStatusCn(key){
+            if(key === "archived"){ return "已归档"; }
+            if(key === "mismatch"){ return "地图不符"; }
+            return "进行中";
+        }
+
+        // 这版 Pal 没有 scarlet（Pal.java:76-88 只有 remove=e55454 / health=ff341c），
+        // 危险动作与「地图不符」统一用 Pal.remove，别写 Pal.scarlet。
+        function wsStatusColor(key){
+            if(key === "archived"){ return Pal.gray; }
+            if(key === "mismatch"){ return Pal.remove; }
+            return themeColor();
+        }
+
+        // wsList() 的 procs/jobs 是**数量**（摘要），界面要全文，所以单独取完整对象。
+        function wsAll(){
+            var names = wsFileNames(), out = [], i;
+            for(i = 0; i < names.length; i++){
+                var nm = String(names[i]);
+                var obj = wsLoad(nm.substring(0, nm.length - 5));
+                if(obj !== null && obj !== undefined){ out.push(obj); }
+            }
+            return out;
+        }
+
+        function wsLastJobText(ws){
+            var list = ws.jobs || [], i;
+            for(i = list.length - 1; i >= 0; i--){
+                var j = list[i];
+                if(j === null || j === undefined){ continue; }
+                return "#" + String(j.id) + " " + stateCn(String(j.state || "queued"));
+            }
+            return "还没投过作业";
+        }
+
+        function wsRowParts(ws, mapName){
+            var key = wsStatusOf(ws, mapName);
+            var n = (ws.procs || []).length;
+            return {id: String(ws.id), name: String(ws.name || "?"), state: key,
+                    colorKey: key, stateCn: wsStatusCn(key),
+                    sub: String(n) + " 台 · " + wsTimeText(ws.updated) + " · 最近作业 " + wsLastJobText(ws)};
+        }
+
+        function wsCodeLines(code){
+            var s = String(code || "");
+            if(s.length === 0){ return 0; }
+            return s.split("\n").length;
+        }
+
+        // 详情模型：处理器最多 12 行、作业最多 6 条（多的折成「还有 N 台」）。
+        function wsDetailModel(ws, mapName){
+            var key = wsStatusOf(ws, mapName);
+            var list = ws.procs || [], procs = [], i;
+            for(i = 0; i < list.length && procs.length < 12; i++){
+                var row = list[i];
+                var n = wsCodeLines(row.code);
+                procs.push({pos: "@" + String(row.x) + "," + String(row.y),
+                            block: String(row.block || "?"),
+                            code: n > 0 ? (String(n) + " 行") : "（空）",
+                            desc: String(row.desc || ""),
+                            written: Number(row.accepted || 0)});
+            }
+            var jobs = [], jl = ws.jobs || [];
+            for(i = jl.length - 1; i >= 0 && jobs.length < 6; i--){
+                var j = jl[i];
+                if(j === null || j === undefined){ continue; }
+                jobs.push({id: String(j.id), state: String(j.state || "queued"),
+                           cn: stateCn(String(j.state || "queued")),
+                           desc: String(j.desc || "").substring(0, 40), at: wsTimeText(j.at)});
+            }
+            var b = ws.bounds || {};
+            var w = Number(b.x2) - Number(b.x1) + 1, h = Number(b.y2) - Number(b.y1) + 1;
+            return {name: String(ws.name || "?"), state: key, stateCn: wsStatusCn(key),
+                    map: String(ws.map || "?"),
+                    boundsLine: "地图 " + String(ws.map || "?") + "  (" + String(b.x1) + "," + String(b.y1)
+                              + ")-(" + String(b.x2) + "," + String(b.y2) + ")",
+                    size: (w > 0 && h > 0) ? (String(w) + "×" + String(h)) : "?",
+                    procTotal: list.length, procs: procs,
+                    jobTotal: jl.length, jobs: jobs,
+                    notes: String(ws.notes || ""),
+                    created: wsTimeText(ws.created), updated: wsTimeText(ws.updated),
+                    canLocate: (key !== "mismatch")};
+        }
+
+        function wsMatchText(ws, q){
+            if(String(ws.name || "").toLowerCase().indexOf(q) >= 0){ return true; }
+            if(String(ws.notes || "").toLowerCase().indexOf(q) >= 0){ return true; }
+            var list = ws.procs || [], i;
+            for(i = 0; i < list.length; i++){
+                if(String(list[i].desc || "").toLowerCase().indexOf(q) >= 0){ return true; }
+                if(String(list[i].block || "").toLowerCase().indexOf(q) >= 0){ return true; }
+            }
+            return false;
+        }
+
+        // opt = {q, filter: all|active|archived|mismatch, map}
+        function wsFilterList(rows, opt){
+            var q = String((opt && opt.q) || "").toLowerCase();
+            var flt = String((opt && opt.filter) || "all");
+            var map = String((opt && opt.map) || "");
+            var out = [], i;
+            for(i = 0; i < (rows || []).length; i++){
+                var ws = rows[i];
+                var key = wsStatusOf(ws, map);
+                if(flt === "active" && key !== "active"){ continue; }
+                if(flt === "archived" && key !== "archived"){ continue; }
+                if(flt === "mismatch" && key !== "mismatch"){ continue; }
+                if(q.length > 0 && !wsMatchText(ws, q)){ continue; }
+                out.push(ws);
+            }
+            return out;
+        }
+
+        // mode: updated（最近更新，默认）| name | procs（处理器多在前）
+        function wsSortList(rows, mode){
+            var arr = [], i;
+            for(i = 0; i < (rows || []).length; i++){ arr.push(rows[i]); }
+            var m = String(mode || "updated");
+            arr.sort(function(a, b){
+                if(m === "name"){
+                    var x = String(a.name || ""), y = String(b.name || "");
+                    return (x < y) ? -1 : ((x > y) ? 1 : 0);
+                }
+                if(m === "procs"){ return (b.procs || []).length - (a.procs || []).length; }
+                return Number(b.updated || 0) - Number(a.updated || 0);
+            });
+            return arr;
+        }
+
+        function wsSortCn(mode){
+            if(mode === "name"){ return "名字"; }
+            if(mode === "procs"){ return "处理器数"; }
+            return "最近更新";
+        }
+
+        function wsNextSort(mode){
+            if(mode === "updated"){ return "name"; }
+            if(mode === "name"){ return "procs"; }
+            return "updated";
+        }
+
+        function wsReleaseConfirmText(ws){
+            var n = (ws.procs || []).length;
+            return "工作区「" + String(ws.name || "?") + "」（" + String(n) + " 台处理器）将被释放，\n"
+                 + "上下文不再留存，也不能恢复。\n"
+                 + "想留着就先用「归档」；只想复用范围，用「恢复选框」。";
+        }
+
+        function wsCanLocate(ws, mapName){ return wsStatusOf(ws, mapName) !== "mismatch"; }
+
+        // 镜头定位：世界坐标 = 格子中心 * 8 + 4（先例见 showAiPanel 的 Core.camera.position.set）。
+        function wsLocate(ws){
+            if(ws === null || ws === undefined){ return "没有这个工作区"; }
+            if(!wsCanLocate(ws, wsMapName())){
+                return "地图不符（工作区在「" + String(ws.map) + "」），跳不过去";
+            }
+            var b = ws.bounds || {};
+            var cx = (Number(b.x1) + Number(b.x2)) / 2, cy = (Number(b.y1) + Number(b.y2)) / 2;
+            try{ Core.camera.position.set(cx * 8 + 4, cy * 8 + 4); }
+            catch(e){ return "镜头跳转失败：" + e; }
+            return "已定位到 (" + String(Math.round(cx)) + "," + String(Math.round(cy)) + ")";
+        }
+
+        // 世界层细框：只画「进行中 + 地图一致」的；坐标口径同 selDrawArgs（左下角 + 宽高，退半格）。
+        function wsGhostRects(rows, mapName){
+            var out = [], i;
+            for(i = 0; i < (rows || []).length; i++){
+                var ws = rows[i];
+                if(wsStatusOf(ws, mapName) !== "active"){ continue; }
+                var b = ws.bounds;
+                if(b === null || b === undefined){ continue; }
+                out.push({id: String(ws.id), name: String(ws.name || "?"),
+                          x1: Number(b.x1), y1: Number(b.y1), x2: Number(b.x2), y2: Number(b.y2)});
+            }
+            return out;
+        }
+
+        function wsT(){ return new Packages.arc.scene.ui.layout.Table(); }
+
+        function wsSelect(id){
+            wsUI.sel = String(id);
+            if(wsUI.single){
+                wsUI.showDetail = true;
+                wsRefreshDetail();
+                return;
+            }
+            wsRefreshList();
+            wsRefreshDetail();
+        }
+
+        function wsRefreshAll(){
+            if(wsUI.single && wsUI.showDetail){ wsRefreshDetail(); return; }
+            wsRefreshList();
+            if(!wsUI.single){ wsRefreshDetail(); }
+        }
+
+        // 释放前必须确认一次（规划稿 §4 的要求，v0.14 实现时漏了）。
+        function wsAskRelease(ws){
+            if(ws === null || ws === undefined){ return; }
+            var doIt = function(){
                 hint(wsRelease(ws.id));
-                renderWorkspaces(host, d);
-            }).width(160);
-            host.button("导出 JSON", function(){
-                hint(wsExportToDisk(ws.id));
-            }).width(160).row();
-            host.button("返回列表", function(){ renderWorkspaces(host, d); }).width(160).row();
+                wsUI.sel = null;
+                wsRefreshAll();
+            };
+            try{
+                if(Vars.ui === null || Vars.ui === undefined){ doIt(); return; }
+                Vars.ui.showConfirm("释放工作区", wsReleaseConfirmText(ws), doIt);
+            }catch(e){ log("release confirm failed: " + e); doIt(); }
         }
 
         function renderWorkspaces(host, d){
-            var seq = ++managerSeq;
+            if(host === null || host === undefined){ return; }
+            managerSeq++;
+            if(d !== null && d !== undefined){ wsUI.d = d; }
+            wsUI.host = host;
+            wsUI.listHost = host;
+            if(wsUI.detailHost === null || wsUI.detailHost === undefined){ wsUI.detailHost = host; }
+            if(wsUI.single && wsUI.showDetail){ wsRefreshDetail(); return; }
+            wsRefreshList();
+            if(!wsUI.single){ wsRefreshDetail(); }
+        }
+
+        function wsRefreshList(){
+            var host = wsUI.listHost;
+            if(host === null || host === undefined){ return; }
             try{ host.clear(); }catch(e){ return; }
-            var rows = wsList(), i, shown = 0;
-            host.add("— 进行中的工作区 —").row();
-            for(i = 0; i < rows.length; i++){
-                if(String(rows[i].state) !== "active"){ continue; }
-                (function(id){
-                    var ws = wsLoad(id);
-                    if(ws === null){ return; }
-                    host.button(wsRowLabel(ws), function(){ renderWorkspaceDetail(host, d, ws); })
-                        .width(560).row();
-                })(String(rows[i].id));
-                shown++;
+            var map = wsMapName();
+            var all = wsAll();
+            wsUI.ghosts = wsGhostRects(all, map);
+            var rows = wsSortList(wsFilterList(all, {q: wsUI.q, filter: wsUI.filter, map: map}), wsUI.sort);
+            var bar = wsT();
+            bar.left();
+            try{
+                var tf = new Packages.arc.scene.ui.TextField();
+                tf.setMessageText("搜索 名字 / 备注 / 处理器");
+                tf.setMaxLength(40);
+                try{ tf.setText(String(wsUI.q || "")); }catch(e2){ }
+                tf.setTextFieldListener(function(field, c){
+                    try{ wsUI.q = String(field.getText()); }catch(e3){ wsUI.q = ""; }
+                    wsRefreshList();
+                });
+                bar.add(tf).width(170).height(34).padRight(4);
+            }catch(e){ log("ws search field failed: " + e); }
+            bar.button("排序：" + wsSortCn(wsUI.sort), function(){
+                wsUI.sort = wsNextSort(wsUI.sort);
+                wsRefreshList();
+            }).width(132).height(34);
+            host.add(bar).growX().left().row();
+            var chips = wsT();
+            chips.left();
+            var defs = [["all", "全部"], ["active", "进行中"], ["archived", "已归档"], ["mismatch", "地图不符"]];
+            for(var ci = 0; ci < defs.length; ci++){
+                (function(key, cn){
+                    chips.button((String(wsUI.filter) === key ? "● " : "") + cn, function(){
+                        wsUI.filter = key;
+                        wsRefreshList();
+                    }).width(92).height(30).padRight(4);
+                })(defs[ci][0], defs[ci][1]);
             }
-            if(shown === 0){ host.add("（框选区域并投递作业后，这里会出现一个工作区）").row(); }
-            host.add("— 已归档 —").row();
-            var arc = 0;
-            for(i = 0; i < rows.length; i++){
-                if(String(rows[i].state) === "active"){ continue; }
-                (function(id){
-                    var ws = wsLoad(id);
-                    if(ws === null){ return; }
-                    host.button(wsRowLabel(ws), function(){ renderWorkspaceDetail(host, d, ws); })
-                        .width(560).row();
-                })(String(rows[i].id));
-                arc++;
+            host.add(chips).growX().left().row();
+            host.add("— " + String(rows.length) + " 个工作区 —").color(Pal.gray).left().row();
+            if(rows.length === 0){
+                host.add(all.length === 0
+                    ? "（框选区域并投递作业后，这里会出现一个工作区）"
+                    : "（没有符合条件的，换个词或点「全部」）").left().row();
             }
-            if(arc === 0){ host.add("（归档过的工作区会放在这里）").row(); }
-            if(seq !== managerSeq){ return; }
+            for(var i = 0; i < rows.length; i++){
+                var ws = rows[i];
+                var p = wsRowParts(ws, map);
+                (function(pr){
+                    try{
+                        var card = new Packages.arc.scene.ui.Button();
+                        card.left();
+                        var col = wsStatusColor(pr.state);
+                        try{ card.image(Tex.whiteui).width(4).height(34).color(col); }catch(e4){ }
+                        card.add((String(wsUI.sel) === String(pr.id) ? "▸ " : "") + String(pr.name))
+                            .color(col).left().padLeft(6);
+                        card.row();
+                        card.add(String(pr.sub)).color(Pal.gray).left().padLeft(10).fontScale(0.85);
+                        card.changed(function(){ wsSelect(pr.id); });
+                        host.add(card).growX().height(46).padBottom(3).row();
+                    }catch(e5){ log("ws card failed: " + e5); }
+                })(p);
+            }
+        }
+
+        function wsRefreshDetail(){
+            var dp = wsUI.detailHost;
+            if(dp === null || dp === undefined){ return; }
+            try{ dp.clear(); }catch(e){ return; }
+            if(wsUI.single){
+                dp.button("← 返回列表", function(){
+                    wsUI.showDetail = false;
+                    wsRefreshList();
+                }).width(120).height(32).left().row();
+            }
+            var ws = (wsUI.sel === null || wsUI.sel === undefined) ? null : wsLoad(String(wsUI.sel));
+            if(ws === null){
+                dp.add("← 左边选一个工作区").color(Pal.gray).left().row();
+                dp.add("· 恢复选框：把选框重新指到它的范围").color(Pal.gray).left().fontScale(0.85).row();
+                dp.add("· 继续改进：拿它的代码再投一单").color(Pal.gray).left().fontScale(0.85).row();
+                dp.add("· 世界里的细框 = 进行中的工作区（选中的会加粗）").color(Pal.gray).left().fontScale(0.85).row();
+                return;
+            }
+            var map = wsMapName();
+            var m = wsDetailModel(ws, map);
+            var col = wsStatusColor(m.state);
+            var head = wsT();
+            head.defaults().left();
+            head.add(String(m.name)).color(col);
+            head.add("  " + String(m.stateCn)).color(col).fontScale(0.85);
+            dp.add(head).growX().left().row();
+            dp.add(String(m.boundsLine) + "   " + String(m.size) + " 格").color(Pal.gray).left().row();
+            var meta = wsT();
+            meta.defaults().left();
+            meta.add("创建 " + String(m.created) + " · 更新 " + String(m.updated)).color(Pal.gray).fontScale(0.85);
+            meta.button("⌖ 定位", function(){ hint(wsLocate(ws)); }).width(84).height(28).padLeft(6);
+            dp.add(meta).growX().left().row();
+            if(String(m.notes).length > 0){
+                dp.add("备注：" + String(m.notes)).color(Pal.gray).left().row();
+            }
+            dp.add("── 处理器 " + String(m.procTotal) + " 台 ──").color(Pal.gray).left().row();
+            if(m.procs.length === 0){
+                dp.add("（还没有处理器）").left().row();
+            }else{
+                var hdr = wsT();
+                hdr.defaults().left();
+                hdr.add("位置").width(78).color(Pal.gray);
+                hdr.add("方块").width(118).color(Pal.gray);
+                hdr.add("代码").width(88).color(Pal.gray);
+                hdr.add("写入").width(50).color(Pal.gray);
+                dp.add(hdr).growX().left().row();
+                for(var pi = 0; pi < m.procs.length; pi++){
+                    var pr = m.procs[pi];
+                    var rowT = wsT();
+                    rowT.defaults().left();
+                    rowT.add(String(pr.pos)).width(78);
+                    rowT.add(String(pr.block).substring(0, 12)).width(118);
+                    rowT.add(String(pr.code)).width(88);
+                    rowT.add(String(pr.written) + " 次").width(50);
+                    if(String(pr.desc).length > 0){
+                        try{ tipOn(rowT, String(pr.desc)); }catch(e6){ }
+                    }
+                    dp.add(rowT).growX().left().row();
+                }
+                if(m.procTotal > m.procs.length){
+                    dp.add("… 还有 " + String(m.procTotal - m.procs.length) + " 台").color(Pal.gray).left().row();
+                }
+            }
+            dp.add("── 最近作业 " + String(m.jobTotal) + " 条 ──").color(Pal.gray).left().row();
+            if(m.jobs.length === 0){
+                dp.add("（还没有投过作业）").left().row();
+            }else{
+                for(var ji = 0; ji < m.jobs.length; ji++){
+                    var j = m.jobs[ji];
+                    var jr = wsT();
+                    jr.defaults().left();
+                    var jc = (j.state === "done") ? themeColor() : (j.state === "failed" ? Pal.remove : Pal.gray);
+                    try{ jr.image(Tex.whiteui).width(8).height(8).color(jc).padRight(6); }catch(e7){ }
+                    jr.add(String(j.cn)).color(jc).width(56);
+                    jr.add("#" + String(j.id)).width(72);
+                    jr.add(String(j.desc)).growX();
+                    jr.add(String(j.at)).color(Pal.gray).width(80).right();
+                    dp.add(jr).growX().left().row();
+                }
+            }
+            // 动作三层：主（恢复选框 / 继续改进）/ 次（存蓝图 / 归档 / 改名 / 导出）/ 危险（释放，独立一行靠右）
+            var a1 = wsT();
+            a1.defaults().left();
+            a1.button("恢复选框", function(){ hint(wsRestoreBox(ws.id)); try{ wsUI.d.hide(); }catch(e8){ } })
+              .width(150).height(40).padRight(6);
+            a1.button("继续改进", function(){ hint(wsImproveBatch(ws.id, "在上一版的基础上继续改进")); try{ wsUI.d.hide(); }catch(e9){ } })
+              .width(150).height(40);
+            dp.add(a1).growX().left().row();
+            var a2 = wsT();
+            a2.defaults().left();
+            a2.button("存成蓝图", function(){ blueprintSaveBoxAsk(ws); }).width(104).height(32).padRight(4);
+            a2.button(String(ws.state) === "archived" ? "取消归档" : "归档", function(){
+                hint(String(ws.state) === "archived" ? wsRestore(ws.id) : wsArchive(ws.id));
+                wsRefreshAll();
+            }).width(104).height(32).padRight(4);
+            a2.button("改名", function(){
+                if(Vars.ui === null || Vars.ui === undefined){ return; }
+                Vars.ui.showTextInput("工作区改名", "名字", 40, String(ws.name || ""), function(nm){
+                    hint(wsRename(ws.id, String(nm)));
+                    wsRefreshAll();
+                });
+            }).width(84).height(32).padRight(4);
+            a2.button("导出 JSON", function(){ hint(wsExportToDisk(ws.id)); }).width(110).height(32);
+            dp.add(a2).growX().left().row();
+            var a3 = wsT();
+            a3.button("释放工作区…", function(){ wsAskRelease(ws); }).width(150).height(32);
+            dp.add(a3).growX().right().row();
+        }
+
+        // 世界层：每帧画所有 active 工作区的细框（只读缓存，不每帧读盘）。
+        function drawWorkspaceGhosts(){
+            if(!wsUI.open){ return; }
+            if(wsUI.listHost === null || wsUI.listHost === undefined){ return; }
+            try{
+                if(Vars.state === null || Vars.state === undefined){ return; }
+            }catch(e){ return; }
+            var rects = wsUI.ghosts || [];
+            if(rects.length === 0){ return; }
+            var L = Packages.arc.graphics.g2d.Lines;
+            var base = themeColor();
+            for(var i = 0; i < rects.length; i++){
+                var g = rects[i];
+                var sel = (wsUI.sel !== null && wsUI.sel !== undefined && String(wsUI.sel) === String(g.id));
+                var c = base.cpy();
+                c.a = sel ? 1 : 0.35;
+                L.stroke(sel ? 2 : 1, c);
+                L.rect((g.x1 - 0.5) * 8, (g.y1 - 0.5) * 8,
+                       (g.x2 - g.x1 + 1) * 8, (g.y2 - g.y1 + 1) * 8);
+            }
         }
 
         // W4：蓝图列表。无头环境 Vars.schematics 是 null，必须能吃 null 回空数组。
@@ -5389,23 +5843,43 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
             var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 工作区快照 v" + MOD_VERSION);
             d.cont.defaults().pad(4).left();
-            var host = new Packages.arc.scene.ui.layout.Table();
-            try{ d.cont.pane(host).height(320).width(600).row(); }catch(e){ d.cont.add(host).row(); }
-            d.buttons.button("刷新", function(){ renderWorkspaces(host, d); }).width(110);
+            // v0.19.0：宽屏双栏（左列表 / 右详情），窄屏单栏靠「← 返回列表」翻。
+            var wide = false;
+            try{ wide = Number(Core.graphics.getWidth()) >= 900; }catch(e0){ wide = false; }
+            var listT = wsT(), detailT = wsT();
+            if(wide){
+                try{
+                    d.cont.pane(listT).width(300).height(430).padRight(6);
+                    d.cont.pane(detailT).width(440).height(430).row();
+                }catch(e1){ log("ws two-pane failed: " + e1); d.cont.add(listT).row(); }
+            }else{
+                try{ d.cont.pane(listT).height(430).width(360).row(); }catch(e2){ d.cont.add(listT).row(); }
+            }
+            wsUI.open = true;
+            wsUI.d = d;
+            wsUI.single = !wide;
+            wsUI.showDetail = false;
+            wsUI.listHost = listT;
+            wsUI.detailHost = wide ? detailT : listT;
+            wsUI.ghosts = [];
+            var listOf = function(){ return wsUI.listHost; };
+            d.buttons.button("刷新", function(){ renderWorkspaces(listOf(), d); }).width(110);
             // v0.18.3（用户 m11124）：「撤销功能移入 MAI 控制面板」。
             d.buttons.button("撤销上次写入", function(){
                 var r = undo();
                 if(Vars.ui !== null && Vars.ui !== undefined){ Vars.ui.showText("Mlog辅助 · 撤销", String(r)); }
-                renderWorkspaces(host, d);
+                renderWorkspaces(listOf(), d);
             }).width(150);
             d.buttons.button("撤销快照", function(){
                 if(Vars.ui !== null && Vars.ui !== undefined){ Vars.ui.showText("Mlog辅助 · 撤销", String(undoInfo())); }
             }).width(120);
-            d.buttons.button("从蓝图创建", function(){ renderBlueprintPicker(host, d); }).width(140);
+            d.buttons.button("从蓝图创建", function(){ renderBlueprintPicker(listOf(), d); }).width(140);
             d.buttons.button("关闭", function(){ d.hide(); }).width(110);
+            // 关窗必须清 open，否则世界层会一直画细框（drawWorkspaceGhosts 只认这个标志）。
+            d.hidden(function(){ wsUI.open = false; wsUI.ghosts = []; });
             d.closeOnBack();
             d.show();
-            renderWorkspaces(host, d);
+            renderWorkspaces(listT, d);
             return "workspace dialog";
         }
 
@@ -6753,6 +7227,16 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                          + " first=" + as[0])
                       : ("bad assumptions=" + as.length + " cost=" + co.length);
         };
+        // v0.18.4（用户 m13036）：思考全文的无头探针。Dialog 在无头环境开不了，
+        // 所以只验「取行」这一层：全量文本长度、按 60 字切出来的行数与首行宽度。
+        api.maiJobThinkProbe = function(jobJson){
+            var job = parse(String(jobJson));
+            var all = jobThinkAll(job), rows = jobReasoningLines(job, 100000, 60);
+            var ok = all.length === 80 && rows.length === 2 && String(rows[0]).length === 60;
+            return ok ? ("ok len=" + all.length + " rows=" + rows.length
+                         + " w0=" + String(rows[0]).length)
+                      : ("bad len=" + all.length + " rows=" + rows.length);
+        };
         // v0.14.0：工作区数据层的无头探针。无头模拟器里 Vars.dataDirectory 可能是 null，
         // 所以把三个存储原语换成内存表，验的是「逻辑」而不是磁盘：
         // 落盘/读回、复用判定（中心在框内 + 地图一致）、归档后不复用、恢复、释放后文件真的没了。
@@ -6909,6 +7393,80 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return notes.length === 0 ? "ok" : ("bad " + notes.join(","));
         };
 
+        // v0.19.0：工作区界面（列表过滤/排序、详情模型、世界细框、释放确认）的自检口。
+        // 只跑纯函数，不建窗口（无头环境 Vars.ui === null 也能过）。
+        api.maiWorkspace3Probe = function(){
+            var notes = [];
+            var mk = function(name, map, state, nproc, njob){
+                var procs = [], jobs = [], i;
+                for(i = 0; i < nproc; i++){
+                    procs.push({x: 10 + i, y: 10, block: "processor",
+                                code: "set n 1\njump 0 always", desc: "把 n 设成 1", accepted: 1});
+                }
+                for(i = 0; i < njob; i++){
+                    jobs.push({id: "j" + String(i), state: "done", desc: "把 n 设成 " + String(i), at: 1000 + i});
+                }
+                return {id: name, name: name, map: map, state: state, notes: "",
+                        created: 1000, updated: 2000 + nproc,
+                        bounds: {x1: 10, y1: 10, x2: 16, y2: 14},
+                        procs: procs, jobs: jobs};
+            };
+            var counts = "";
+            try{
+                var a = mk("甲", "A", "active", 1, 1);
+                var b = mk("乙", "A", "archived", 2, 0);
+                var c = mk("丙", "B", "active", 3, 2);
+                var rows = [a, b, c];
+                if(wsStatusOf(a, "A") !== "active"){ notes.push("status-active"); }
+                if(wsStatusOf(b, "A") !== "archived"){ notes.push("status-archived"); }
+                if(wsStatusOf(c, "A") !== "mismatch"){ notes.push("status-mismatch"); }
+                if(wsStatusOf(c, "?") !== "active"){ notes.push("status-unknown-map"); }
+                if(wsStatusCn("mismatch") !== "地图不符"){ notes.push("status-cn"); }
+                if(wsRowParts(a, "A").sub.indexOf("台") < 0){ notes.push("rowparts"); }
+                var act = wsFilterList(rows, {q: "", filter: "active", map: "A"});
+                if(act.length !== 1){ notes.push("filter-active"); }
+                var mm = wsFilterList(rows, {q: "", filter: "mismatch", map: "A"});
+                if(mm.length !== 1 || String(mm[0].id) !== "丙"){ notes.push("filter-mismatch"); }
+                var hit = wsFilterList(rows, {q: "把 n 设成 1", filter: "all", map: "A"});
+                if(hit.length < 1){ notes.push("filter-q"); }
+                var srt = wsSortList(rows, "name");
+                if(String(srt[0].name) !== "丙" && String(srt[0].name) !== "乙" && String(srt[0].name) !== "甲"){
+                    notes.push("sort-name");
+                }
+                if((wsSortList(rows, "procs")[0].procs || []).length !== 3){ notes.push("sort-procs"); }
+                if(String(wsSortList(rows, "updated")[0].id) !== String(c.id)){ notes.push("sort-updated"); }
+                if(wsNextSort("updated") !== "name" || wsNextSort("procs") !== "updated"){
+                    notes.push("next-sort");
+                }
+                var m = wsDetailModel(a, "A");
+                if(m.size !== "7×5"){ notes.push("detail-size"); }
+                if(m.procs.length !== 1 || m.jobs.length !== 1){ notes.push("detail-rows"); }
+                if(m.boundsLine.indexOf("地图 A") < 0){ notes.push("detail-bounds"); }
+                if(m.canLocate !== true){ notes.push("detail-locate"); }
+                var m2 = wsDetailModel(c, "A");
+                if(m2.canLocate !== false || m2.stateCn !== "地图不符"){ notes.push("detail-mismatch"); }
+                var big = wsDetailModel(mk("大", "A", "active", 15, 9), "A");
+                if(big.procs.length !== 12 || big.jobs.length !== 6){ notes.push("detail-cap"); }
+                if(big.procTotal !== 15 || big.jobTotal !== 9){ notes.push("detail-total"); }
+                var gh = wsGhostRects(rows, "A");
+                if(gh.length !== 1 || String(gh[0].id) !== "甲"){ notes.push("ghosts"); }
+                if(gh.length > 0 && (gh[0].x1 !== 10 || gh[0].y2 !== 14)){ notes.push("ghost-bounds"); }
+                var rl = wsReleaseConfirmText(a);
+                if(rl.indexOf("释放") < 0 || rl.indexOf("不能恢复") < 0){ notes.push("release-text"); }
+                if(wsCanLocate(c, "A") !== false || wsCanLocate(a, "A") !== true){ notes.push("can-locate"); }
+                if(String(wsLocate(null)) !== "没有这个工作区"){ notes.push("locate-null"); }
+                counts = "rows=" + String(rows.length) + " filt=" + String(act.length + mm.length)
+                       + " sort=" + String(srt.length) + " detail=" + String(m.procs.length + m.jobs.length)
+                       + " ghosts=" + String(gh.length) + " release=" + String(rl.length > 0 ? 1 : 0)
+                       + " mismatch=" + String(m2.canLocate === false ? 1 : 0)
+                       + " locate=" + String(wsCanLocate(a, "A") ? 1 : 0);
+            }catch(e){
+                notes.push("throw:" + e);
+            }
+            return notes.length === 0 ? ("ok " + counts) : ("bad " + notes.join(","));
+        };
+
+
         // 挂到脚本作用域（控制台里能直接敲），并读回自检
         // v0.14.4（用户 2026-11-01）：「sidcar应该随游戏启动而启动」——不再等 F3 才拉；
         // 这里先试一次，ClientLoadEvent（进游戏）再补一次，两次都幂等。
@@ -7008,6 +7566,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         try{
             Events.run(ET.Trigger.draw, function(){
                 try{ drawSelection(); }catch(e){ /* 每帧回调里绝不抛出去 */ }
+                // v0.19.0：工作区窗口开着时，世界层补画一层细框（只画进行中且地图一致的）。
+                try{ drawWorkspaceGhosts(); }catch(e2){ /* 同上 */ }
             });
         }catch(e){ log("Trigger.draw hook failed: " + e); }
 

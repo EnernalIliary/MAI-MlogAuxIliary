@@ -286,6 +286,14 @@ def build(out_dir: Path | None = None, make_zip: bool = True,
           make_exe: bool = True, quiet: bool = False) -> dict:
     """Write the package tree (and zip) and return a summary dict."""
     ver = mod_version()
+    # v0.19.0: main.js:sidecarVersionMismatch() retires any sidecar whose
+    # /health version differs from MOD_VERSION, so shipping two different
+    # numbers installs cleanly and then refuses to start its own backend.
+    # The gate cannot see this from the zip alone -- fail the build instead.
+    if sidecar_version() != ver:
+        raise SystemExit('mod version %s != sidecar version %s: main.js compares them '
+                         ' at runtime, so bump tools/logicd.py SIDECAR_VERSION'
+                         % (ver, sidecar_version()))
     name = 'MAI-' + ver
     out_dir = Path(out_dir) if out_dir else DIST
     tree = out_dir / name

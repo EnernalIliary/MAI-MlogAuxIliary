@@ -194,6 +194,8 @@ def job_probe(port, bx, by):
         # prints it under the status line.  The fake provider has no reasoning, so hand
         # the renderer a hand-made job that does (this is the UI half, not the transport).
         "print('MAIJOBTHINK:' + maiJobReasoning('{\"id\":\"t1\",\"state\":\"done\",\"reasoning\":\"先想一想：玩家要的是打印铜的数量\"}'));",
+        # v0.18.4: the thinking window reads the whole text, not the 16x40 head.
+        "print('MAIJOBTHINK2:' + maiJobThinkProbe(JSON.stringify({id:'t2',state:'failed',reasoning:'%s'})));" % ("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
         "var wmA = maiJobSyncAt(%d, %d, 'ui clean code batch', 25000);" % (bx, by),
         "print('MAIWRITEMANY:' + maiWriteManyProbe(wmA, %d, %d));" % (bx, by),
     ]
@@ -355,6 +357,8 @@ def main():
     # where Vars.dataDirectory is null (headless sim does not call Vars.loadSettings).
     "print('MAIWORKSPACE:' + maiWorkspaceProbe());",
     "print('MAIWS2:' + maiWorkspace2Probe());",
+    # v0.19.0: the workspace UI (filter/sort/detail model/world ghost boxes/release confirm).
+    "print('MAIWS3:' + maiWorkspace3Probe());",
     # v0.16.0 B1: 存蓝图在无头环境（Vars.schematics 为 null）必须先守住，不能抛。
     "print('MAIBP:' + maiBlueprintSaveProbe(JSON.stringify({x1:10, y1:10, x2:20, y2:20})));",
     # v0.16.1 B2/B4: 签名 payload v2 的 meta 要能在游戏里解出来（Java Base64 + zlib）。
@@ -395,12 +399,12 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIBP:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAIBP:',
                               'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:', 'MAITHEME:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
                               'MAIJOBBOXPIN2:', 'MAIJOBBOXCLOSE:', 'MAIJOBBOX4:',
-                              'MAIBADGERECT:', 'MAIDBG:'))]
+                              'MAIBADGERECT:', 'MAIDBG:', 'MAIJOBTHINK2:'))]
     joined = '\n'.join(lines)
 
     # ---- resolve every Table/Cell method the page actually uses, in the engine
@@ -560,6 +564,13 @@ def main():
         problems.append('v0.14.1: the workspace dialog helpers are broken '
                         '(want MAIWS2:ok): %r'
                         % [l for l in lines if l.startswith('MAIWS2:')][:1])
+    # v0.19.0: the workspace UI is one screen with a filter/sort bar, a detail model that
+    # caps its tables, a world layer that only boxes live+on-this-map workspaces, and a
+    # release path that asks first.
+    if 'MAIWS3:ok' not in joined:
+        problems.append('v0.19.0: the workspace UI helpers are broken '
+                        '(want MAIWS3:ok ...): %r'
+                        % [l for l in lines if l.startswith('MAIWS3:')][:1])
     if 'MAIJOBPANELDIAG:ok why=1 ev=2' not in joined:
         problems.append('v0.15.0: the job panel does not explain a failed call '
                         '(want MAIJOBPANELDIAG:ok why=1 ev=2): %r'
@@ -825,7 +836,7 @@ def main():
     for l in jtext.splitlines():
         for key in ('MAIJOBSET', 'MAIJOBCLEAN', 'MAIJOBPROG', 'MAIJOBWRITE', 'MAIJOBREJ',
                     'MAIJOBCONF', 'MAIJOBEDIT', 'MAIJOBEDIT2',
-                    'MAIJOBZERO', 'MAIWRITEMANY', 'MAIJOBTHINK'):
+                    'MAIJOBZERO', 'MAIWRITEMANY', 'MAIJOBTHINK', 'MAIJOBTHINK2'):
             if l.startswith(key + ':'):
                 jres[key] = l[len(key) + 1:]
 
@@ -895,6 +906,10 @@ def main():
     if '先想一想' not in think:
         problems.append('v0.12.4: maiJobReasoning lost the job thinking: %r'
                         % (think[:160],))
+    think2 = jres.get('MAIJOBTHINK2') or ''
+    if not think2.startswith('ok len=80 rows=2 w0=60'):
+        problems.append('v0.18.4: the thinking window no longer reads the whole text '
+                        '(want ok len=80 rows=2 w0=60): %r' % (think2[:160],))
     wm = jres.get('MAIWRITEMANY') or ''
     if not wm.startswith('ok '):
         problems.append('v0.12.0: the transactional batch write probe failed: %r' % (wm[:260],))
@@ -907,6 +922,12 @@ def main():
                          'the model-thinking renderer is gone'),
                         ('api.maiJobReasoning = function',
                          'the reasoning test hook is gone'),
+                        ('function openThinkDialog(', 'the thinking window is gone'),
+                        ('function jobThinkCopy(', 'copying the whole thinking is gone'),
+                        ('function jobThinkFetchOpen(',
+                         'the list-row thinking fetch is gone'),
+                        ('var tr = openThinkDialog(job);',
+                         'a finished job no longer opens the thinking window'),
                         ('api.maiJobSyncAt = function', 'the job test hook is gone'),
                         ('POST", "/jobs"', 'main.js no longer submits to /jobs')):
         if needle not in code_only:
@@ -1163,6 +1184,30 @@ def main():
                          'no dialog offers a way into the workspace list')):
         if needle not in code_only:
             problems.append('v0.14.1: ' + why)
+    # v0.19.0: the workspace screen is a list + detail pair with a world layer and a
+    # release that asks first; losing any of these brings back the old one-column box.
+    for needle, why in (('function wsRowParts(',
+                         'the workspace card row parts are gone'),
+                        ('function wsDetailModel(',
+                         'the workspace detail model is gone'),
+                        ('function wsFilterList(',
+                         'the workspace filter is gone'),
+                        ('function wsSortList(',
+                         'the workspace sort is gone'),
+                        ('function wsGhostRects(',
+                         'the world-layer boxes lost their geometry'),
+                        ('function drawWorkspaceGhosts(',
+                         'the workspace boxes are no longer drawn in the world'),
+                        ('function wsAskRelease(',
+                         'releasing a workspace no longer asks first'),
+                        ('showConfirm("释放工作区"',
+                         'the release confirmation text is gone'),
+                        ('wsUI.open = false',
+                         'closing the workspace dialog no longer hides the world boxes'),
+                        ('api.maiWorkspace3Probe = function',
+                         'headless probe for the workspace UI')):
+        if needle not in code_only:
+            problems.append('v0.19.0: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
@@ -1831,9 +1876,10 @@ def main():
         print('  batch write: ' + wm[:170])
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
-                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:',
+                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
-                        'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:', 'MAITHEME:')):
+                        'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:', 'MAITHEME:',
+                        'MAIJOBTHINK2:')):
             print('  ' + l[:300])
     return 0
 
