@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.20.0";
+    var MOD_VERSION = "0.20.1";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -6447,6 +6447,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             try{
                 // v0.18.3（用户 m11124）：「MAI 控制面板按钮是用来管理工作区的，替代以前的查看页面」。
                 btns.button("MAI 控制面板", function(){ openWorkspaceDialog(); }).width(150);
+                // v0.20.1（用户 m02850「没有看到哪里更新了」）：对话窗也能从蓝图页一键打开，
+                // 不然平时（没投过作业时）根本够不着「作业管理」里的「＋ 新建对话」。
+                btns.button("MAI 对话", function(){
+                    try{ openChatDialog(); }
+                    catch(e3){ hint("对话窗口打不开：" + e3); }
+                }).width(130);
                 BP_BTN_ADDED = true;
             }catch(e2){ log("blueprint page button failed: " + e2); }
         }
@@ -6673,6 +6679,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 if(Vars.ui !== null && Vars.ui !== undefined){ Vars.ui.showText("Mlog辅助 · 撤销", String(undoInfo())); }
             }).height(34).padLeft(4).ellipsis(true);
             d.buttons.button("从蓝图创建", function(){ renderBlueprintPicker(listOf(), d); }).height(34).padLeft(4).ellipsis(true);
+            // v0.20.1（用户 m02850）：对话入口原来只在作业管理窗里（要先投作业、再点作业框「查看」），
+            // 平时看不见。这里在工作区快照底栏再挂一个，蓝图页 →「MAI 控制面板」一步就能进对话。
+            d.buttons.button("＋ 对话", function(){
+                try{ openChatDialog(); }
+                catch(e3){ hint("对话窗口打不开：" + e3); }
+            }).height(34).padLeft(4).ellipsis(true);
             d.buttons.button("关闭", function(){ d.hide(); }).height(34).padLeft(4).ellipsis(true);
             // 关窗必须清 open，否则世界层会一直画细框（drawWorkspaceGhosts 只认这个标志）。
             d.hidden(function(){ wsUI.open = false; wsUI.ghosts = []; wsUI.needGeom = false; });

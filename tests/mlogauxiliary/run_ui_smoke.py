@@ -1287,6 +1287,15 @@ def main():
                          'the chat polling flag is gone')):
         if needle not in code_only:
             problems.append('v0.20.0: ' + why)
+    # v0.20.1 (user m02850 "没有看到哪里更新了"): the chat dialog used to be reachable only from the
+    # job manager, which itself needs a submitted job -- add a direct entry on the blueprint page and in
+    # the workspace snapshot dialog, so the new feature is actually visible.
+    for needle, why in (('btns.button("MAI 对话"',
+                         'the blueprint page lost its direct chat entry again'),
+                         ('d.buttons.button("＋ 对话"',
+                         'the workspace dialog lost its chat entry again')):
+        if needle not in code_only:
+            problems.append('v0.20.1: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
