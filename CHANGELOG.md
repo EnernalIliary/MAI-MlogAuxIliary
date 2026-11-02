@@ -15,7 +15,10 @@
   也不能恢复」，并提示想留着就先「归档」。
 - 详情里的动作按钮改成三层（主：恢复选框 / 继续改进；次：存成蓝图 / 归档 / 改名 / 导出 JSON；
   危险：释放工作区…单独一行靠右），不再挤成一排。
-
+- **打包守卫：前后端版本必须一致**：模组运行时会把 `/health` 版本不等于自身版本的 sidecar 退役
+  （`main.js:sidecarVersionMismatch`），所以 `MlogAuxiliary/mod.hjson` 的版本与 `tools/logicd.py` 的
+  `SIDECAR_VERSION` 不一致时 `tools/package.py` 直接失败，`tests/packaging/run_pack_tests.py` 也会报问题。
+  0.19.0 第一次打包就是 0.18.4 的后端配 0.19.0 的前端——装上去 AI 全不可用。
 ## 0.18.4
 
 - **模型思考可以看全文了**：作业里一直带着模型自己的思考（`reasoning_content`），但以前只有两个
