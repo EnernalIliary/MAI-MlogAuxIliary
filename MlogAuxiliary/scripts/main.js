@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.19.3";
+    var MOD_VERSION = "0.19.4";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -5087,6 +5087,20 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(!(w > 0)){ w = wsListPaneWidth(); }
             return w;
         }
+        // v0.19.4（用户 m01690）：按钮宽度一律走这两个纯函数 —— 面板再宽，chips 和主按钮也有上限，
+        // 不会被撑成「半栏宽」（之前 chips 是四等分、主按钮是半栏，宽屏下就是被拉伸的样子）。
+        // 纯函数的好处：探针能直接断言上限，改布局时不会静默退化。
+        function wsChipWidth(iw){
+            var v = Math.floor((Number(iw) - 14) / 4);
+            if(!(v > 0)){ v = 56; }
+            return Math.round(Math.max(56, Math.min(96, v)));
+        }
+        function wsPrimaryWidth(iw){
+            var v = Math.floor((Number(iw) - 8) / 2);
+            if(!(v > 0)){ v = 100; }
+            return Math.round(Math.max(100, Math.min(168, v)));
+        }
+
         function wsFilterCn(key){
             var k = String(key === null || key === undefined ? "all" : key);
             if(k === "active"){ return "进行中"; }
@@ -5152,7 +5166,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var chips = wsT();
             chips.left();
             var defs = [["all", "全部"], ["active", "进行中"], ["archived", "已归档"], ["mismatch", "地图不符"]];
-            var cw = Math.max(60, Math.floor((iw - 14) / 4));
+            var cw = wsChipWidth(iw);
             for(var ci = 0; ci < defs.length; ci++){
                 (function(key, cn){
                     chips.button(cn, function(){
@@ -5297,11 +5311,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             // 动作三层：主（恢复选框 / 继续改进）/ 次（存蓝图 / 归档 / 改名 / 导出）/ 危险（释放，独立一行靠右）
             var a1 = wsT();
             a1.left();
-            var half = Math.max(120, Math.floor((iw - 8) / 2));
+            var bw = wsPrimaryWidth(iw);
             a1.button("恢复选框", function(){ hint(wsRestoreBox(ws.id)); try{ wsUI.d.hide(); }catch(e8){ } })
-              .width(half).height(40).padRight(6).ellipsis(true);
+              .width(bw).height(40).padRight(6).ellipsis(true);
             a1.button("继续改进", function(){ hint(wsImproveBatch(ws.id, "在上一版的基础上继续改进")); try{ wsUI.d.hide(); }catch(e9){ } })
-              .width(half).height(40).ellipsis(true);
+              .width(bw).height(40).ellipsis(true);
             dp.add(a1).growX().left().row();
             var a2 = wsT();
             a2.left();
@@ -5969,9 +5983,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(!(w > 0)){ w = 1280; }
             if(!(h > 0)){ h = 720; }
             // 左右留 28+28、上下留 100+90：对话框边框 + 标题栏 + 底部按钮栏都要吃掉余量。
-            var availW = Math.round(Math.max(520, Math.min(1500, w - 56)));
-            var availH = Math.round(Math.max(320, Math.min(820, h - 190)));
-            var listW = Math.round(Math.min(430, Math.max(340, availW * 0.3)));
+            // v0.19.4（用户 m01690「标题居中导致按钮被拉伸」）：不再顶满屏幕 —— 上限 1080 时
+            // 两栏是 356 / 710，详情栏的按钮有确定宽度（wsPrimaryWidth），不会被撑成半栏。
+            var availW = Math.round(Math.max(520, Math.min(1080, w - 56)));
+            var availH = Math.round(Math.max(320, Math.min(760, h - 190)));
+            var listW = Math.round(Math.min(400, Math.max(320, availW * 0.33)));
             var detailW = Math.round(Math.max(300, availW - listW - 14));
             var onlyW = Math.round(Math.min(availW, 560));
             return {wide: w >= 900, availW: availW, availH: availH,
@@ -5982,6 +5998,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
             var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 工作区快照 v" + MOD_VERSION);
             d.cont.defaults().pad(3).left();
+            // v0.19.4（用户 m01690「你把工作区的标题居中了」）：标题明确左对齐。
+            // Arc 的 Dialog 标题行是 add(titleTable).growX()，Label 默认 left 但一旦被居中，
+            // 整行会按标题宽度撑开，下面的按钮行（fillX）跟着变宽 —— 直接钉死左对齐 + 底部按钮靠左。
+            try{ d.title.setAlignment(Packages.arc.util.Align.left); }catch(e0){ }
+            try{ d.titleTable.left(); }catch(e0b){ }
+            try{ d.buttons.left(); }catch(e0c){ }
             // v0.19.0：宽屏双栏（左列表 / 右详情），窄屏单栏靠「← 返回列表」翻。
             // v0.19.1：尺寸按屏幕算，不再写死 300/440×430。
             // v0.19.2（用户截图：字重叠 / 宽度不够 / 按钮折行）：几乎顶满屏幕，算好的宽度存进 wsUI 供各栏排版。
@@ -5992,6 +6014,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var plan = wsDialogPlan(scr.w, scr.h);
             wide = plan.wide;
             var availH = plan.availH;
+            // v0.19.4：真机排版问题的取证 —— 写进 saves/last_log.txt（[mai] 前缀），不用再靠截图猜。
+            try{
+                log("ws dialog: screen=" + String(scr.w) + "x" + String(scr.h) + " scl=" + String(scr.scl)
+                    + " plan=" + String(plan.availW) + "x" + String(plan.availH)
+                    + " list=" + String(plan.listW) + " detail=" + String(plan.detailW) + " wide=" + String(wide));
+            }catch(e1){ }
             var listT = wsT(), detailT = wsT();
             if(wide){
                 try{
@@ -7610,11 +7638,17 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 var plan = wsDialogPlan(1366, 768);
                 if(plan.wide !== true){ notes.push("plan-wide"); }
                 if(plan.listW < 340 || plan.detailW < 300){ notes.push("plan-min"); }
-                if(plan.availW !== 1310){ notes.push("plan-avail"); }
+                if(plan.availW !== 1080){ notes.push("plan-avail"); }
+                // v0.19.4：窗口宽度有上限，不再顶满屏幕（用户 m01690 的「按钮被拉伸」）。
+                if(plan.availW > 1080){ notes.push("plan-cap"); }
+                if(wsChipWidth(1200) !== 96){ notes.push("chip-cap"); }
+                if(wsChipWidth(200) !== 56){ notes.push("chip-min"); }
+                if(wsPrimaryWidth(1200) !== 168){ notes.push("primary-cap"); }
+                if(wsPrimaryWidth(120) !== 100){ notes.push("primary-min"); }
                 if(plan.listW + plan.detailW + 14 > plan.availW){ notes.push("plan-fit"); }
                 if(wsDialogPlan(880, 600).wide !== false){ notes.push("plan-narrow"); }
                 if(wsDialogPlan(900, 600).wide !== true){ notes.push("plan-wide-edge"); }
-                if(wsDialogPlan(0, 0).availW !== 1224){ notes.push("plan-fallback"); }
+                if(wsDialogPlan(0, 0).availW !== 1080){ notes.push("plan-fallback"); }
                 // v0.19.3：像素 → scene 单位的换算（用户 m01237 的「按钮太宽 / 右栏被挤出屏幕」）。
                 if(wsSceneUnits(2049, 1.5) !== 1366){ notes.push("scene-units"); }
                 if(wsSceneUnits(0, 1.5) !== 0){ notes.push("scene-units-zero"); }
@@ -7628,6 +7662,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                        + " mismatch=" + String(m2.canLocate === false ? 1 : 0)
                        + " locate=" + String(wsCanLocate(a, "A") ? 1 : 0)
                        + " plan=" + String(plan.listW) + "x" + String(plan.detailW)
+                       + " cap=" + String(wsChipWidth(1200)) + "/" + String(wsPrimaryWidth(1200))
                        + " scl=" + String(wsSclFactor() > 0 ? 1 : 0);
             }catch(e){
                 notes.push("throw:" + e);

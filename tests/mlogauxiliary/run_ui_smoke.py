@@ -1222,6 +1222,18 @@ def main():
                          're-entrant list refreshes can stack two sets of widgets')):
         if needle not in code_only:
             problems.append('v0.19.3: ' + why)
+    # v0.19.4（用户 m01690「标题居中导致按钮被拉伸」）：标题必须左对齐，按钮宽度必须有上限
+    # （chips 与主按钮以前是「四等分 / 半栏」，宽屏下就是被拉伸的样子）。
+    for needle, why in (('d.title.setAlignment(Packages.arc.util.Align.left)',
+                         'the dialog title is centered again and widens the whole row'),
+                        ('function wsChipWidth(',
+                         'filter chips are back to equal-width stretching'),
+                        ('function wsPrimaryWidth(',
+                         'the primary action buttons are back to half-pane width'),
+                        ('d.buttons.left()',
+                         'the bottom button bar is centered again')):
+        if needle not in code_only:
+            problems.append('v0.19.4: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),
