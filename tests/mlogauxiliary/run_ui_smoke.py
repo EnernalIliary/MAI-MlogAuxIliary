@@ -1234,6 +1234,19 @@ def main():
                          'the bottom button bar is centered again')):
         if needle not in code_only:
             problems.append('v0.19.4: ' + why)
+    # v0.19.5（用户 m01884「MAI 的左栏仍然没变…按钮/输入框还是被拉得很宽，占满一整行」）：
+    # 左栏控件按文字宽度走，不再「栏宽 - 固定宽」铺满一行；另外留一个几何自检 dump，
+    # 真机排版再出问题时直接读 last_log.txt 的 [mai] ws geom: 数字，不用靠截图猜。
+    for needle, why in (('function wsGeomDump(',
+                         'the on-screen geometry dump is gone'),
+                        ('wsUI.needGeom = true',
+                         'the geometry dump is never armed when the dialog opens'),
+                        ('bar.add(tf).width(150)',
+                         'the search field is stretched across the whole row again'),
+                        ('maxWidth(cw)',
+                         'the filter chips are stretched to equal width again')):
+        if needle not in code_only:
+            problems.append('v0.19.5: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),

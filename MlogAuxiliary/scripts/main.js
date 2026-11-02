@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.19.4";
+    var MOD_VERSION = "0.19.5";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -4836,6 +4836,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         var wsUI = {open: false, d: null, host: null, listHost: null, detailHost: null,
                     sel: null, q: "", filter: "all", sort: "updated",
                     single: false, showDetail: false, ghosts: [],
+                    needGeom: false,   // v0.19.5：开窗后第一帧 dump 一次真实宽度（wsGeomDump）
                     listW: 380, detailW: 380};   // v0.19.2：由 openWorkspaceDialog 按屏幕算
 
         function wsMapName(){
@@ -5132,7 +5133,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var rows = wsSortList(wsFilterList(all, {q: wsUI.q, filter: wsUI.filter, map: map}), wsUI.sort);
             var pw = wsListPaneWidth();
             var iw = Math.max(200, pw - 22);
-            var sortW = 158;
+            // v0.19.5（用户 m01884）：搜索框固定 150、排序按钮走自然宽度 —— 原来「搜索框 = 栏宽 - 158」
+            // 加上 158 的排序按钮，两行都恰好填满整栏，看起来就是「被拉得很宽、占满一整行」。
             var bar = wsT();
             bar.left();
             try{
@@ -5147,7 +5149,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     wsUI.focusSearch = true;
                     wsRefreshList();
                 });
-                bar.add(tf).width(Math.max(90, iw - sortW - 6)).height(34).padRight(6);
+                bar.add(tf).width(150).height(34).padRight(6);
                 // 重建后恢复焦点（上面 listener 里置的标志）。
                 try{
                     if(wsUI.focusSearch === true){
@@ -5160,7 +5162,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             bar.button("排序：" + wsSortCn(wsUI.sort), function(){
                 wsUI.sort = wsNextSort(wsUI.sort);
                 wsRefreshList();
-            }).width(sortW).height(34).ellipsis(true);
+            }).height(34).ellipsis(true);
             host.add(bar).growX().left().row();
             // 筛选 chips：四等分 + 省略号；当前筛选写在下面计数行里（省掉「● 」前缀，那个会把文字挤折行）。
             var chips = wsT();
@@ -5172,7 +5174,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     chips.button(cn, function(){
                         wsUI.filter = key;
                         wsRefreshList();
-                    }).width(cw).height(30).padRight(4).ellipsis(true);
+                    // v0.19.5：不再四等分铺满，按文字宽度，只有超过上限才截断。
+                    }).maxWidth(cw).height(30).padRight(4).ellipsis(true);
                 })(defs[ci][0], defs[ci][1]);
             }
             host.add(chips).growX().left().row();
@@ -5359,6 +5362,62 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 L.rect((g.x1 - 0.5) * 8, (g.y1 - 0.5) * 8,
                        (g.x2 - g.x1 + 1) * 8, (g.y2 - g.y1 + 1) * 8);
             }
+        }
+
+        // v0.19.5（用户 m01884「MAI 的左栏仍然没变…按钮/输入框还是被拉得很宽」）：真机排版自检。
+        // 控件的真实宽度只有 validate（布局）之后才有，所以不能在 wsRefreshListBody 里读 ——
+        // openWorkspaceDialog 置 wsUI.needGeom，Trigger.draw 第一帧之后 dump 一次到 last_log.txt。
+        // 下一轮排查直接看 `[mai] ws geom:` 的数字，不用再靠截图猜。
+        function wsGeomCls(e){
+            try{ return String(e.getClass().getSimpleName()); }catch(e1){ return "?"; }
+        }
+        function wsGeomText(e){
+            try{ if(typeof e.getText === "function"){ return String(e.getText()); } }catch(e2){ }
+            return "";
+        }
+        function wsGeomOne(e){
+            var w = -1, x = -1, h = -1;
+            try{ w = Math.round(Number(e.getWidth())); }catch(e1){ }
+            try{ x = Math.round(Number(e.getX())); }catch(e2){ }
+            try{ h = Math.round(Number(e.getHeight())); }catch(e3){ }
+            var s = wsGeomCls(e) + " w=" + String(w) + " x=" + String(x) + " h=" + String(h);
+            var t = wsGeomText(e);
+            if(t !== ""){ s += " t=" + (t.length > 12 ? t.substring(0, 12) : t); }
+            return s;
+        }
+        function wsGeomDump(){
+            if(wsUI.needGeom !== true){ return; }
+            var host = wsUI.listHost;
+            if(host === null || host === undefined){ return; }
+            wsUI.needGeom = false;
+            try{
+                var dlg = "?";
+                try{
+                    if(wsUI.d !== null && wsUI.d !== undefined){ dlg = wsGeomOne(wsUI.d); }
+                }catch(e0){ }
+                var pane = "?";
+                try{
+                    var par = host.getParent();
+                    if(par !== null && par !== undefined){ pane = wsGeomOne(par); }
+                }catch(e1){ }
+                var parts = [];
+                var kids = host.getChildren();
+                var n = Number(kids.size);
+                for(var i = 0; i < n && i < 24; i++){
+                    var e = kids.get(i);
+                    var line = "#" + String(i) + " " + wsGeomOne(e);
+                    try{
+                        var sub = e.getChildren();
+                        var sn = Number(sub.size);
+                        for(var j = 0; j < sn && j < 6; j++){
+                            line += " [" + wsGeomOne(sub.get(j)) + "]";
+                        }
+                    }catch(e2){ }
+                    parts.push(line);
+                }
+                log("ws geom: dialog(" + dlg + ") pane(" + pane + ") host(" + wsGeomOne(host) + ") "
+                    + parts.join(" | "));
+            }catch(e3){ log("ws geom failed: " + e3); }
         }
 
         // W4：蓝图列表。无头环境 Vars.schematics 是 null，必须能吃 null 回空数组。
@@ -5987,7 +6046,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             // 两栏是 356 / 710，详情栏的按钮有确定宽度（wsPrimaryWidth），不会被撑成半栏。
             var availW = Math.round(Math.max(520, Math.min(1080, w - 56)));
             var availH = Math.round(Math.max(320, Math.min(760, h - 190)));
-            var listW = Math.round(Math.min(400, Math.max(320, availW * 0.33)));
+            // v0.19.5（用户 m01884「MAI 的左栏仍然没变…按钮/输入框还是被拉得很宽」）：
+            // 左栏是列表，不需要 1/3 那么宽 —— 收窄到 30%（1080 时 324），控件不再铺满整行。
+            var listW = Math.round(Math.min(360, Math.max(300, availW * 0.30)));
             var detailW = Math.round(Math.max(300, availW - listW - 14));
             var onlyW = Math.round(Math.min(availW, 560));
             return {wide: w >= 900, availW: availW, availH: availH,
@@ -6040,6 +6101,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             wsUI.listHost = listT;
             wsUI.detailHost = wide ? detailT : listT;
             wsUI.ghosts = [];
+            wsUI.needGeom = true;   // v0.19.5：等布局跑完再 dump 真实宽度（见 wsGeomDump）
             var listOf = function(){ return wsUI.listHost; };
             // 底部按钮不写死宽度：宽度跟着文字走，大字号下就不会折行。
             d.buttons.button("刷新", function(){ renderWorkspaces(listOf(), d); }).height(34).padLeft(4).ellipsis(true);
@@ -6055,7 +6117,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             d.buttons.button("从蓝图创建", function(){ renderBlueprintPicker(listOf(), d); }).height(34).padLeft(4).ellipsis(true);
             d.buttons.button("关闭", function(){ d.hide(); }).height(34).padLeft(4).ellipsis(true);
             // 关窗必须清 open，否则世界层会一直画细框（drawWorkspaceGhosts 只认这个标志）。
-            d.hidden(function(){ wsUI.open = false; wsUI.ghosts = []; });
+            d.hidden(function(){ wsUI.open = false; wsUI.ghosts = []; wsUI.needGeom = false; });
             d.closeOnBack();
             d.show();
             renderWorkspaces(listT, d);
@@ -7637,7 +7699,10 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 // v0.19.2：排版尺寸（用户截图「窗口宽度不够」的那条线）也被断言，改宽度时不会静默退化。
                 var plan = wsDialogPlan(1366, 768);
                 if(plan.wide !== true){ notes.push("plan-wide"); }
-                if(plan.listW < 340 || plan.detailW < 300){ notes.push("plan-min"); }
+                // v0.19.5：左栏收窄到 30%（1080 → 324），控件按文字宽度，不再铺满整行。
+                if(plan.listW < 300 || plan.listW > 360){ notes.push("plan-min"); }
+                if(plan.detailW < 300){ notes.push("plan-detail-min"); }
+                if(plan.listW !== 324){ notes.push("plan-listw"); }
                 if(plan.availW !== 1080){ notes.push("plan-avail"); }
                 // v0.19.4：窗口宽度有上限，不再顶满屏幕（用户 m01690 的「按钮被拉伸」）。
                 if(plan.availW > 1080){ notes.push("plan-cap"); }
@@ -7772,6 +7837,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 try{ drawSelection(); }catch(e){ /* 每帧回调里绝不抛出去 */ }
                 // v0.19.0：工作区窗口开着时，世界层补画一层细框（只画进行中且地图一致的）。
                 try{ drawWorkspaceGhosts(); }catch(e2){ /* 同上 */ }
+                // v0.19.5：布局跑完之后 dump 一次真实宽度（只 dump 一次，见 wsGeomDump）。
+                try{ wsGeomDump(); }catch(e3){ /* 同上 */ }
             });
         }catch(e){ log("Trigger.draw hook failed: " + e); }
 
