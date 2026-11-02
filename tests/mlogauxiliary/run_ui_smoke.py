@@ -1242,11 +1242,26 @@ def main():
                         ('wsUI.needGeom = true',
                          'the geometry dump is never armed when the dialog opens'),
                         ('bar.add(tf).width(150)',
-                         'the search field is stretched across the whole row again'),
-                        ('maxWidth(cw)',
-                         'the filter chips are stretched to equal width again')):
+                         'the search field is stretched across the whole row again')):
         if needle not in code_only:
             problems.append('v0.19.5: ' + why)
+    # v0.19.6（用户 m02101「标题还是居中的」）：Arc 的 cell.align 默认 0 就落到 Table.java:1249 的居中分支，
+    # 不继承表的 align —— 卡片色条没写 .left() 会被副行撑宽的第 0 列居中，名字被挤到最右；
+    # 标题行则是 add(title).expandX().fillX()（Dialog.java:78）撑满整行，文字飘到中间。
+    for needle, why in (('card.image(Tex.whiteui).width(4).height(26).color(col).left()',
+                         'the card status strip is centred inside its column again'),
+                        ('.left().padLeft(12).colspan(2)',
+                         'the card sub-line sits in column 0 again and widens the strip column'),
+                        ('d.titleTable.clearChildren()',
+                         'the dialog title cell is filled again (the title drifts to the middle)'),
+                        ('d.cont.left().top()',
+                         'the dialog content table is centred again'),
+                        ('try{ x = Math.round(Number(e.x)); }catch(e2){ }',
+                         'the geometry dump reads getX() again (every x is -1)'),
+                        ('["mismatch", "不符", "地图不符（工作区记录的地图跟当前地图不一样）"]',
+                         'the filter chips are long enough to get truncated again')):
+        if needle not in code_only:
+            problems.append('v0.19.6: ' + why)
     for needle, why in (('function jobRetryHead(',                          'a retrying job no longer labels its findings as the last attempt'),
                         ('function jobFindingLines(',
                          'the truncation gloss helper is gone'),

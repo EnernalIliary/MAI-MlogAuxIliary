@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.19.5";
+    var MOD_VERSION = "0.19.6";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -5149,7 +5149,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     wsUI.focusSearch = true;
                     wsRefreshList();
                 });
-                bar.add(tf).width(150).height(34).padRight(6);
+                bar.add(tf).width(150).height(34).padRight(6).left();
                 // 重建后恢复焦点（上面 listener 里置的标志）。
                 try{
                     if(wsUI.focusSearch === true){
@@ -5162,21 +5162,24 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             bar.button("排序：" + wsSortCn(wsUI.sort), function(){
                 wsUI.sort = wsNextSort(wsUI.sort);
                 wsRefreshList();
-            }).height(34).ellipsis(true);
+            }).height(34).ellipsis(true).left();
             host.add(bar).growX().left().row();
             // 筛选 chips：四等分 + 省略号；当前筛选写在下面计数行里（省掉「● 」前缀，那个会把文字挤折行）。
             var chips = wsT();
             chips.left();
-            var defs = [["all", "全部"], ["active", "进行中"], ["archived", "已归档"], ["mismatch", "地图不符"]];
-            var cw = wsChipWidth(iw);
+            // v0.19.6：标签改短（「地图不符」→「不符」+ tooltip），并且不再按 wsChipWidth 截断 ——
+            // 原来 maxWidth 卡到 72 时「进行中/已归档/地图不符」全被省略成「进行…/已归…/地图…」。
+            // 自然宽度 60+77+76+55 + 间距 = 280，放得进 302 的栏，不用再截。
+            var defs = [["all", "全部", ""], ["active", "进行中", ""], ["archived", "已归档", ""],
+                        ["mismatch", "不符", "地图不符（工作区记录的地图跟当前地图不一样）"]];
             for(var ci = 0; ci < defs.length; ci++){
-                (function(key, cn){
-                    chips.button(cn, function(){
+                (function(key, cn, tip){
+                    var cell = chips.button(cn, function(){
                         wsUI.filter = key;
                         wsRefreshList();
-                    // v0.19.5：不再四等分铺满，按文字宽度，只有超过上限才截断。
-                    }).maxWidth(cw).height(30).padRight(4).ellipsis(true);
-                })(defs[ci][0], defs[ci][1]);
+                    }).height(30).padRight(4).left();
+                    if(tip !== ""){ try{ cell.tooltip(tip); }catch(et){ } }
+                })(defs[ci][0], defs[ci][1], defs[ci][2]);
             }
             host.add(chips).growX().left().row();
             host.add("— " + String(rows.length) + " 个工作区 · 筛选：" + wsFilterCn(wsUI.filter) + " —")
@@ -5193,14 +5196,18 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 (function(pr){
                     try{
                         var card = new Packages.arc.scene.ui.Button();
-                        card.left();
+                        // v0.19.6（用户 m02101「标题还是居中的」）：根因是 Arc 的单元格 align 不继承表格 ——
+                        // Table.java:1243 `align = c.align;`，cell.align 默认 0 就走 Table.java:1249 的居中分支，
+                        // 所以 card.left() 管不住 cell。色条原来没写 .left()，在副行撑宽的第 0 列里居中；
+                        // 名字被挤到第 1 列最右边裁掉。现在每个 cell 显式 .left()，副行 colspan(2) 跨两列。
+                        card.left().top();
                         var col = wsStatusColor(pr.state);
-                        try{ card.image(Tex.whiteui).width(4).height(28).color(col); }catch(e4){ }
+                        try{ card.image(Tex.whiteui).width(4).height(26).color(col).left(); }catch(e4){ }
                         card.add((String(wsUI.sel) === String(pr.id) ? "▸ " : "") + String(pr.name))
-                            .color(col).left().padLeft(6).width(Math.max(80, iw - 26)).ellipsis(true);
+                            .color(col).left().padLeft(6).width(Math.max(80, iw - 34)).ellipsis(true);
                         card.row();
-                        card.add(String(pr.sub)).color(Pal.gray).left().padLeft(10)
-                            .fontScale(0.85).width(Math.max(80, iw - 30)).ellipsis(true);
+                        card.add(String(pr.sub)).color(Pal.gray).left().padLeft(12).colspan(2)
+                            .fontScale(0.85).width(Math.max(80, iw - 40)).ellipsis(true);
                         card.changed(function(){ wsSelect(pr.id); });
                         // 不写死卡片高度：高度跟着两行字走（写死 46 时大字号下两行会压到下一张卡）。
                         host.add(card).growX().padTop(2).padBottom(4).row();
@@ -5245,15 +5252,15 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var head = wsT();
             head.left();
             head.add(String(m.name)).color(col).left().width(Math.max(90, iw - 86)).ellipsis(true);
-            head.add("  " + String(m.stateCn)).color(col).fontScale(0.85).width(80).ellipsis(true);
+            head.add("  " + String(m.stateCn)).color(col).fontScale(0.85).width(80).ellipsis(true).left();
             dp.add(head).growX().left().row();
             dp.add(String(m.boundsLine) + "   " + String(m.size) + " 格").color(Pal.gray)
                 .width(iw).left().ellipsis(true).row();
             var meta = wsT();
             meta.left();
             meta.add("创建 " + String(m.created) + " · 更新 " + String(m.updated))
-                .color(Pal.gray).fontScale(0.85).width(Math.max(80, iw - 100)).ellipsis(true);
-            meta.button("⌖ 定位", function(){ hint(wsLocate(ws)); }).height(28).padLeft(6).ellipsis(true);
+                .color(Pal.gray).fontScale(0.85).width(Math.max(80, iw - 100)).ellipsis(true).left();
+            meta.button("⌖ 定位", function(){ hint(wsLocate(ws)); }).height(28).padLeft(6).ellipsis(true).left();
             dp.add(meta).growX().left().row();
             if(String(m.notes).length > 0){
                 dp.add("备注：" + String(m.notes)).color(Pal.gray).width(iw).left().ellipsis(true).row();
@@ -5268,19 +5275,19 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 var cBlock = Math.max(80, iw - cPos - cCode - cWrite - 6);
                 var hdr = wsT();
                 hdr.left();
-                hdr.add("位置").width(cPos).color(Pal.gray).ellipsis(true);
-                hdr.add("方块").width(cBlock).color(Pal.gray).ellipsis(true);
-                hdr.add("代码").width(cCode).color(Pal.gray).ellipsis(true);
-                hdr.add("写入").width(cWrite).color(Pal.gray).ellipsis(true);
+                hdr.add("位置").width(cPos).color(Pal.gray).ellipsis(true).left();
+                hdr.add("方块").width(cBlock).color(Pal.gray).ellipsis(true).left();
+                hdr.add("代码").width(cCode).color(Pal.gray).ellipsis(true).left();
+                hdr.add("写入").width(cWrite).color(Pal.gray).ellipsis(true).left();
                 dp.add(hdr).growX().left().row();
                 for(var pi = 0; pi < m.procs.length; pi++){
                     var pr = m.procs[pi];
                     var rowT = wsT();
                     rowT.left();
-                    rowT.add(String(pr.pos)).width(cPos).ellipsis(true);
-                    rowT.add(String(pr.block)).width(cBlock).ellipsis(true);
-                    rowT.add(String(pr.code)).width(cCode).ellipsis(true);
-                    rowT.add(String(pr.written) + " 次").width(cWrite).ellipsis(true);
+                    rowT.add(String(pr.pos)).width(cPos).ellipsis(true).left();
+                    rowT.add(String(pr.block)).width(cBlock).ellipsis(true).left();
+                    rowT.add(String(pr.code)).width(cCode).ellipsis(true).left();
+                    rowT.add(String(pr.written) + " 次").width(cWrite).ellipsis(true).left();
                     if(String(pr.desc).length > 0){
                         try{ tipOn(rowT, String(pr.desc)); }catch(e6){ }
                     }
@@ -5303,10 +5310,10 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     var jr = wsT();
                     jr.left();
                     var jc = (j.state === "done") ? themeColor() : (j.state === "failed" ? Pal.remove : Pal.gray);
-                    try{ jr.image(Tex.whiteui).width(8).height(8).color(jc).padRight(6); }catch(e7){ }
-                    jr.add(String(j.cn)).color(jc).width(cState).ellipsis(true);
-                    jr.add("#" + String(j.id)).width(cId).ellipsis(true);
-                    jr.add(String(j.desc)).width(cDesc).ellipsis(true);
+                    try{ jr.image(Tex.whiteui).width(8).height(8).color(jc).left().padRight(6); }catch(e7){ }
+                    jr.add(String(j.cn)).color(jc).width(cState).ellipsis(true).left();
+                    jr.add("#" + String(j.id)).width(cId).ellipsis(true).left();
+                    jr.add(String(j.desc)).width(cDesc).ellipsis(true).left();
                     jr.add(String(j.at)).color(Pal.gray).width(cTime).right().ellipsis(true);
                     dp.add(jr).growX().left().row();
                 }
@@ -5316,29 +5323,29 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             a1.left();
             var bw = wsPrimaryWidth(iw);
             a1.button("恢复选框", function(){ hint(wsRestoreBox(ws.id)); try{ wsUI.d.hide(); }catch(e8){ } })
-              .width(bw).height(40).padRight(6).ellipsis(true);
+              .width(bw).height(40).padRight(6).ellipsis(true).left();
             a1.button("继续改进", function(){ hint(wsImproveBatch(ws.id, "在上一版的基础上继续改进")); try{ wsUI.d.hide(); }catch(e9){ } })
-              .width(bw).height(40).ellipsis(true);
+              .width(bw).height(40).ellipsis(true).left();
             dp.add(a1).growX().left().row();
             var a2 = wsT();
             a2.left();
-            a2.button("存成蓝图", function(){ blueprintSaveBoxAsk(ws); }).height(32).padRight(4).ellipsis(true);
+            a2.button("存成蓝图", function(){ blueprintSaveBoxAsk(ws); }).height(32).padRight(4).ellipsis(true).left();
             a2.button(String(ws.state) === "archived" ? "取消归档" : "归档", function(){
                 hint(String(ws.state) === "archived" ? wsRestore(ws.id) : wsArchive(ws.id));
                 wsRefreshAll();
-            }).height(32).padRight(4).ellipsis(true);
+            }).height(32).padRight(4).ellipsis(true).left();
             a2.button("改名", function(){
                 if(Vars.ui === null || Vars.ui === undefined){ return; }
                 Vars.ui.showTextInput("工作区改名", "名字", 40, String(ws.name || ""), function(nm){
                     hint(wsRename(ws.id, String(nm)));
                     wsRefreshAll();
                 });
-            }).height(32).padRight(4).ellipsis(true);
-            a2.button("导出 JSON", function(){ hint(wsExportToDisk(ws.id)); }).height(32).ellipsis(true);
+            }).height(32).padRight(4).ellipsis(true).left();
+            a2.button("导出 JSON", function(){ hint(wsExportToDisk(ws.id)); }).height(32).ellipsis(true).left();
             dp.add(a2).growX().left().row();
             var a3 = wsT();
             a3.right();
-            a3.button("释放工作区…", function(){ wsAskRelease(ws); }).height(32).ellipsis(true);
+            a3.button("释放工作区…", function(){ wsAskRelease(ws); }).height(32).ellipsis(true).right();
             dp.add(a3).growX().right().row();
         }
 
@@ -5378,7 +5385,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         function wsGeomOne(e){
             var w = -1, x = -1, h = -1;
             try{ w = Math.round(Number(e.getWidth())); }catch(e1){ }
-            try{ x = Math.round(Number(e.getX())); }catch(e2){ }
+            // v0.19.6：Element 没有无参 getX()（只有 getX(int alignment)，Element.java:380），上一版每帧
+            // 抛异常被吞掉，dump 出来的 x 恒为 -1。x/y 是 public 字段（Element.java:37），直接读。
+            try{ x = Math.round(Number(e.x)); }catch(e2){ }
             try{ h = Math.round(Number(e.getHeight())); }catch(e3){ }
             var s = wsGeomCls(e) + " w=" + String(w) + " x=" + String(x) + " h=" + String(h);
             var t = wsGeomText(e);
@@ -5395,6 +5404,19 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 try{
                     if(wsUI.d !== null && wsUI.d !== undefined){ dlg = wsGeomOne(wsUI.d); }
                 }catch(e0){ }
+                // v0.19.6：标题行也 dump 出来（上一版只 dump 左栏，标题居中的问题查不到数字）。
+                var titleLine = "?";
+                try{
+                    if(wsUI.d !== null && wsUI.d !== undefined){
+                        var tt = wsUI.d.titleTable;
+                        var tk = tt.getChildren();
+                        var tl = wsGeomOne(tt);
+                        for(var ti = 0; ti < Number(tk.size) && ti < 3; ti++){
+                            tl += " [" + wsGeomOne(tk.get(ti)) + "]";
+                        }
+                        titleLine = tl;
+                    }
+                }catch(e0t){ }
                 var pane = "?";
                 try{
                     var par = host.getParent();
@@ -5415,7 +5437,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     }catch(e2){ }
                     parts.push(line);
                 }
-                log("ws geom: dialog(" + dlg + ") pane(" + pane + ") host(" + wsGeomOne(host) + ") "
+                log("ws geom: dialog(" + dlg + ") title(" + titleLine + ") pane(" + pane + ") host(" + wsGeomOne(host) + ") "
                     + parts.join(" | "));
             }catch(e3){ log("ws geom failed: " + e3); }
         }
@@ -6059,11 +6081,20 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(Vars.ui === null || Vars.ui === undefined){ return "no ui"; }
             var d = new Packages.arc.scene.ui.Dialog("Mlog辅助 · 工作区快照 v" + MOD_VERSION);
             d.cont.defaults().pad(3).left();
+            try{ d.cont.left().top(); }catch(e00){ }
             // v0.19.4（用户 m01690「你把工作区的标题居中了」）：标题明确左对齐。
             // Arc 的 Dialog 标题行是 add(titleTable).growX()，Label 默认 left 但一旦被居中，
             // 整行会按标题宽度撑开，下面的按钮行（fillX）跟着变宽 —— 直接钉死左对齐 + 底部按钮靠左。
             try{ d.title.setAlignment(Packages.arc.util.Align.left); }catch(e0){ }
-            try{ d.titleTable.left(); }catch(e0b){ }
+            // v0.19.6（用户 m02101「标题还是居中的」）：Dialog 的标题是 add(titleTable).growX()（Dialog.java:79），
+            // titleTable 里又是 add(title).expandX().fillX()（Dialog.java:78）—— Label 被撑满整行时，
+            // 只要样式对齐不是 left，文字就飘到中间；而且这个 cell 一旦被撑开，下面的行也跟着拉宽。
+            // 这里把 titleTable 重建：cell 用自然宽度 + 左对齐，标题钉死在左上。
+            try{
+                d.titleTable.clearChildren();
+                d.titleTable.left();
+                d.titleTable.add(d.title).left().padLeft(2);
+            }catch(e0b){ }
             try{ d.buttons.left(); }catch(e0c){ }
             // v0.19.0：宽屏双栏（左列表 / 右详情），窄屏单栏靠「← 返回列表」翻。
             // v0.19.1：尺寸按屏幕算，不再写死 300/440×430。
