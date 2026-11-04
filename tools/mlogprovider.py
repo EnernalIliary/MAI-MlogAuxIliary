@@ -125,6 +125,52 @@ def snapshot_facts(snap):
     return rows
 
 
+def global_facts(snap):
+    """Map-wide facts the region snapshot cannot carry (v0.24.0).
+
+    A region snapshot only knows what is inside the selection, so "supply this dome
+    from the core with a flare" used to look impossible: the core and the units were
+    outside the box.  ubind/ulocate read the whole map, so the model has to be told
+    what exists out there -- and that those two instructions need no link at all.
+    """
+    rows = []
+    g = snap.get("globals") if isinstance(snap, dict) else None
+    if not isinstance(g, dict) or not g:
+        rows.append("map-wide facts: not sent by this build of the game -- ubind and ulocate",)
+        rows.append("  still see the whole map, so do not assume the area is all there is.")
+        return rows
+    cores = g.get("cores") if isinstance(g.get("cores"), list) else []
+    if cores:
+        parts = []
+        for c in cores[:4]:
+            if not isinstance(c, dict):
+                continue
+            items = c.get("items") if isinstance(c.get("items"), dict) else {}
+            hold = ", ".join("%s %s" % (k, _num(v)) for k, v in _top(items, 3)) or "empty"
+            parts.append("@ (%s, %s) %s [%s]" % (c.get("x"), c.get("y"),
+                                                c.get("block") or "core", hold))
+        rows.append("cores on the map (nearest to the selection first): " + "; ".join(parts))
+    else:
+        rows.append("cores on the map: none found -- a task that takes items from a core",)
+        rows.append("  cannot be done here; say so in blocked instead of writing a fake program.")
+    units = g.get("units") if isinstance(g.get("units"), dict) else {}
+    total = units.get("total")
+    types = units.get("types") if isinstance(units.get("types"), dict) else {}
+    if total:
+        rows.append("your units on the map: %s (%s) -- ubind @<type> binds one, no link needed"
+                    % (_num(total),
+                       ", ".join("%s x%s" % (k, _num(v)) for k, v in _top(types, 6)) or "?"))
+    else:
+        rows.append("your units on the map: none -- a unit task cannot be done here,",)
+        rows.append("  say so in blocked (do not pretend); ubind needs a unit that exists.")
+    rules = g.get("rules") if isinstance(g.get("rules"), dict) else {}
+    if "logicUnitControl" in rules:
+        ok = bool(rules.get("logicUnitControl"))
+        rows.append("map rules: logicUnitControl=%s%s"
+                    % (ok, "" if ok else " (logic may NOT control units on this map)"))
+    return rows
+
+
 def previous_version(job):
     """The 'improve THIS, do not start over' block, or '' when there is none (v0.14.0).
 
@@ -177,6 +223,7 @@ def build_prompt(job, hint=None):
             origin.get("x"), origin.get("y")))
     out.append("instruction set: v160 (ipt=%s)" % ipt)
     out.extend(snapshot_facts(job.get("snapshot")))
+    out.extend(global_facts(job.get("snapshot")))
     batch = job.get("batch")
     if isinstance(batch, dict) and int(batch.get("n") or 1) > 1:
         out.append("batch: the same sentence was sent to %s processors; this is #%s" % (
@@ -203,17 +250,28 @@ def build_prompt(job, hint=None):
     out.append("  very first statement, and a label line is NOT a statement, so every label")
     out.append("  above a jump shifts its index. NEVER count line numbers. Write a label on")
     out.append("  its own line (`wait_ready:` -- nothing else on that line) and jump to it:")
-    out.append("  `jump wait_ready always`. A numeric target that is off by one silently")
-    out.append("  jumps INTO the middle of a block, so the statements it skipped never run;")
-    out.append("  every jump in your reply must name a label you defined, never a number.")
+    out.append("  jump wait_ready always. That label form is the safer one for text that")
+    out.append("  is pasted or packed, and it is the preferred form here.")
+
+    out.append("  A NUMBER is also legal -- it is the only form the in-game editor writes,")
+    out.append("  so a program carrying numbers can still be edited by the player -- but")
+    out.append("  then the count must be right: a numeric target that is off by one silently")
+    out.append("  jumps INTO the middle of a block, so the statements it skipped never run.")
     out.append("- print/printflush: print writes into the buffer, printflush sends it.")
     out.append("- sensor <result> <block> <property> reads a property of a linked block.")
     out.append("- control/radar/ucontrol need the documented argument count for v160.")
     out.append("- End the program with an explicit `end` unless it loops forever.")
     out.append("- The whole program must pass the analyzer: any ERR rejects the job.")
-    out.append("- Use ONLY the link names in the whitelist above. If the task needs a")
-    out.append("  block this processor is not wired to, say so in needs_links and write")
-    out.append("  the best program that works with what it really has.")
+    out.append("- A whitelist name is what sensor/control/radar/read/write/printflush,")
+    out.append("  itemTake/itemDrop take; any other block name is rejected.")
+    out.append("- These need NO link and see the WHOLE map, so a unit/core/ore task is not")
+    out.append("  blocked by an empty whitelist:")
+    out.append("    ubind <unit type>          binds @unit to your nearest unit of that type")
+    out.append("    ulocate building core ...  finds a core; returns x/y and a found flag")
+    out.append("    ucontrol ...               moves @unit (and itemTake/itemDrop move items)")
+    out.append("- If the task truly needs a block this processor is not wired to, list it in")
+    out.append("  needs_links (names outside the whitelist ARE allowed there: that is how")
+    out.append("  you ask the player to wire it) and still write the best program you can.")
     out.append("")
     prev = previous_version(job)
     if prev:
@@ -242,11 +300,18 @@ def build_prompt(job, hint=None):
         out.append("  # %s" % ex["title"])
         for ln in ex["code"].split("\n"):
             out.append("    " + ln)
-    out.append("  The block names above are placeholders: use ONLY whitelist names,")
-    out.append("  and leave out a statement whose block you cannot wire.")
+    out.append("  The link names above are placeholders; use whitelist names there and")
+    out.append("  leave out a statement whose block you cannot wire.")
     out.append("(the `code` string uses \\n between statements; label lines are statements'")
     out.append(" landmarks, not statements, and are kept verbatim.)")
-    out.append("needs_links must be a subset of the whitelist above (or empty).")
+    out.append("needs_links: whitelist names are already wired; other names are allowed")
+    out.append("  here and become a request to the player; the code you do write")
+    out.append("  still has to pass the gate.")
+    out.append("If the task cannot be done at all with this processor (no unit type on the")
+    out.append("map, no core, wrong map), do NOT invent a program -- reply with only:")
+    out.append('  {"blocked": {"reason": "why not", "need": ["core", "flare"],')
+    out.append("   " + chr(34) + "instead" + chr(34) + ": " + chr(34) + "what you would write if they were wired" + chr(34) + "}, " + chr(34) + "explanation" + chr(34) + ": " + chr(34) + "..." + chr(34) + "}")
+    out.append("A blocked reply is answered by the player: it costs nothing to use when true.")
     return "\n".join(out)
 
 
@@ -344,6 +409,49 @@ print total
 printflush message1
 jump loop always""",
     },
+    {
+        "title": "unit transport -- bind a unit, take items from a core, drop them into a block",
+        "keys": ["单位", "星辉", "搬运", "运输", "送料", "取料", "unit", "flare", "supply",
+                 "transport", "carry", "deliver", "item", "drop"],
+        "code": """ubind @flare
+jump have notEqual @unit null
+end
+have:
+ulocate building core false @copper cx cy found core1
+jump have equal found false
+itemTake core1 @copper 20
+ucontrol move cx cy 0 0 0
+itemDrop dome1 @copper 20""",
+    },
+    {
+        "title": "unit supply loop -- top a block back up from the core while a unit is bound",
+        "keys": ["供料", "供给", "补给", "原料", "库存", "无线", "超速", "运输",
+                 "overdrive", "supply", "feed", "refill", "dome"],
+        "code": """loop:
+ubind @flare
+jump wait equal @unit null
+ulocate building core false @phase-fabric cx cy found core1
+jump wait equal found false
+sensor have dome1 @phase-fabric
+jump wait greaterThanEq have 5
+itemTake core1 @phase-fabric 20
+ucontrol move cx cy 0 0 0
+itemDrop dome1 @phase-fabric 20
+wait:
+wait 1
+jump loop always""",
+    },
+    {
+        "title": "unit mining -- bind one unit and send it at the nearest ore patch",
+        "keys": ["采矿", "挖矿", "矿井", "资源", "采集", "mine", "mining", "ore", "mono"],
+        "code": """ubind @mono
+jump go notEqual @unit null
+end
+go:
+ulocate ore core true @copper ox oy found ore
+jump go equal found false
+ucontrol approach ox oy 4 0 0""",
+    },
 ]
 
 
@@ -411,8 +519,23 @@ def parse_reply(text):
         raise ProviderError("reply JSON is %s, want an object" % type(obj).__name__)
     code = obj.get("code")
     tid = obj.get("template")
-    if not (isinstance(code, str) and code.strip()) and not tid:
-        raise ProviderError("reply has neither a non-empty code nor a template")
+    blk = obj.get("blocked")
+    if blk is not None and not isinstance(blk, dict):
+        raise ProviderError("blocked must be an object")
+    if isinstance(blk, dict):
+        reason = blk.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ProviderError("blocked.reason must be a non-empty string")
+        need = blk.get("need")
+        if need is not None and not (isinstance(need, list)
+                                     and all(isinstance(x, str) for x in need)):
+            raise ProviderError("blocked.need must be a list of strings")
+        instead = blk.get("instead")
+        if instead is not None and not isinstance(instead, str):
+            raise ProviderError("blocked.instead must be a string")
+    if not (isinstance(code, str) and code.strip()) and not tid \
+            and not isinstance(blk, dict):
+        raise ProviderError("reply has neither a non-empty code, a template, nor blocked")
     if code is not None and not isinstance(code, str):
         raise ProviderError("code must be a string")
     if tid is not None and not isinstance(tid, str):
@@ -427,6 +550,10 @@ def parse_reply(text):
     out = {"explanation": str(obj.get("explanation") or ""),
            "assumptions": list(obj.get("assumptions") or []),
            "needs_links": list(obj.get("needs_links") or [])}
+    if isinstance(blk, dict):
+        out["blocked"] = {"reason": str(blk.get("reason") or ""),
+                          "need": [str(x) for x in (blk.get("need") or [])],
+                          "instead": str(blk.get("instead") or "")}
     if isinstance(code, str) and code.strip():
         out["code"] = code
     if tid:
@@ -498,7 +625,16 @@ class Recorder:
 
 
 DEFAULT_MAX_TOKENS = 4096
-TOKENS_CEILING = 16000
+#: v0.24.0: a reasoning model can burn 16000 tokens on one hard task (seen on a job
+#: that asked for a unit to carry items), so the ceiling is 32000 -- the retry after a
+#: truncation now also tells it to stop thinking instead of only paying more.
+TOKENS_CEILING = 32000
+#: appended to the prompt when the previous attempt was cut off by the budget.
+TRUNC_NUDGE = "".join([
+    chr(10), chr(10), "=== correction ===", chr(10),
+    "Your previous reply was cut off by the token budget while you were still ",
+    "thinking. Stop reasoning now and write the JSON object: the shortest program ",
+    "that answers the task is better than none, and a blocked reply is acceptable."])
 
 #: how much of reasoning_content a reply carries back to the job (the panel shows
 #: a screenful of it; the point is to explain a refusal, not to archive a transcript)
@@ -573,6 +709,10 @@ class HttpProvider:
                 if budget < self.ceiling and attempt < TRUNC_TOTAL:
                     budget = min(self.ceiling, budget * 4)
                     timeout = min(600, max(timeout, 30) * 3)
+                    # paying more is only half of it: a reasoning model that hit the
+                    # ceiling was still thinking, so tell it to answer now (v0.24.0).
+                    if not prompt.endswith(TRUNC_NUDGE):
+                        prompt = prompt + TRUNC_NUDGE
                     continue
                 return _keep_reason(
                     {"error": _budget_hint(out.get("error") or "", budget),

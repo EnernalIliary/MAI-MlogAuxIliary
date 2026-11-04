@@ -1,19 +1,19 @@
 {
  "id": "numeric-jump",
  "kind": "semantics",
- "severity": "WARN",
- "claim": "`jump` takes a 0-based STATEMENT index, so a hand-counted number is a promise about the code above it: insert one statement (or one label line, which shifts nothing) and the jump silently lands somewhere else. A jump must name a label.",
- "why": "LParser.java:117-125 records a label against the count of statements parsed so far and :195-198 resolves `jump <label>` to that 0-based number, which is exactly the literal `jump N` accepts -- so the two forms compile to the same instruction and only the number is fragile. Measured on out/jobs/43fe34c6557e3eeb.json (out/takeover-20261024/98-quality-analysis.md §2): `jump 12` pointed one line past the label the author meant and `jump 5` closed the loop one statement late, so four `control shootp` statements never ran and the radar fired exactly once -- every line legal, nothing to complain about at compile time. prepare() rewrites a named jump into the same number, which is why this check has to read the lines as written rather than the prepared statement list. Prefer labels (`loop:` on its own line + `jump loop always`) so the game does the counting.",
+ "severity": "INFO",
+ "claim": "jump takes a 0-based STATEMENT index, and the in-game editor can only write a number there: a numeric target is the normal, editor-produced form and is not a mistake. It is only a promise about the statements above it -- insert or delete one statement and every literal target below it shifts. INFO: the editor gives no other option, so this is a reminder to re-check targets after editing, not a defect.",
+ "why": "User m06173 (2026-11-03): a numeric line-number jump must not be reported as an error, because the vanilla editor can only use numeric jump targets -- the target is a number field, so every program touched in the editor carries numeric targets, and flagging them WARN turned a normal program into a wall of warnings (v0.23.3 review panel). LParser.java:117-125 records a label against the statement counter and :195-198 resolves a named jump to that 0-based number, which is exactly the literal jump N accepts, so both forms compile to the same instruction. A label is still the safer form for generated text (tools/msch.py writes code as text into logic data and the game resolves labels at load), but a number is what the editor writes and what a player can keep editing. The failure still worth catching is not \"a number was used\" but \"the number points nowhere\": jump-target-out-of-range (ERR) and unreachable-statement (WARN) carry that -- measured on out/jobs/43fe34c6557e3eeb.json (out/takeover-20261024/98-quality-analysis.md section 2), where jump 12 pointed one line past the label the author meant and four control shootp statements never ran. Downgraded WARN -> INFO on 2026-11-03 and consolidated to one finding per program.",
  "source": "source",
  "ref": "m00174",
  "since": "2026-11-01",
  "counter_example": "tests/cases/numeric-jump-ok.mlog",
  "match": {
   "sevs": [
-   "WARN"
+   "INFO"
   ],
   "msg_any": [
-   "is a 0-based statement index"
+   "numeric jump target"
   ]
  },
  "auto_downgrade": false

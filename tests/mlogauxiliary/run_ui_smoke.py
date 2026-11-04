@@ -365,6 +365,24 @@ def main():
     # v0.21.0 档1（用户 m04199「能直接把工作区快照并入MAI对话里面吗」）：两个窗口共用一个外壳，
     # 标题行右侧是「对话 / 工作区」分段开关，开一个就关掉另一个。纯状态探针，窗口本身要真机看。
     "print('MAIDUAL:' + maiDualProbe());",
+    # v0.23.0（用户 m04691）：对话 agent 五项 —— markdown→标签、玩家/服务器快照、
+    # 写蓝图/跑命令的意图队列（侧车登记、玩家确认）、回车发送、对话框贴右。
+    "print('MAIACT:' + maiChatActionsProbe());",
+    # v0.23.1（用户 m05372 ②）：「无法复制它给出的代码块」—— 回复按围栏切段，代码段带头行与复制按钮。
+    # 切段/转义都是纯函数，无头下只验这些；按钮本身要真机点。
+    "print('MAICOPY:' + maiChatCopyProbe());",
+    # v0.23.3（用户 m05926「逻辑审查一直 0err 0warn」）：这一栏原来只有本地 5 条判据，
+    # 而且 canvas.save() 在 MindustryX 下可能读到空串（栏里「语句 0」）；现在取码有兜底、
+    # 并异步问侧车 POST /analyze 要全量结果。无头下只验计数/行文/来源判定这些纯函数。
+    "print('MAIREV2:' + maiReview2Probe());",
+    # v0.23.5（用户 m06360「没有看到明显的错误行指示箭头」）：箭头以前只吃本地快检的结果，
+    # 「跳转越界」这类只有侧车全量才查得出的错误一条箭头也没有；现在两份合并，栏里也标 L# 行号。
+    "print('MAIARROW2:' + maiArrow2Probe());",
+    "print('MAITASK:' + maiTaskFactsProbe());",
+    # v0.23.2（用户 m05726「编辑界面的逻辑审查显示没有连接到处理器」）：MindustryX 这类
+    # loader 模组会替换 LogicDialog 的字节码，写死的 Class.forName 反射会静默失败；
+    # 现在改成从实例的类沿父类链找 executor 字段、并按鸭子类型找目标建筑。无头下只验诊断串。
+    "print('MAIREV:' + maiReviewDiagProbe());",
     # v0.22.0 档3（用户 m04334「完成之后继续做档3」）：工作区快照随 POST /chat 一起下发，
     # 侧车只读地用 ws_list / ws_get / ws_search 看它。这里只验纯函数的裁剪与预算。
     "print('MAIWSDIGEST:' + maiWsDigestProbe());",
@@ -408,7 +426,7 @@ def main():
              or l.startswith(('MAISELF:', 'MAIDIAG:', 'MAISET:', 'MAILIST:', 'MAILISTROWS:',
                               'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
                               'MAILINKCONFLICT:', 'MAINET:', 'MAIWRITECHECK:', 'MAICHAT:', 'MAISIDECAR:',
-                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIWSDIGEST:', 'MAIBP:',
+                              'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIWSDIGEST:', 'MAIBP:', 'MAIACT:', 'MAICOPY:', 'MAIREV:', 'MAIREV2:', 'MAIARROW2:', 'MAITASK:',
                               'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIWELCOME:', 'MAIKEYBIND:', 'MAITHEME:',
                               'MAIJOBBOX0:', 'MAIJOBBOXPIN:', 'MAIJOBBOXFIN:',
                               'MAIJOBBOXCLR:', 'MAIJOBBOX3:', 'MAIJOBMANAGER:',
@@ -596,6 +614,41 @@ def main():
         problems.append('v0.21.0: the shared dialog shell lost its mode switch '
                         '(want MAIDUAL:ok modes=chat,ws ...): %r'
                         % [l for l in lines if l.startswith('MAIDUAL:')][:1])
+    # v0.23.0（用户 m04691）：模型写 markdown、要写蓝图库/跑命令、要读玩家与服务器；
+    # 转换器与意图队列都是纯函数，玩家/服务器快照在无头下必须是 null 而不是抛。
+    if 'MAIACT:ok' not in joined:
+        problems.append('v0.23.0: the chat actions (md->tags / intents / digests / dock) are broken '
+                        '(want MAIACT:ok ...): %r'
+                        % [l for l in lines if l.startswith('MAIACT:')][:1])
+    # v0.23.1（用户 m05372 ②）：回复里的代码块要能整块复制 —— 切成文字段/代码段后代码段单独带按钮。
+    if 'MAICOPY:ok' not in joined:
+        problems.append('v0.23.1: the code-block splitter / console digest is broken '
+                        '(want MAICOPY:ok segs=3 ...): %r'
+                        % [l for l in lines if l.startswith('MAICOPY:')][:1])
+    # v0.23.3（用户 m05926「逻辑审查一直 0err 0warn」）：审查栏要真的能报出 ERR/WARN。
+    if 'MAIREV2:ok' not in joined:
+        problems.append('v0.23.3: the review bar lost its full-check wiring or its count/line rendering'
+                        ' (want MAIREV2:ok blank=3 cnt=1/2/1/4 ...): %r'
+                        % [l for l in lines if l.startswith('MAIREV2:')][:1])
+    # v0.23.5（用户 m06360）：行内箭头必须同时吃本地快检和侧车全量；同一行取最坏级别、按行号排序。
+    if 'MAIARROW2:ok' not in joined:
+        problems.append('v0.23.5: the review arrows lost their merged feed or their line list'
+                        ' (want MAIARROW2:ok lines=2 worst=ERR size=22 ...): %r'
+                        % [l for l in lines if l.startswith('MAIARROW2:')][:1])
+    # v0.24.0（用户 m06693「画工作区做无线超那个」结果不好）：选区快照只说框里有什么，
+    # 而 ubind / ulocate 看的是整张图 —— 全图核心/单位/规则要一起送上去；做不了的作业要有
+    # 自己的状态和说得清原因的卡片，不能退回 Failed + 空话。
+    if 'MAITASK:ok' not in joined:
+        problems.append('v0.24.0: the task prompt lost the map-wide facts or the blocked card'
+                        ' (want MAITASK:ok cores=N units=N blocked=1): %r'
+                        % [l for l in lines if l.startswith('MAITASK:')][:1])
+    # v0.23.2（用户 m05726）：审查栏不能再靠写死的 Class.forName("mindustry.logic.LogicDialog")
+    # 反射 —— MindustryX 替换字节码之后 f.get(L) 抛 IllegalArgumentException 被静默吞掉，
+    # 表现就是永远「读不到处理器」。诊断串在无头下必须是 ui=null 且字段齐全。
+    if 'MAIREV:ok' not in joined:
+        problems.append('v0.23.2: the review diagnosis (executor field chain / link why) is broken '
+                        '(want MAIREV:ok ui=null ...): %r'
+                        % [l for l in lines if l.startswith('MAIREV:')][:1])
     # v0.22.0 档3: the workspace snapshot that rides on POST /chat must be trimmed to a budget --
     # full code on every processor of every workspace would blow up the request.
     if 'MAIWSDIGEST:ok' not in joined:
@@ -2021,10 +2074,11 @@ def main():
             if ast is None or (line - 1) not in kids:
                 continue
             kx, ky, kh = kids[line - 1]
-            want_x = ast[0] + kx - 16 - 2          # left gutter when there is room
+            # v0.23.5: ARROW 16 -> 22，左侧让位从 2 放宽到 4（箭头加大后别被行盖住）。
+            want_x = ast[0] + kx - 22 - 4          # left gutter when there is room
             if want_x < 2:
                 want_x = ast[0] + kx + 2
-            want_y = ast[1] + ky + kh - 19 - 8     # header row is 38 px tall
+            want_y = ast[1] + ky + kh - 19 - 11    # header row is 38 px tall (ARROW/2 = 11)
             if abs(v[0] - round(want_x)) > 1 or abs(v[1] - round(want_y)) > 1:
                 problems.append('arrow on line %d at %r, wanted (%r, %r)' % (line, v[:2], round(want_x), round(want_y)))
         if 1 in got and 3 in got and not got[1][1] > got[3][1]:
@@ -2035,6 +2089,23 @@ def main():
     # 'executor:pkg'), and Rhino only exposes public members -- so L.executor was
     # undefined, linkNames() came back empty, and every link slot looked unbound.
     # Read it through the reflective accessor instead of touching the field directly.
+    # v0.23.2: the executor field must be found from the INSTANCE's class chain, not from a
+    # hard-coded Class.forName -- MindustryX (dexed loader) replaces mindustry.logic.LogicDialog,
+    # and field.get(instance) then throws IllegalArgumentException which the outer catch swallowed
+    # silently (the bar showed "链接 ?（读不到处理器）" forever).
+    if 'function logicExecFieldOf(' not in code_only or 'function logicClassChain(' not in code_only:
+        problems.append('v0.23.2: logicExecutor() no longer walks the instance class chain -- '
+                        'MindustryX replaces LogicDialog, so a hard-coded Class.forName fails silently')
+    if 'mindustry.logic.LExecutor' not in code_only:
+        problems.append('v0.23.2: the executor field is no longer located by its declared type')
+    if 'function logicBuildOf(' not in code_only:
+        problems.append('v0.23.2: lost the logicBuildOf() fallback (the dialog itself holds the target build)')
+    if 'function reviewDiagText(' not in code_only or 'api.maiReviewDiag = function(' not in code_only:
+        problems.append('v0.23.2: lost the one-line review diagnosis (maiReviewDiag() in the F8 console)')
+    if '"链接 ?（" + linkWhy' not in code_only:
+        problems.append('v0.23.2: the link line no longer says WHY the link table is unknown')
+    if 'Class.forName("mindustry.logic.LogicDialog")' in code_only:
+        problems.append('v0.23.2: the hard-coded Class.forName("mindustry.logic.LogicDialog") is back')
     if 'function logicExecutor(' not in code_only:
         problems.append('main.js lost logicExecutor() -- LogicDialog.executor is package-private; '
                         'a direct read is undefined and every link slot looks unbound')
@@ -2046,6 +2117,21 @@ def main():
     # an empty array makes quickcheck report a WARN on every link slot.
     if 'linkKnown' not in code_only:
         problems.append('the review stopped telling "no links" apart from "cannot read the link table"')
+    # ---- v0.23.3（用户 m05926）：本地快检只有 5 条判据，写着「jump 3 always」这种跳转越界
+    # 的错误一条都不命中；所以审查栏必须再接一条侧车全量检查，且取码要有兜底
+    # （MindustryX 下 canvas.save() 可能是空串）。
+    if 'function reviewCodeSrc(' not in code_only or 'L.canvas.save()' not in code_only:
+        problems.append('v0.23.3: reviewCode() no longer reads the editor canvas through reviewCodeSrc()')
+    if '"编辑器代码读不到，查的是已保存的代码"' not in code_only:
+        problems.append('v0.23.3: lost the fallback that reviews the saved code when canvas.save() is empty')
+    if '"POST", "/analyze"' not in code_only:
+        problems.append('v0.23.3: the review bar no longer asks the sidecar for a full check (POST /analyze)')
+    if 'function paintReviewBar(' not in code_only or 'function reviewCountList(' not in code_only:
+        problems.append('v0.23.3: the bar cannot be repainted from the full result (paintReviewBar / reviewCountList)')
+    if '"review code: src="' not in code_only:
+        problems.append('v0.23.3: lost the one-time review code: src=... chars=... stmts=... log line')
+    if 'api.maiReview2Probe = function(' not in code_only:
+        problems.append('v0.23.3: lost maiReview2Probe() (the headless self-check for the review bar)')
     if 'function syncArrows(' not in code_only or 'Touchable.childrenOnly' not in code_only:
         problems.append('the in-line review arrows are gone (syncArrows / Touchable.childrenOnly)')
     if 'function tapLine(' not in code_only:
@@ -2075,6 +2161,83 @@ def main():
     if 'isProcessor(g)' not in code_only:
         problems.append('the list scan stopped filtering by duck type (isProcessor)')
 
+    # v0.23.0（用户 m04691）：五项都要在代码里立住 —— 少一项就等于没做。
+    # ① markdown → 标签：助手气泡必须走 mdToTags，字面量方括号要双写成 [[。
+    if 'function mdToTags(' not in code_only:
+        problems.append('v0.23.0 ④: mdToTags is gone')
+    if 'var segs = chatSegments(content);' not in code_only or 'mdToTags(one.text)' not in code_only:
+        problems.append('v0.23.0 ④: the assistant bubble no longer runs mdToTags')
+    if 'split(MD_LB).join("[[")' not in code_only:
+        problems.append('v0.23.0 ④: literal [ is no longer escaped as [[')
+    # ② ③ 意图与快照：四个工具的数据源必须随 POST /chat 下发，意图必须过确认才执行。
+    if 'function playerDigest(' not in code_only or 'function serverDigest(' not in code_only:
+        problems.append('v0.23.0 ③: the player/server digests are gone')
+    if 'req.player = pd' not in code_only or 'req.server = sd' not in code_only:
+        problems.append('v0.23.0 ③: the digests no longer ride on POST /chat')
+    if 'chatTakeIntents(doc.chat);' not in code_only:
+        problems.append('v0.23.0 ①②: the finished round no longer picks up intents')
+    if 'Vars.ui.showConfirm("MAI · 执行动作"' not in code_only:
+        problems.append('v0.23.0 ①②: intents no longer ask before acting')
+    if 'Packages.mindustry.game.Schematics.readBase64' not in code_only:
+        problems.append('v0.23.0 ①: bp intents no longer go through Schematics.readBase64')
+    if 'Call.sendChatMessage(full)' not in code_only:
+        problems.append('v0.23.0 ②: console intents no longer reach the server in multiplayer')
+    # ④ ⑤ 输入与停靠：TextArea 才有换行，回车要拦、Shift+回车才换行；两个窗口都要贴右。
+    if 'new Packages.arc.scene.ui.TextArea("")' not in code_only:
+        problems.append('v0.23.0 ⑤: the chat input is not a TextArea (Enter can never arrive)')
+    if 'function chatShiftDown(' not in code_only or 'field.setText(t);' not in code_only:
+        problems.append('v0.23.0 ⑤: Enter/Shift+Enter handling is gone')
+    if 'function dualDock(' not in code_only or 'dualDockRight(d);' not in code_only:
+        problems.append('v0.23.0 ⑤: the dialogs no longer dock right')
+
+    # v0.23.1（用户 m05372）：① F8 调出来的是 JS 控制台，不是聊天命令 ② 代码块要能一键复制。
+    if 'function chatSegments(' not in code_only or 'function chatCodeBlock(' not in code_only:
+        problems.append('v0.23.1 ②: the code-block splitter / code block row is gone')
+    if 'function chatCopyText(' not in code_only or 'head.button("复制"' not in code_only:
+        problems.append('v0.23.1 ②: code blocks no longer carry a working copy button')
+    if 'injectConsoleVariables()' not in code_only or 'runConsole(pre + code)' not in code_only:
+        problems.append('v0.23.1 ①: console intents no longer run through the F8 JS console')
+    if 'function consoleDigest(' not in code_only or 'req.console = cd' not in code_only:
+        problems.append('v0.23.1 ①: the console api catalog no longer rides on POST /chat')
+
+    # v0.23.5（用户 m06360「没有看到明显的错误行指示箭头」）：
+    # 箭头以前只 syncArrows(本地 quickRun 的结果)，而跳转越界这类只有侧车全量才查得出 ——
+    # 栏里写着 ERR 1、编辑器里一条箭头也没有。现在两份合并、每份结果回来都重刷、建不出来还会重试。
+    if 'function reviewArrowFindings(' not in code_only or 'function refreshArrows(' not in code_only:
+        problems.append('v0.23.5: the review arrows lost their merged (local + full) feed')
+    if 'refreshArrows();' not in code_only or 'syncArrows(res, null, null)' in code_only:
+        problems.append('v0.23.5: refreshReview still feeds only the local quick check to the arrows')
+    if 'var ARROW = 22;' not in code_only:
+        problems.append('v0.23.5: review arrows shrank back below 22 px (too small to notice)')
+    if 'arrowWant > 0 && arrowRows.length === 0' not in code_only:
+        problems.append('v0.23.5: the arrow gutter has no retry (a failed first build stays empty)')
+    if 'reviewLineList(' not in code_only or 'reviewBar.add("L" + ll[ci].line)' not in code_only:
+        problems.append('v0.23.5: the review bar no longer names the offending lines')
+    if 'api.maiArrow2Probe = function(' not in code_only:
+        problems.append('v0.23.5: the arrow self-check hook disappeared')
+    # v0.23.6（用户 m06578「就第一次建出来了，但是后来再打开就消失了」）：
+    # 编辑器每次打开都会 canvas.rebuild()（LCanvas.java:110 新建 DragLayout），旧箭头跟着旧容器一起没了；
+    # 代码没变时 refreshReview 早退、自愈分支又看 arrowRows 非空 —— 必须按「容器换了」整份重画。
+    if 'function arrowStale(' not in code_only:
+        problems.append('v0.23.6: the arrow overlay lost its statements-identity check')
+    if 'arrowHost.parent === parent' not in code_only:
+        problems.append('v0.23.6: a stale arrow host is no longer detected as detached')
+    if 'arrowStale(arrowStatements, st)' not in code_only:
+        problems.append('v0.23.6: the per-frame tick no longer rebuilds the arrows after a canvas rebuild')
+    if 'review arrows: canvas rebuilt, rows=' not in code_only:
+        problems.append('v0.23.6: the canvas-rebuild diagnostic line disappeared')
+
+    # v0.24.0：全图事实段 + blocked 出口 + 卡片措辞（都不能再退回去）。
+    if 'function globalFacts(' not in code_only or 'globals: globalFacts(' not in code_only:
+        problems.append('v0.24.0: the region snapshot no longer carries the map-wide facts')
+    if 'function jobChatText(' not in code_only:
+        problems.append('v0.24.0: the job card wording was folded back into jobChatDone')
+    if 'var JOB_TERMINAL = {done: 1, blocked: 1' not in code_only:
+        problems.append('v0.24.0: blocked is not a terminal job state any more')
+    if 'Vars.ui.showText("MAI · 这件事它做不了"' not in code_only:
+        problems.append('v0.24.0: a blocked job is no longer surfaced outside the chat box')
+    if 'api.maiTaskFactsProbe = function(' not in code_only:
+        problems.append('v0.24.0: the task-facts self-check hook disappeared')
     if problems:
         print('FAIL ' + '; '.join(problems))
         print(joined[-1500:])
@@ -2103,7 +2266,7 @@ def main():
         print('  batch write: ' + wm[:170])
     for l in lines:
         if l.startswith(('MAISELF:', 'MAIDIAG:', 'MAIUNDO:', 'MAICONFLICT:', 'MAILLM:',
-                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIWSDIGEST:',
+                        'MAICHAT:', 'MAISIDECAR:', 'MAIJOBPANEL:', 'MAIJOBPANELDIAG:', 'MAIHINT:', 'MAIFILTER:', 'MAIFILTER2:', 'MAIWORKSPACE:', 'MAIWS2:', 'MAIWS3:', 'MAICHATUI:', 'MAIDUAL:', 'MAIWSDIGEST:', 'MAIACT:', 'MAICOPY:', 'MAIREV:', 'MAIREV2:', 'MAIARROW2:', 'MAITASK:',
                         'MAIJOBBOX', 'MAIBADGERECT:', 'MAIJOBMANAGER:', 'MAIBP:',
                         'MAISIGMETA:', 'MAIBPTITLE:', 'MAIBPCHAT:', 'MAIKEYBIND:', 'MAITHEME:',
                         'MAIJOBTHINK2:')):

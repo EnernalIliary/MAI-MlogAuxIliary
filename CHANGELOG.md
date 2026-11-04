@@ -3,6 +3,84 @@
 只记对外可见的变化。工程日志（每一版的动机、踩过的坑、源码依据）见
 `MlogAuxiliary/HISTORY.md` 与 `docs/`。
 
+## 0.24.0
+
+- 全图事实段：区域快照只写了框里有什么，而 `ubind` / `ulocate` / `radar` 看的是整张图 —— 「从核心给穹顶送料」的材料全在框外时，模型只能判「做不到」。模组新增 `globalFacts()`（`Groups.build` 找最近的核心连库存、`Groups.unit` 按本队统计类型、`Vars.state.rules.logicUnitControl`）挂到 `regionSnapshot().globals`，侧车 `global_facts()` 把它写成三行提示（没有数据时明说这一版游戏没送）。
+- `needs_links` 不再是拒绝：旧提示一边说「需要玩家接线的方块写进 needs_links」，一边说「needs_links 必须是白名单子集」，模型于是得出「没有 core 的链接就做不了」。现在照常收下代码，记下 `needs_links` 并给一条 WARN `needs-unwired-link`，作业卡片显示「需要接线 core」。
+- 新的 blocked 出口：模型可以直接答 `{"blocked": {"reason", "need", "instead"}}`，作业进入新终态 `blocked`（不再退化成 failed），聊天卡片说清原因与所需方块，并弹一次「MAI · 这件事它做不了」。
+- 语义覆盖检查：任务句子里出现单位/物品词（星辉、供料、transport…）而程序一条 `ubind` / `ucontrol` / `itemTake` / `itemDrop` / `ulocate` 都没有 ⇒ WARN `task-needs-unit-control`，不再静默发一个只开关穹顶的程序。
+- 预算与例子：`TOKENS_CEILING` 16000 → 32000，截断重试追加一段 `TRUNC_NUDGE`（上一轮把 16000 tokens 全花在思考上、`finish_reason=length`、交回空回复）；`EXAMPLES` 8 → 11，新增单位运输 / 供给循环 / 采矿三条，全部过 `mlogcheck` 0 findings。
+- 作业卡片 0 字节修复：`bytes_len` 由 `_materialize()` 按实际 payload 记下（`normalize()` 默认 0），卡片才真的显示「N 字节」。
+- 自检：`api.maiTaskFactsProbe` 返回 `ok cores=0 units=0 blocked=1 bytes=1234 need=1 states=Done/Blocked/Rejected/Failed`；sidecar provider 12 → 15 项（needs_links 改 WARN / blocked 终态 / 全图事实在提示里 / 覆盖检查），smoke 加 5 条红线。
+
+## 0.23.6
+
+- **修：审查箭头关掉再打开就消失**（用户 m06578「就第一次建出来了，但是后来再打开就消失了」）。原因：原版编辑器每次打开都会 `canvas.rebuild()`，它在 `LCanvas.java:110` 里 `statements = new DragLayout()` —— 整个语句容器换成了新对象，旧箭头跟着旧容器一起没了；而`refreshReview()` 在代码没变时会早退（本来是为了省掉重复快检），自愈分支又要求「一行箭头都没有」才重试 —— 旧箭头还挂在记录里，于是从第二次打开起永久没有箭头。
+- 现在记住箭头挂在哪份 `statements` 上（`arrowStatements`），每帧比对一次：换了容器就整份重画；箭头覆盖层也校验自己还挂在原来的父容器上（`arrowHost.parent === parent`），发现被摘掉就丢掉旧的重新建，不再把 `Image` 攒在已分离的 `Table` 上。
+- 新增诊断：重画时打一行 `review arrows: canvas rebuilt, rows=N`（最多 3 次），真机再出问题时一眼能看出「重画了但没画上」还是「根本没触发」。
+- 自检：`api.maiArrow2Probe` 加四条 `arrowStale()` 断言（空 → false、同一对象 → false、换对象 → true、当前为空 → false），smoke 加 4 条源码红线。
+
+## 0.23.5
+
+- **行内箭头真的会指到出问题的那一行**：用户 m06360 报「没有看到明显的错误行指示箭头」。两个原因叠在一起：① 箭头只吃**本地快检**的结果（`quickcheck.js` 那 5 条判据），而 `jump 3 always` 这类跳转越界只有侧车 `tools/mlogcheck.py` 的全量检查才查得出来 —— 于是审查栏写着 `ERR 1`、编辑器里一条箭头也没有；② 箭头是贴在语句表父容器上的覆盖层，要 `statements.parent` 非空才建得出来，以前只在**代码变化**时同步一次，第一次没建成就整局都不再试（MIndustryX 这类 loader 模组下 `LogicDialog` 被替换，第一次取不到很正常）。现在两份结果合并后画箭头（同一行取最坏级别、按行号升序），侧车结果回来时也立刻重刷，建不出来时每 30 帧补一次。
+- **箭头更显眼**：`ARROW` 16 → 22 像素，左侧让位从 2 放宽到 4（加大后不压到行内容）；`Icon.right` 取不到时退成图集里的白色方块（照样按严重度染色），不再静默整片不画。
+- **栏里直接点出行号**：计数后面按严重度列出最多 4 个 `L#`（红 = ERR、橙 = WARN），后面 `+N` 是省略的条数 —— 覆盖层万一还是画不出来，也能一眼看出是哪几行，点「详情」看原因。
+- **诊断**：首次建立箭头时打一行 `review arrows: want=N rows=M`，下次再「看不见箭头」看这一行就知道是「没数据」还是「没画上去」。
+- 自检：`api.maiArrow2Probe` 断言两路合并、按行去重、最坏级别胜出、行号排序、`ARROW` = 22、无画布时 `syncArrows` 返回 0；smoke 输出 `MAIARROW2:ok lines=2 worst=ERR size=22`，退出码 0（箭头几何断言按新的 22/4 让位重写）。
+
+## 0.23.4
+
+- **数字行号 jump 不再被当成错误**：用户 m06173 报「使用行号 jump 不应该报 err，原版编辑器只能用数字行号 jump」。原版逻辑编辑器的 jump 目标就是一个数字字段（`LParser.java:117-125` 把 `label:` 记在语句计数器上、`:195-198` 把命名 jump 解析成同一个 0 基数字，两者编译成同一条指令），所以在编辑器里改过的程序**必然**全是数字目标。v0.4.x 起我们把每一处数字 jump 都判成 WARN「不是标签」，6 个分支就是 6 条警告 —— 一个完全正常的程序被刷成一片黄。现在整个程序只出一条 **INFO**（列出位置，最多 8 处），措辞改成「编辑器只能写数字，这是常态，不是错误；但字面目标是关于它上方语句数的承诺，插一句或删一句，下方所有目标都会漂」；`rules/numeric-jump.json` 的 severity 同步 WARN → INFO（`match.sevs` 必须一起改，否则 rid 认不出来）。
+- **跳转越界的提示更具体**：`jump target 3 out of range (0..2)` 后面补上「jump 取的是 0 基**语句**序号，最后一条是 n-1，再大就什么也不做、直接往下走；如果你是按 1 基行号数的，减 1」。真正该拦的从来不是「用了数字」，而是「数字指不到任何语句」—— 这条 ERR 与 `unreachable-statement`(WARN) 照旧。
+- **给模型的话术放宽**：`tools/mlogprovider.py` 里原来写「every jump must name a label ... never a number」，现在改成「标签形式更安全、是生成文本的首选；但数字同样合法 —— 它是编辑器唯一能写的形式，所以带数字的程序玩家还能接着改 —— 只是数字得数对」。
+- 自检：`tests/run_tests.py` 48/48（`numeric-jump` / `labels-check` / `reactor-guard*` / `loop-labels-ok` 等 12 个夹具的期望从 WARN 改成 INFO，同一程序多条 WARN 合并成一条）；`tests/ruleids/run_ruleids.py` 35 rid / 49 夹具 0 问题（覆盖集合不变，`rule-coverage.json` 只有键序变化）；三个分析器镜像（`.dsh/skills/mlog-agentskill/tools`、`mindustry-blueprint/tools`、`.dsh/skills/mindustry-blueprint/tools`）已同步。
+
+## 0.23.3
+
+- **审查栏真的会报错了**：这一栏以前只有本地 5 条判据（未知指令 / 子命令拼错 / 版本门 / 链接名未绑定 / 体积），所以 `jump 3 always` 这种跳转越界的错一条都不命中，栏里永远「没有发现问题」——用户 m05926 报「一直是 0err 0warn」就是这个。现在再挂一条**侧车全量检查**：代码一变就 `POST /analyze`（`tools/mlogcheck.py` 的 41 条规则：跳转目标越界、不可达语句、读未赋值变量、参数个数…），回来之后重画这一栏，行文从「本地 · 语句 N」变成「全量 · 语句 N」。
+- **读不到编辑器代码时会说实话**：MindustryX（loader 型模组）换了游戏的 `LogicDialog`，`canvas.save()` 有可能拿到空串（栏里「语句 0」就是这么来的）。现在按 `canvas.save()` → 处理器里已保存的 `code` 顺序取，取到哪份就在栏里标出来（「编辑器代码读不到，查的是已保存的代码」/「读不到编辑器里的代码」），不再默默显示 0。
+- **详情窗口把两套结果分开写**：先本地快检的统计，再一行「全量检查：ERR n / WARN m    语句 k」（或「全量检查不可用：…」「还没回来，稍等一下」），然后逐条列 `L{行} {级别} [{规则}] 说明`；末尾附「代码来源：…」。
+- **一次性性能日志**：第一次取码时打一行 `review code: src=canvas|build|none chars=N stmts=M`，下次再报「不生效」看一眼这行就知道卡在哪一环。
+- 自检口：`api.maiReview2Probe()` 在无头环境返回 `MAIREV2:ok blank=3 cnt=1/2/1/4 lines=1 src=none`；诊断串 `maiReviewDiag()` 尾部加上了 `src= chars= stmts= full=`；ui smoke 加 `MAIREV2:ok` 断言与 6 条红线（`reviewCodeSrc` / 兜底文案 / `POST /analyze` / `paintReviewBar`+`reviewCountList` / 那行日志 / 探针本身）。
+
+## 0.23.2
+
+- **审查栏不再因为「模组换了游戏类」而永远说没有处理器**：v0.4.7 起审查栏读 `LogicDialog.executor` 靠的是写死的 `Class.forName("mindustry.logic.LogicDialog")` + 反射。装了 MindustryX（loader 型模组，包里直接带替换版 `mindustry/logic/LogicDialog.class`）之后，类由别的 ClassLoader 定义，`field.get(实例)` 抛 `IllegalArgumentException` 又被外层 `catch` 静默吞掉 —— 表现就是审查栏永远「链接 ?（读不到处理器）」（用户 m05726 实报）。
+  现在改成**从实例自己的类出发沿父类链找字段**：名字先试 `executor` / `exec` / `lExecutor`，都对不上就按字段的声明类型 `mindustry.logic.LExecutor` 认，不再依赖写死的类名。
+- **目标处理器多了第二条路**：`executor.build` 拿不到时，扫编辑器自己声明的字段，用「有 executor + code 字段才算处理器」的鸭子判据找目标建筑（MindustryX 的 `LogicDialog` 自己就存着 `building`），两条路都失败才认「读不到」。
+- **「链接 ?」现在会说清原因**：区分「编辑器没绑处理器」与「读到处理器但链接表读不出来」，详情里还会附一行自检串。
+- **一键自检**：F8 控制台里敲 `maiReviewDiag()`（就是 `api.maiReviewDiag`），返回 `ui=obj cls=mindustry.logic.LogicDialog field=executor owner=… ex=obj build=obj links=N` 这一串，直接能看出卡在哪一环；审查栏第一次取不到链接表时也会把同一串打进日志（只打一次，不刷屏）。
+- 自检口：`api.maiReviewDiagProbe()` 在无头环境返回 `MAIREV:ok ui=null cls=- field=none owner=- ex=null build=null links=unknown`；ui smoke 加 `MAIREV:ok` 断言与 7 条红线（不许再出现写死的 `Class.forName("mindustry.logic.LogicDialog")`）。
+## 0.23.1
+
+- **对话里的「控制台」终于是游戏里 F8 那个 JavaScript 控制台**：上一版模型把「控制台命令」理解成服务器聊天里的 `/命令`，于是你让它查点东西，它一直在 `/info`、`/pause`。现在明确分流：`/` 开头的仍按聊天命令走（联机发聊天、单机走 `clientCommands`），其余一律当 JS 代码送进 F8 控制台执行（`mods.getScripts().runConsole(injectConsoleVariables() + code)`），返回值原样回给模型；代码可多行，上限从 300 字符放宽到 2000。
+- **模型知道你这一局里有什么可调**：每轮请求附带 `consoleDigest()` —— 模组版本、F8 是否可用、控制台预置变量（`unit` / `player` / `team` / `core` / `items` / `build` / `cursor` / `cursorUnit`）、以及本局 `api.*` 的全部函数名（最多 90 个，实测 90 个）。新增工具 `console_help`：先查再写，别再凭空猜 `Vars.xxx`。
+- **助手给出的代码块现在能一键复制**：回话按反引号围栏切段，代码段单独成一个块、顶上标语言和「复制」按钮，点了写进系统剪贴板并提示「代码已复制（N 字符）」；正文段继续走 markdown 转标签。没标语言的围栏也照切。
+- **确认框把风险说清楚**：控制台那条改成「控制台代码在游戏内那个 F8 JavaScript 控制台里执行，能直接改存档，看清楚再点确认。」，动作行改成「· 控制台 JS（N 行）：<前 60 字预览>」。
+- **切段不用正则**：v160.7 的 Rhino 有正则字面量构造期 codeBug（断言表 L2-118），所以 `chatSegments()` / `chatTrimCode()` / `chatEsc()` 全是逐字符扫描。
+- 自检口：`api.maiChatCopyProbe()` 返回 `ok segs=3 lang=mlog esc=a[[b]c api=90 f8=...`；ui smoke 增 `MAICOPY:ok` 断言与 4 条红线；侧车测试 chats 节 17 → 19 条。
+## 0.23.0
+
+- **助手能替你写蓝图、跑控制台命令了 —— 但要你点确认**：对话里新增两个工具：`bp_add`（名字 + base64 蓝图码 + 一句说明）把一次生成结果直接存进原版蓝图库，
+  `console_run` 跑一条控制台命令。它们**不会自动执行** —— 只是把动作登记下来，面板随即弹出确认框（「写蓝图库「补料线」（1 行代码）」「/pause on」），
+  点确认才真的写、才真的发，点取消就丢掉。每轮最多 4 条，蓝图码 20000 字符、命令 300 字符，超了当场截断并在回话里说明。
+- **助手现在知道你是谁、在哪、在什么局里**：每轮请求都附带两份只读快照 —— `playerDigest()`（名字、是否管理员、坐标（格）、队伍、单位、血量）与
+  `serverDigest()`（地图名与尺寸、波次、TPS、在线玩家数、敌方数、是否联机、是否 PvP、游戏模式）。侧车的 `player_info` / `server_info` 两个工具读它们；
+  无头环境两者都返回 null，工具回「这一轮没有快照」，不编。
+- **模型回话里的 markdown 现在真的像样了**：助手爱用 `#`、`**粗**`、行内代码、`- 列表`、围栏代码块，以前整段原样贴进 Label，屏幕上是一堆星号井号。
+  新增 `mdToTags()` 把 markdown 翻成 Mindustry 标签：标题与加粗 → 强调色、行内代码与斜体 → 浅灰、引用 → 灰色竖线、无序列表 → `•`、围栏代码块整体浅灰、
+  `[文字](地址)` → `文字 (地址)`，方括号一律转义成 `[[`。转换器**完全不用正则**（原因见下一条），是纯字符扫描。
+- **输入框能换行了：回车发送、Shift+回车换行**：原来是单行 TextField，一敲回车就发，长问题只能挤一行。现在换成 `TextArea("")`（2 行高），
+  在 listener 里拦换行 —— 没按 Shift 就把这个换行抠掉再发送，按了 Shift 就留着；输入框与「发送」按钮高度 34→56。
+- **两只窗口默认贴右**：`dualDockRight()` 把对话窗/工作区窗摆到右边缘（`scene 宽 − 窗宽 − 12`、垂直居中），每帧在 update 钩子里校正，拖走了也会自己回去；
+  `DUAL.dockRight = true` 可关。
+- ⚠️ **踩到一个真机级的坑，写进断言表了**：v160.7 的 Rhino 在**某些正则字面量**上会在构造期抛 `IllegalStateException: FAILED ASSERTION: invalid bytecode`
+  （`rhino/regexp/NativeRegExp` 里的 `Kit.codeBug`），**JS 的 try/catch 抓不住**，整个 `main.js` 会静默不执行。这一版第一批 markdown 转换器用了 13 条正则字面量，
+  恰好触发，全改成字符串扫描后才转绿。以后这个引擎里的新代码一律不写正则字面量（断言表 L2-118）。
+- 自检口 `api.maiChatActionsProbe`：`ok md=7 esc=a [[b] c intents=2 took=-1 player=null server=obj dock=true`（markdown 九条样例、方括号转义、
+  意图列表与确认文案、重复轮次不重复弹、非法蓝图码回人话、贴右开关）；`tests/logicd` 的 chats 一节 11→17 条（快照读取、意图字段、4 条封顶、
+  brief 只报条数、20000/300 截断、下一轮清零），`--no-sim` 全绿。
+
 ## 0.22.0
 
 - **助手现在能「看见」工作区快照了（只读）**：以前对话窗和侧车都看不到工作区里的处理器与代码，用户问「备料那个工作区的代码在干嘛」

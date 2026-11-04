@@ -964,31 +964,42 @@ def analyse(lines: list[str], links: list[str] | None = None, ipt: int = 2,
                 f"`{_t[1]}` is not a label in this program, so the game turns this "
                 f"into a jump to -1, which does nothing; execution just falls through"))
 
-    # `jump 12`: a hand-counted 0-based statement index instead of a label.
-    # LParser resolves a label to the statement counter (LParser.java:117-125) --
-    # the same 0-based number `jump` takes as a literal -- and prepare() rewrites
-    # a named jump into that number, so the prepared statement list can no longer
-    # tell a label from a hand-counted number. This scan therefore reads the lines
-    # as written. The failure this catches is out/takeover-20261024/
-    # 98-quality-analysis.md §2: `jump 12` / `jump 5`, each one line off, one
-    # branch never executed and a radar fired exactly once.
+    # jump 12: a numeric target written by hand. NOT an error, and it must not be
+    # reported as one: the in-game logic editor can only write numbers (user m06173,
+    # 2026-11-03: the editor's jump target is a number field), so a numeric target
+    # is the normal form of every program that has been edited in the editor. What
+    # is worth one line is the drift risk: a literal target is a promise about the
+    # statements above it, so inserting or deleting one statement shifts every
+    # target below it. One finding per program, not one per jump -- six branches
+    # would otherwise put the same sentence on the panel six times. The failure this
+    # note is about is out/takeover-20261024/98-quality-analysis.md section 2:
+    # jump 12 / jump 5, each one line off, one branch never executed and a radar
+    # fired exactly once. Range and reachability are checked separately below
+    # (jump-target-out-of-range, unreachable-statement).
+    _num_jumps: list[tuple[int, str]] = []
     for _i, _raw in enumerate(lines):
         _c = strip_comment(_raw)
         if "aigenerated:" in _c:
-            # The signature idiom `jump 0 always 0 "aigenerated:MAI:<12hex>"` is
+            # The signature idiom jump 0 always 0 "aigenerated:MAI:<12hex>" is
             # written by tools/aigenerated.py on purpose (target 0 = restart the
             # program, the id lives in the value slot); it is not the numeric
-            # confusion this rule hunts.
+            # confusion this note is about.
             continue
         _t = _c.split()
         if len(_t) < 2 or _t[0].lower() != "jump" or not is_number(_t[1]):
             continue
+        _num_jumps.append((_i, _t[1]))
+    if _num_jumps:
+        _where = ", ".join("L%d" % (_i + 1) for _i, _v in _num_jumps[:8])
+        if len(_num_jumps) > 8:
+            _where += " ..."
         out.append(Finding(
-            "WARN", _i + 1, "numeric-jump",
-            f"`{_t[1]}` is a 0-based statement index, not a label; label lines do not "
-            f"count as statements, so inserting one line above silently re-points this "
-            f"jump at the wrong statement -- put `<name>:` on its own line and jump to "
-            f"that name instead"))
+            "INFO", _num_jumps[0][0] + 1, "numeric-jump",
+            f"{len(_num_jumps)} numeric jump target(s) ({_where}): the in-game editor "
+            f"can only write numbers, so this is the normal form, not a mistake -- but a "
+            f"literal target is a promise about the statements above it, so inserting or "
+            f"deleting one statement shifts every target below it; re-check them after "
+            f"editing (0-based: the first statement is 0)"))
 
     # ---- 病毒逻辑 / virus logic: `ucontrol build ... @this` ---------------
     # The last argument of `ucontrol build` is the config copied onto the new
@@ -1699,7 +1710,10 @@ def analyse(lines: list[str], links: list[str] | None = None, ipt: int = 2,
             continue
         if not (0 <= tgt < n):
             out.append(Finding("ERR", orig + 1, c,
-                               f"jump target {tgt} out of range (0..{n-1})"))
+                               f"jump target {tgt} out of range (0..{n-1}): jump takes a "
+                               f"0-based STATEMENT index, so the last statement is {n-1} and a "
+                               f"larger target does nothing at all -- execution just falls "
+                               f"through. If you counted 1-based line numbers, subtract 1"))
             continue
         # Only UNCONDITIONAL into UNCONDITIONAL is a chain: then the second hop
         # is guaranteed and one instruction is spent for nothing. A conditional

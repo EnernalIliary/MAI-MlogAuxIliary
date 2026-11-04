@@ -28,7 +28,7 @@
 function __logicWriterMain(){
     "use strict";
 
-    var MOD_VERSION = "0.22.0";
+    var MOD_VERSION = "0.24.0";
     var URL_KEY     = "mlogauxiliary-url";
     var DEFAULT_URL = "http://127.0.0.1:8765";
     // v0.11.0：设置页里填的模型档三件套。密钥只留在本机 Core.settings 与 sidecar 进程内存。
@@ -2731,6 +2731,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // 无头环境里 Vars.ui 是 null（Vars.java:209/332），每次访问都套 try。
 
         var reviewHost = null, reviewBar = null, reviewLast = "", reviewFrame = 0, reviewRes = null;
+        // 「读不到链接表」的两种原因要分开说（v0.23.2）：编辑器没绑处理器 / 绑了但链接表读不出来
+        var linkWhy = "读不到处理器";
 
         // LogicDialog.executor 是**包私有**字段（真 v160.7 反射实测：canvas 是 public，
         // executor / privileged / consumer / wasRows 全是包私有），而 Rhino 只按 public
@@ -2738,84 +2740,363 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // 审查栏永远认为「没有处理器」，把链接表当成空表喂给 quickcheck。
         // 唯一能读到它的路是反射：getDeclaredField + setAccessible（Mindustry 在
         // classpath 上，没有模块系统挡着，实测 setAccessible 可用）。
-        var logicExecField = null, logicExecProbed = false;
+        var logicExecField = null, logicExecProbed = false, logicExecOwner = "", logicDiag = "";
+        var logicDiagLogged = false;
+
+        // v0.23.2：MindustryX 这类 loader 型模组会替换掉 mindustry.logic.LogicDialog 的字节码，
+        // 甚至让 Vars.ui.logic 变成它的子类。此时用 Class.forName("mindustry.logic.LogicDialog")
+        // 拿到的类未必是实例真正的类，field.get(L) 抛 IllegalArgumentException 又被外层
+        // catch 静默吞掉 —— 表现就是审查栏永远「读不到处理器」（v0.23.1 装机后用户实报）。
+        // 改法：从实例自己的类出发沿父类链找字段；名字对不上（executor / exec / lExecutor）
+        // 就按类型名 mindustry.logic.LExecutor 认，不再依赖写死的类名。
+
+        function logicClassChain(c){
+            var out = [];
+            while(c !== null && c !== undefined){
+                out.push(c);
+                try{ c = c.getSuperclass(); }catch(e){ c = null; }
+            }
+            return out;
+        }
+
+        function fieldByName(c, names){
+            for(var i = 0; i < names.length; i++){
+                try{ return c.getDeclaredField(names[i]); }catch(e){ /* try next */ }
+            }
+            return null;
+        }
+
+        function fieldByType(c, typeName){
+            try{
+                var fs = c.getDeclaredFields();
+                for(var i = 0; i < fs.length; i++){
+                    var t = "";
+                    try{ t = String(fs[i].getType().getName()); }catch(e){ continue; }
+                    if(t === typeName){ return fs[i]; }
+                }
+            }catch(e){ /* ignore */ }
+            return null;
+        }
+
+        function logicExecFieldOf(L){
+            if(logicExecProbed){ return logicExecField; }
+            logicExecProbed = true;
+            var chain = [];
+            try{ chain = logicClassChain(L.getClass()); }catch(e){ chain = []; }
+            for(var i = 0; i < chain.length; i++){
+                var f = fieldByName(chain[i], ["executor", "exec", "lExecutor"]);
+                if(f === null){ f = fieldByType(chain[i], "mindustry.logic.LExecutor"); }
+                if(f === null){ continue; }
+                try{ f.setAccessible(true); }catch(e){ continue; }
+                logicExecField = f;
+                try{ logicExecOwner = String(chain[i].getName()); }catch(e){ logicExecOwner = "?"; }
+                return f;
+            }
+            try{ log("logic editor: executor field not found on " + String(L.getClass().getName())); }catch(e){ }
+            return null;
+        }
 
         function logicExecutor(){
             try{
                 var L = Vars.ui.logic;
                 if(L === null || L === undefined){ return null; }
-                if(!logicExecProbed){
-                    logicExecProbed = true;
-                    try{
-                        var cls = Packages.java.lang.Class.forName("mindustry.logic.LogicDialog");
-                        var f = cls.getDeclaredField("executor");
-                        f.setAccessible(true);
-                        logicExecField = f;
-                    }catch(e){ log("LogicDialog.executor is not reachable: " + e); }
-                }
-                if(logicExecField === null){ return null; }
-                var ex = logicExecField.get(L);
+                var f = logicExecFieldOf(L);
+                if(f === null){ return null; }
+                var ex = f.get(L);
                 return (ex === undefined) ? null : ex;
             }catch(e){ return null; }
         }
 
+        // 目标处理器的第二条路：编辑器自己身上往往也存着目标建筑（MindustryX 的 LogicDialog
+        // 就有 building 字段 / 以及一个 LogicSupport 用来回填）。字段名不可知，就按类型认：
+        // 用页面下方 isProcessor() 的鸭子判据（只有逻辑建筑才有 executor + code）。
+        function logicBuildOf(L){
+            var chain = [];
+            try{ chain = logicClassChain(L.getClass()); }catch(e){ return null; }
+            for(var i = 0; i < chain.length; i++){
+                var fs;
+                try{ fs = chain[i].getDeclaredFields(); }catch(e){ continue; }
+                for(var k = 0; k < fs.length; k++){
+                    var v = null;
+                    try{ fs[k].setAccessible(true); v = fs[k].get(L); }catch(e){ continue; }
+                    if(v === null || v === undefined){ continue; }
+                    if(isProcessor(v)){ return v; }
+                }
+            }
+            return null;
+        }
+
         function reviewTargets(){
-            // LExecutor.build 是 public（v160.7 实测），所以拿到 executor 之后这一步直读即可。
+            // LExecutor.build 是 public（v160.7 实测），拿到 executor 之后直读即可；
+            // 拿不到或为 null 时退回「扫编辑器自己的字段」。
             var ex = logicExecutor();
-            if(ex === null){ return null; }
+            if(ex !== null){
+                try{
+                    var b = ex.build;
+                    if(b !== undefined && b !== null){ return b; }
+                }catch(e){ /* fall through */ }
+            }
+            var L = null;
+            try{ L = Vars.ui.logic; }catch(e){ L = null; }
+            if(L !== null && L !== undefined){ return logicBuildOf(L); }
+            return null;
+        }
+
+        // 一句话诊断：给 F8 控制台的 maiReviewDiag() 和日志用（发给开发者就能定位）。
+        function reviewDiagText(){
+            var L = null, cls = "-", f = null, ex = null, b = null, lk = null;
+            try{ L = Vars.ui.logic; }catch(e){ L = null; }
+            if(L !== null && L !== undefined){
+                try{ cls = String(L.getClass().getName()); }catch(e){ cls = "?"; }
+                try{ f = logicExecFieldOf(L); }catch(e){ f = null; }
+            }
+            ex = logicExecutor();
+            b = reviewTargets();
+            lk = linkListOrNull(b);
+            var s = "ui=" + (L === null ? "null" : "obj")
+                  + " cls=" + cls
+                  + " field=" + (f === null ? "none" : String(f.getName()))
+                  + " owner=" + (logicExecOwner === "" ? "-" : logicExecOwner)
+                  + " ex=" + (ex === null ? "null" : "obj")
+                  + " build=" + (b === null ? "null" : "obj")
+                  + " links=" + (lk === null ? "unknown" : String(lk.length))
+                  + reviewDiagCode();
+            logicDiag = s;
+            return s;
+        }
+
+        // v0.23.3：这一栏现在跑两套检查 ——
+        //   ① 本地快检（quickcheck.js，5 条判据：未知指令 / 子命令拼错 / 版本门 / 链接名 / 体积），
+        //      同步、零延迟，打字就能看到；
+        //   ② 侧车全量检查（tools/mlogcheck.py，41 条：跳转语义、未赋值读、不可达语句…），
+        //      异步、代码变了才发一次，回来之后重画这一栏。
+        // 起因：用户写 \`jump <不对的数> always\` 这类错误，本地 5 条一条都不命中，栏里一直
+        // 「没有发现问题」，看起来就像这一栏没起作用。
+        // 另一个起因：MindustryX 这类 loader 型模组换了游戏的 LogicDialog，canvas.save() 可能
+        // 是空的（用户实测「语句 0」）。所以代码按 canvas.save -> 处理器里已保存的 code 取，
+        // 并在栏里说清楚查的是哪一份。
+        var REVIEW_FULL = {code: "", res: null, err: "", busy: false, seq: 0};
+        var reviewCodeNote = "", reviewSrcLogged = false;
+
+        function reviewBlank(s){
+            if(s === null || s === undefined){ return true; }
+            for(var i = 0; i < s.length; i++){
+                var ch = s.charAt(i);
+                if(ch !== " " && ch !== "\t" && ch !== "\r" && ch !== "\n"){ return false; }
+            }
+            return true;
+        }
+
+        function reviewCodeSrc(){
+            var canvasText = null, haveCanvas = false;
             try{
-                var b = ex.build;
-                return (b === undefined) ? null : b;
-            }catch(e){ return null; }
+                var L = Vars.ui.logic;
+                if(L !== null && L !== undefined){
+                    var cv = L.canvas;
+                    if(cv !== null && cv !== undefined){
+                        var s = String(L.canvas.save());
+                        if(s !== null && s !== undefined){ canvasText = s; haveCanvas = true; }
+                    }
+                }
+            }catch(e){ canvasText = null; }
+            if(haveCanvas && !reviewBlank(canvasText)){
+                return {code: canvasText, src: "canvas", note: ""};
+            }
+            var b = reviewTargets();
+            if(b !== null && b !== undefined){
+                try{
+                    var raw = (b.code === undefined || b.code === null) ? "" : String(b.code);
+                    if(!reviewBlank(raw)){
+                        return {code: raw, src: "build",
+                                note: "编辑器代码读不到，查的是已保存的代码"};
+                    }
+                }catch(e2){ /* fall through */ }
+            }
+            return {code: (canvasText === null ? "" : canvasText), src: "none",
+                    note: "读不到编辑器里的代码"};
         }
 
         function reviewCode(){
-            try{ return String(Vars.ui.logic.canvas.save()); }catch(e){ return null; }
+            return reviewCodeSrc().code;
         }
 
+        function reviewCountList(list){
+            var err = 0, warn = 0, info = 0;
+            if(list === null || list === undefined){ return {err: 0, warn: 0, info: 0, total: 0}; }
+            for(var i = 0; i < list.length; i++){
+                var sev = String(list[i].sev);
+                if(sev === "ERR"){ err++; }
+                else if(sev === "WARN"){ warn++; }
+                else { info++; }
+            }
+            return {err: err, warn: warn, info: info, total: list.length};
+        }
+
+        function reviewCount(res){
+            if(res === null || res === undefined){ return {err: 0, warn: 0, info: 0, total: 0}; }
+            return reviewCountList(res.findings);
+        }
+
+        // 全量检查的结果只对「这一份代码」有效：代码一变就作废（REVIEW_FULL.code 存的是旧代码）。
         // 审查栏/详情里都要说清「链接表是数出来的还是不知道」——v0.4.6 的假 WARN 就是
         // 因为把「不知道」当成了「一个链接都没有」。
         function linkLine(res){
             var st = (res === null || res === undefined) ? null : res.stats;
             if(st === null || st === undefined){ return "链接 ?"; }
             if(st.linkKnown === true){ return "链接 " + st.linkCount; }
-            return "链接 ?（读不到处理器）";
+            return "链接 ?（" + linkWhy + "）";
         }
 
-        function reviewCount(res){
-            var err = 0, warn = 0, info = 0, f = res.findings;
-            for(var k = 0; k < f.length; k++){
-                if(f[k].sev === "ERR"){ err++; } else if(f[k].sev === "WARN"){ warn++; } else { info++; }
+        function reviewFullFor(code){
+            if(REVIEW_FULL.res === null){ return null; }
+            return (REVIEW_FULL.code === code) ? REVIEW_FULL.res : null;
+        }
+
+        // v0.23.5（用户 m06360「没有看到明显的错误行指示箭头」）：
+        // 箭头以前只吃本地快检的结果（quickcheck.js 的 5 条判据），可「跳转越界」「读未赋值变量」
+        // 这些只有侧车 tools/mlogcheck.py 才查得出来 —— 于是栏里写着 ERR 1，编辑器里一条箭头也没有。
+        // 现在两份结果合并后再画箭头：同一行取最坏级别，按行号升序。
+        function reviewArrowFindings(local, full){
+            var out = [], i, g, lists = [local, full];
+            for(g = 0; g < lists.length; g++){
+                var l = lists[g];
+                if(l === null || l === undefined || l.length === undefined){ continue; }
+                for(i = 0; i < l.length; i++){ out.push(l[i]); }
             }
-            return {err: err, warn: warn, info: info, total: f.length};
+            return {findings: out};
         }
 
-        function refreshReview(force){
+        // 覆盖层画不出来时的兜底：审查栏里直接标出「哪几行有问题」。
+        function reviewLineList(local, full){
+            var merged = reviewArrowFindings(local, full).findings;
+            var by = {}, lines = [], i;
+            for(i = 0; i < merged.length; i++){
+                var f = merged[i], ln = Number(f.line);
+                if(!(ln >= 1)){ continue; }
+                if(by[ln] === undefined){ by[ln] = {line: ln, sev: f.sev, count: 0}; lines.push(ln); }
+                by[ln].count++;
+                if(sevRank(f.sev) < sevRank(by[ln].sev)){ by[ln].sev = f.sev; }
+            }
+            var out = [];
+            for(i = 0; i < lines.length; i++){ out.push(by[lines[i]]); }
+            out.sort(function(a, b){ return (sevRank(a.sev) - sevRank(b.sev)) || (a.line - b.line); });
+            return out;
+        }
+
+        function paintReviewBar(){
             if(reviewBar === null){ return; }
-            var code = reviewCode();
-            if(code === null){ return; }
-            if(!force && code === reviewLast){ return; }
-            reviewLast = code;
-            var res = quickRun(code, reviewTargets());
-            reviewRes = res;
-            // 审查栏重画之后把行内箭头也同步一遍（箭头贴在原版画布上，见下面的「行内箭头」段）
-            syncArrows(res, null, null);
-            var c = reviewCount(res);
+            var res = reviewRes;
+            if(res === null || res === undefined){ return; }
+            var full = reviewFullFor(reviewLast);
+            var c = (full !== null) ? reviewCountList(full.findings) : reviewCount(res);
             reviewBar.clear();
             reviewBar.left();
             reviewBar.add("审查").padRight(8);
             if(c.total === 0){
-                reviewBar.add("没有发现问题").color(Pal.accent).padRight(16);
+                reviewBar.add("没有发现问题").color(Pal.accent).padRight(12);
             }else{
                 if(c.err > 0){ reviewBar.add("ERR " + c.err).color(Pal.remove).padRight(8); }
                 if(c.warn > 0){ reviewBar.add("WARN " + c.warn).color(Pal.lightOrange).padRight(8); }
                 if(c.info > 0){ reviewBar.add("INFO " + c.info).padRight(8); }
             }
-            reviewBar.add("语句 " + res.stats.statements + " · 线性 " + res.stats.linearCost
-                          + " · ipt " + res.stats.ticksPerPass
-                          + " · " + linkLine(res)).padRight(16);
+            var stmts = res.stats === null || res.stats === undefined ? 0 : res.stats.statements;
+            if(full !== null && full.statements !== undefined && full.statements !== null){
+                stmts = full.statements;
+            }
+            var where = (full !== null) ? "全量" : "本地";
+            var line = where + " · 语句 " + stmts;
+            if(res.stats !== null && res.stats !== undefined){
+                line += " · 线性 " + res.stats.linearCost + " · ipt " + res.stats.ticksPerPass
+                      + " · " + linkLine(res);
+            }
+            reviewBar.add(line).padRight(10);
+            if(c.total > 0){
+                // 覆盖层（行左侧的箭头）建不出来时，栏里这几个 L# 是同等信息：
+                // 颜色直接指出是哪几行，点「详情」看原因。
+                var ll = reviewLineList((full !== null) ? full.findings : res.findings,
+                                        (full !== null) ? res.findings : null);
+                var cap = (ll.length > 4) ? 4 : ll.length;
+                for(var ci = 0; ci < cap; ci++){
+                    reviewBar.add("L" + ll[ci].line).color(sevColor(ll[ci].sev)).padRight(6);
+                }
+                if(ll.length > cap){ reviewBar.add("+" + (ll.length - cap)).padRight(6); }
+            }
+            if(full === null){
+                if(REVIEW_FULL.busy === true){ reviewBar.add("全量检查中…").padRight(8); }
+                else if(REVIEW_FULL.err !== ""){ reviewBar.add("全量检查不可用（" + REVIEW_FULL.err + "）").padRight(8); }
+            }
+            if(reviewCodeNote !== ""){ reviewBar.add(reviewCodeNote).color(Pal.lightOrange).padRight(8); }
             reviewBar.button("详情", function(){ showReview(); }).width(90);
             reviewBar.button("AI 辅助", function(){ showAiPanel(); }).width(120);
+        }
+
+        // 异步问侧车要全量结果；回来的时候只重画栏，不重跑本地快检。
+        function reviewFullCheck(code, b){
+            REVIEW_FULL.code = reviewLast;
+            REVIEW_FULL.res = null;
+            REVIEW_FULL.err = "";
+            REVIEW_FULL.seq++;
+            var seq = REVIEW_FULL.seq;
+            if(code.length > 20000){
+                REVIEW_FULL.busy = false;
+                REVIEW_FULL.err = "代码超过 20000 字符";
+                return;
+            }
+            REVIEW_FULL.busy = true;
+            var body = JSON.stringify({code: code, links: linkNames(b), ipt: 2});
+            httpJson("POST", "/analyze", body, function(status, text){
+                if(seq !== REVIEW_FULL.seq){ return; }      // 代码已经又变了，这份作废
+                REVIEW_FULL.busy = false;
+                if(status !== 200){
+                    REVIEW_FULL.res = null;
+                    REVIEW_FULL.err = "侧车没应答";
+                    refreshArrows();
+                    paintReviewBar();
+                    return;
+                }
+                var r = parse(text);
+                if(r === null || r.findings === undefined || r.findings === null){
+                    REVIEW_FULL.res = null;
+                    REVIEW_FULL.err = "返回不是 JSON";
+                    refreshArrows();
+                    paintReviewBar();
+                    return;
+                }
+                REVIEW_FULL.res = r;
+                REVIEW_FULL.err = "";
+                refreshArrows();
+                paintReviewBar();
+            });
+        }
+
+        function refreshReview(force){
+            if(reviewBar === null){ return; }
+            var src = reviewCodeSrc();
+            var code = (src.code === null || src.code === undefined) ? null : src.code;
+            if(code === null){ return; }
+            reviewCodeNote = src.note;
+            if(!force && code === reviewLast){ return; }
+            var changed = (code !== reviewLast);
+            reviewLast = code;
+            var tgt = reviewTargets();
+            linkWhy = (tgt === null) ? "编辑器没绑处理器" : "读不到链接表";
+            var res = quickRun(code, tgt);
+            reviewRes = res;
+            if(!logicDiagLogged && res.stats !== null && res.stats !== undefined && res.stats.linkKnown !== true){
+                logicDiagLogged = true;
+                try{ log("review links unknown: " + reviewDiagText()); }catch(e){ }
+            }
+            // 只打一次：座落在哪份代码上、读到多少。用户下次报「不生效」时看这一行就够。
+            var stmts0 = (res.stats === null || res.stats === undefined) ? 0 : Number(res.stats.statements);
+            if(!reviewSrcLogged && (src.src !== "canvas" || stmts0 === 0)){
+                reviewSrcLogged = true;
+                try{ log("review code: src=" + src.src + " chars=" + code.length + " stmts=" + stmts0); }catch(e){ }
+            }
+            refreshArrows();
+            paintReviewBar();
+            if((changed === true || force === true) && !reviewBlank(code)){
+                reviewFullCheck(code, tgt);
+            }
         }
 
         function reviewText(){
@@ -2826,20 +3107,64 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var res = quickRun(code === null ? "" : code, b);
             if(res.missing){ return "本地快检不可用（quickcheck.js 未加载）"; }
             var out = [quickSummary(res)];
-            var ls = quickLines(res);
+            var ls = reviewLinesFor(res.findings);
             for(var i = 0; i < ls.length; i++){ out.push(ls[i]); }
             return out.join("\n");
         }
 
+        function reviewLinesFor(list){
+            var out = [];
+            if(list === null || list === undefined){ return out; }
+            for(var i = 0; i < list.length; i++){
+                var f = list[i];
+                out.push("L" + f.line + " " + f.sev + " [" + (f.rid || "-") + "] "
+                         + (f.code && f.code !== f.sev ? ("{" + f.code + "} ") : "")
+                         + String(f.msg));
+            }
+            return out;
+        }
+
         function showReview(){
-            var code = reviewCode();
-            var res = reviewRes;
-            if(code !== null){ res = quickRun(code, reviewTargets()); }
-            if(res === null){ if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 审查", "没有可审查的处理器。"); } return; }
+            var src = reviewCodeSrc();
+            var code = (src.code === null || src.code === undefined) ? "" : src.code;
+            var b = reviewTargets();
+            var res = quickRun(code, b);
+            if(res === null || res.missing){
+                if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 审查", "本地快检不可用（quickcheck.js 未加载）"); }
+                return;
+            }
+            var full = reviewFullFor(code);
             var out = [quickSummary(res)];
-            var ls = quickLines(res);
+            if(full !== null){
+                out.push("全量检查：ERR " + (full.errors === undefined ? "?" : full.errors)
+                         + " / WARN " + (full.warns === undefined ? "?" : full.warns)
+                         + "    语句 " + (full.statements === undefined ? "?" : full.statements));
+            }else if(REVIEW_FULL.err !== ""){
+                out.push("全量检查不可用：" + REVIEW_FULL.err + "（侧车没启动时只有本地 5 条判据）");
+            }else{
+                out.push("全量检查还没回来，稍等一下再点一次「详情」");
+            }
+            if(src.note !== ""){ out.push("代码来源：" + src.note); }
+            var ls = reviewLinesFor(full !== null ? full.findings : res.findings);
             for(var i = 0; i < ls.length; i++){ out.push(ls[i]); }
+            if(ls.length === 0){ out.push("（没有发现）"); }
             if(Vars.ui !== null){ Vars.ui.showText("Mlog辅助 · 审查", out.join("\n")); }
+        }
+
+        // 诊断口补的字段：这份代码从哪儿来（src）、多少字符、本地统计到几条语句、全量检查状态。
+        function reviewDiagCode(){
+            var src = null, st = "-", full = "none";
+            try{ src = reviewCodeSrc(); }catch(e){ return " src=? chars=? stmts=? full=?"; }
+            try{
+                if(reviewRes !== null && reviewRes !== undefined && reviewRes.stats !== null && reviewRes.stats !== undefined){
+                    st = String(reviewRes.stats.statements);
+                }
+            }catch(e){ st = "?"; }
+            if(REVIEW_FULL.res !== null){ full = "ok"; }
+            else if(REVIEW_FULL.busy === true){ full = "busy"; }
+            else if(REVIEW_FULL.err !== ""){ full = REVIEW_FULL.err; }
+            return " src=" + src.src + " chars=" + (src.code === null ? 0 : src.code.length)
+                 + " stmts=" + st + " full=" + full;
         }
 
         // ------------------------------------------ 行内箭头（v0.4.7）
@@ -2857,8 +3182,12 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         //    所以第 i 个孩子对应 line = i + 1。
         //  * 覆盖层用 Touchable.childrenOnly：空白处不拦鼠标（原版画布要能拖行、点按钮），
         //    只有箭头自己被命中（Group.hit 先测孩子，Element.hit 对非 enabled 返回 null）。
-        var ARROW = 16;                       // 箭头边长（像素）
+        var ARROW = 22;                       // 箭头边长（像素）
         var arrowHost = null, arrowParent = null, arrowRows = [], arrowByLine = {};
+        var arrowWant = 0, arrowLogged = false;   // 应画几行 / 诊断日志只打一次
+        // v0.23.6：编辑器每次打开都会 canvas.rebuild()（LCanvas.java:110 新建 DragLayout），
+        // 记住箭头挂在哪份 statements 上，换了容器就整份重画。
+        var arrowStatements = null, arrowRebuilt = 0;
         var arrowDraw;                        // undefined = 还没找过，null = 这个环境没有图标
 
         function sevRank(sev){
@@ -2883,7 +3212,21 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 var d = Packages.mindustry.gen.Icon.right;
                 if(d !== null && d !== undefined){ arrowDraw = d; }
             }catch(e){ /* ignore */ }
-            if(arrowDraw === null){ log("no Icon.right in this build -- review arrows stay off"); }
+            if(arrowDraw === null){
+                // v0.23.5：没有箭头图标就退成图集里的白色方块 —— 一样能染色贴在行左侧。
+                try{
+                    var a = Packages.arc.Core.atlas;
+                    if(a !== null && a !== undefined){
+                        var w = a.find("white");
+                        if(w !== null && w !== undefined){ arrowDraw = w; }
+                    }
+                }catch(e){ /* ignore */ }
+            }
+            if(arrowDraw === null){
+                log("no Icon.right / white drawable -- review arrows stay off");
+            }else{
+                try{ log("review arrow drawable: ok"); }catch(e){ }
+            }
             return arrowDraw;
         }
 
@@ -2896,11 +3239,30 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }catch(e){ return null; }
         }
 
+        // 画布重建后 statements 是新对象（LCanvas.rebuild() 里 new DragLayout()）；
+        // 两代都不是 null 且不相等 ⇒ 箭头要重挂。
+        function arrowStale(prev, cur){
+            if(prev === null || prev === undefined){ return false; }
+            if(cur === null || cur === undefined){ return false; }
+            return prev !== cur;
+        }
+
         function arrowHostFor(statements){
             var parent = null;
             try{ parent = statements.parent; }catch(e){ return null; }
             if(parent === null || parent === undefined){ return null; }
-            if(arrowHost !== null && arrowParent === parent){ return arrowHost; }
+            if(arrowHost !== null && arrowParent === parent && arrowHost.parent === parent &&
+               arrowStatements === statements){
+                return arrowHost;
+            }
+            // 旧容器已经不在场景里（编辑器关掉/重开时 LCanvas.rebuild() 会换掉整棵子树）：
+            // 把旧覆盖层摘掉，别把 Image 攒在已分离的 Table 上。
+            if(arrowHost !== null){
+                try{ arrowHost.clearChildren(); }catch(e){ }
+                try{ arrowHost.remove(); }catch(e){ }
+            }
+            arrowHost = null;
+            arrowRows = [];
             var host = new Packages.arc.scene.ui.layout.Table();
             host.setFillParent(true);
             host.touchable = Packages.arc.scene.event.Touchable.childrenOnly;
@@ -2908,6 +3270,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             host.update(function(){ layoutArrows(); });
             arrowHost = host;
             arrowParent = parent;
+            arrowStatements = statements;
             return host;
         }
 
@@ -2922,7 +3285,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 try{
                     if(e === null || e === undefined){ img.visible = false; continue; }
                     img.visible = true;
-                    var x = statements.x + e.x - ARROW - 2;     // 优先放进行左侧的空白
+                    var x = statements.x + e.x - ARROW - 4;     // 优先放进行左侧的空白
                     if(x < 2){ x = statements.x + e.x + 2; }     // 没空白就压进行内左端
                     var y = statements.y + e.y + e.getHeight() - 19 - (ARROW / 2);
                     img.setPosition(x, y);
@@ -2963,6 +3326,28 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         function clearArrows(){
             if(arrowHost !== null){ try{ arrowHost.clearChildren(); }catch(e){ /* ignore */ } }
             arrowRows = [];
+        }
+
+        // v0.23.5：本地和全量的结果每更新一次就重刷箭头；画布还没挂上时只记账，
+        // 由 reviewTick 每 30 帧补一次（以前只在代码变化时才 syncArrows，第一次没建成就整局没有）。
+        function reviewArrowFeed(){
+            var full = reviewFullFor(reviewLast);
+            var local = (reviewRes === null || reviewRes === undefined) ? null : reviewRes.findings;
+            return reviewArrowFindings(local, (full === null || full === undefined) ? null : full.findings);
+        }
+
+        function refreshArrows(){
+            var got = 0;
+            try{
+                var feed = reviewArrowFeed();
+                arrowWant = reviewLineList(feed.findings, null).length;
+                got = syncArrows(feed, null, null);
+            }catch(e){ got = 0; }
+            if(!arrowLogged && (arrowWant > 0 || got > 0)){
+                arrowLogged = true;
+                try{ log("review arrows: want=" + arrowWant + " rows=" + got); }catch(e){ }
+            }
+            return got;
         }
 
         // res.findings -> 每行一个箭头。statements / drawable 只给测试用，真机传 null。
@@ -3027,6 +3412,21 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 if(reviewHost !== Vars.ui.logic){ injectReview(); }
                 reviewFrame++;
                 if(reviewFrame % 30 === 0){ refreshReview(false); }
+                // v0.23.6（用户 m06578「就第一次建出来了，但是后来再打开就消失了」）：
+                // 编辑器每次打开都 canvas.rebuild()，statements 是新的 DragLayout，旧箭头跟着旧容器一起没了；
+                // 代码没变时 refreshReview 会早退，所以这里按「容器换了」直接重画。
+                var st = reviewStatements();
+                if(arrowStale(arrowStatements, st)){
+                    var rebuilt = refreshArrows();
+                    if(arrowRebuilt < 3){
+                        arrowRebuilt++;
+                        try{ log("review arrows: canvas rebuilt, rows=" + rebuilt); }catch(e){ }
+                    }
+                }else if(reviewFrame % 30 === 15 && arrowWant > 0 && arrowRows.length === 0){
+                    // 自愈：全量结果回来时画布可能还没上舞台（arrowHostFor 要 statements.parent 非空），
+                    // 那时箭头建不出来；refreshReview 只在代码变化时重跑，所以每 30 帧补一次。
+                    refreshArrows();
+                }
             }catch(e){ /* 每帧回调里绝不抛出去 */ }
         }
 
@@ -3094,7 +3494,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         // 契约：docs/Mlog辅助-规划.md §4.1；端点：POST /jobs、GET /jobs?id=、DELETE /jobs?id=。
         var aiJob = null;                 // {id, b, desc, host, d, lastPoll, job}
         var JOB_POLL_MS = 1000;
-        var JOB_TERMINAL = {done: 1, rejected: 1, failed: 1, cancelled: 1};
+        var JOB_TERMINAL = {done: 1, blocked: 1, rejected: 1, failed: 1, cancelled: 1};
         // v0.12.5: F3 松手之后框不立刻消失——它代表「这一批作业还在跑」，一直到这一批
         // 全部终态再多留 8 秒，玩家才有机会点右下角的徽标看思考过程。
         var jobBox = null;                // {r, ids, jobs, pend, started, termAt, lastPoll}
@@ -3271,6 +3671,9 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }
             if(st === "rejected"){
                 return "作业 " + id + "：被门禁拒绝（尝试 " + a + " 次，ERR " + c.err + " 条）";
+            }
+            if(st === "blocked"){
+                return "作业 " + id + "：它说这件事做不了（" + chatTrim(String(job.explanation || ""), 60) + "）";
             }
             if(st === "cancelled"){ return "作业 " + id + "：已取消"; }
             return "作业 " + id + "：" + st
@@ -4096,6 +4499,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             if(s === "done"){ return "完成"; }
             if(s === "rejected"){ return "被拒"; }
             if(s === "failed"){ return "失败"; }
+            if(s === "blocked"){ return "做不了"; }
             if(s === "cancelled"){ return "已取消"; }
             return s;
         }
@@ -4268,6 +4672,36 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         }
 
         // 完成：终态只播报一次（jobTick 和 jobBoxTick 可能同时看到同一个作业）。
+        // v0.24.0：卡片措辞独立出来（探针能直接断言；以前只能靠真机看聊天框）。
+        function jobChatText(job){
+            var st = String(job.state);
+            if(st === "done"){
+                var c = jobSevCounts(job), tpl = String(job.template || "");
+                var info = (tpl.length > 0 ? tpl + " · " : "") + String(job.statements || 0) + " 条语句 · "
+                         + String(job.bytes_len || 0) + " 字节 · " + (c.err === 0 ? "0 ERR" : ("ERR " + c.err));
+                var need = job.needs_links;
+                if(need === null || need === undefined || need.length === undefined){ need = []; }
+                if(need.length > 0){ info += " · 需要接线 " + need.join("、"); }
+                if(c.warn > 0){ info += " · WARN " + c.warn; }
+                return {status: "Done", info: info};
+            }
+            if(st === "blocked"){
+                var why = chatTrim(String(job.explanation || ""), 80);
+                if(String(why) === ""){ why = "它没说原因"; }
+                var blk = job.blocked, need2 = [];
+                if(blk !== null && blk !== undefined && blk.need !== null && blk.need !== undefined){ need2 = blk.need; }
+                var tail = (need2.length > 0) ? ("；要 " + need2.join("、")) : "";
+                return {status: "Blocked", info: why + tail};
+            }
+            if(st === "rejected"){
+                var c2 = jobSevCounts(job);
+                return {status: "Rejected", info: "静态检查有 ERR（" + c2.err + " 条）"};
+            }
+            if(st === "cancelled"){ return {status: "Cancelled", info: "已取消"}; }
+            var inf = chatTrim(String(job.explanation || ""), 60);
+            if(String(inf) === ""){ inf = "没有说明"; }
+            return {status: "Failed", info: inf};
+        }
         function jobChatDone(job){
             if(job === null || job === undefined){ return; }
             var st = String(job.state);
@@ -4287,25 +4721,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 var q = chatXY(lb);
                 if(q.x !== "?"){ x = q.x; y = q.y; }
             }
-            var status, info;
-            if(st === "done"){
-                status = "Done";
-                var c = jobSevCounts(job), tpl = String(job.template || "");
-                info = (tpl.length > 0 ? tpl + " · " : "") + String(job.statements || 0) + " 条语句 · "
-                     + String(job.bytes_len || 0) + " 字节 · " + (c.err === 0 ? "0 ERR" : ("ERR " + c.err));
-            }else if(st === "rejected"){
-                status = "Rejected";
-                var c2 = jobSevCounts(job);
-                info = "静态检查有 ERR（" + c2.err + " 条）";
-            }else if(st === "cancelled"){
-                status = "Cancelled";
-                info = "已取消";
-            }else{
-                status = "Failed";
-                info = chatTrim(String(job.explanation || ""), 60);
-                if(String(info) === ""){ info = "没有说明"; }
+            var t = jobChatText(job);
+            chatSay(chatLine(t.status, x, y, t.info));
+            if(st === "blocked"){
+                // v0.24.0：它自己说做不了 —— 只留在聊天框里会被刷走，开一次窗说清楚要什么。
+                try{ Vars.ui.showText("MAI · 这件事它做不了", String(t.info)); }
+                catch(eB){ log("blocked notice: no ui"); }
             }
-            chatSay(chatLine(status, x, y, info));
         }
 
         // 一个描述框 → 这块区域里每个处理器各投一个作业（P5 批量入口，v0.12.5）。
@@ -4827,6 +5249,11 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var req = {text: txt};
             if(id !== ""){ req.id = id; }
             try{ req.workspaces = wsDigest(); req.map = wsMapName(); }catch(ew){ }
+            // v0.23.0 ③：玩家 / 本局服务器状态跟着这一轮一起发（无头时两者都是 null，就不带字段）
+            try{ var pd = playerDigest(); if(pd !== null){ req.player = pd; } }catch(ep){ }
+            try{ var sd = serverDigest(); if(sd !== null){ req.server = sd; } }catch(es){ }
+            // v0.23.1 ①：F8 控制台能用的东西（api.* 清单）一起带上，侧车 console_help 要用
+            try{ var cd = consoleDigest(); if(cd !== null){ req.console = cd; } }catch(ec){ }
             var body = JSON.stringify(req);
             CHAT_UI.sending = true;
             CHAT_UI.polling = false;
@@ -4891,6 +5318,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                 CHAT_UI.polling = running;
                 chatRefreshAll();
                 if(running !== true){
+                    // v0.23.0 ①②：这一轮说完了，模型要是登记了「写蓝图 / 跑命令」的意图，就弹一次确认
+                    chatTakeIntents(doc.chat);
                     chatReloadList();
                     if(errText !== ""){ hint("对话出错：" + errText); }
                 }
@@ -5106,7 +5535,13 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     }
                     if(chatStrip(content) !== ""){
                         dp.add("MAI").color(themeColor()).fontScale(0.85).left().row();
-                        chatWrap(dp, content, iw);
+                        // v0.23.1 ②：按围栏切段 —— 文字段走 markdown 转标签，代码段单独渲染并带「复制」
+                        var segs = chatSegments(content);
+                        for(var sg = 0; sg < segs.length; sg++){
+                            var one = segs[sg];
+                            if(one.kind === "code"){ chatCodeBlock(dp, one.text, one.lang, iw); }
+                            else if(chatStrip(one.text) !== ""){ chatWrap(dp, mdToTags(one.text), iw); }
+                        }
                     }
                 }else if(role === "tool"){
                     var tn = String(msg.name === null || msg.name === undefined ? "工具" : msg.name);
@@ -5125,19 +5560,412 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             }
         }
 
+        // ------------------------------------------------ markdown → Mindustry 标签（v0.23.0）
+        // 用户 m04691 ④：模型习惯写 markdown，对话框里却是纯文本。这里做**只影响显示**的转换：
+        // 把 markdown 换成像素工厂的富文本标签（[accent]… 那种），存档里的原文一个字都不改。
+        // 字面量的 '[' 在标签语言里必须双写成 '[['（原版的转义写法），所以先把所有 '[' 换成占位符，
+        // 等我们自己插完 [accent] 这类标签再换回来 —— 否则自己的标签也会被转义成字面文字。
+        // 整个函数是「绝不抛」的：出任何错就原样返回。
+        var MD_LB = "\u0001";
+        function mdEscBrackets(t){ return String(t).split("[").join(MD_LB); }
+        function mdUnescapeBrackets(t){ return String(t).split(MD_LB).join("[["); }
+        // v0.23.0 修（2026-11-03）：v160.7 的 Rhino 在**正则字面量**上会抛
+        // `FAILED ASSERTION: invalid bytecode`（整段脚本连带不执行，见断言 L2-31），
+        // 所以这一段全部改成字符串扫描 —— 和 httpRaw / 签名解析同一口径。
+        // 成对定界符 → 标签；找不到配对就原样留下（宁可不好看，不能吃字符）。
+        function mdWrapPairs(t, d, open, close){
+            var i = 0, n = t.length, out = "", a, b, mid;
+            while(i < n){
+                a = t.indexOf(d, i);
+                if(a < 0){ out = out + t.substring(i); break; }
+                b = t.indexOf(d, a + d.length);
+                if(b < 0){ out = out + t.substring(i); break; }
+                mid = t.substring(a + d.length, b);
+                out = out + t.substring(i, a);
+                if(mid.length === 0){ out = out + d + d; i = b + d.length; continue; }
+                out = out + open + mid + close;
+                i = b + d.length;
+            }
+            return out;
+        }
+        // [文字](地址) → 文字 (地址)：标签语言里没有链接，只能把地址露出来
+        function mdLinkToText(t){
+            var i = 0, n = t.length, out = "", a, b, c, e, name, url, ok;
+            while(i < n){
+                a = t.indexOf("[", i);
+                if(a < 0){ out = out + t.substring(i); break; }
+                b = t.indexOf("]", a + 1);
+                c = (b < 0) ? -1 : t.indexOf("(", b + 1);
+                e = (c < 0) ? -1 : t.indexOf(")", c + 1);
+                ok = (b > a && c > b && e > c + 1);
+                if(ok){
+                    name = t.substring(a + 1, b);
+                    url = t.substring(c + 1, e);
+                    if(name.indexOf("[") >= 0 || name.indexOf("]") >= 0){ ok = false; }
+                    if(url.indexOf(" ") >= 0 || url.indexOf("\t") >= 0 || url.indexOf("(") >= 0){ ok = false; }
+                }
+                if(!ok){ out = out + t.substring(i, a + 1); i = a + 1; continue; }
+                out = out + t.substring(i, a) + name + " (" + url + ")";
+                i = e + 1;
+            }
+            return out;
+        }
+        // HTML 噪声（<br>、<b>x</b>…）一律去掉
+        function mdStripHtml(t){
+            var i = 0, n = t.length, out = "", a, b, body, k, ch, ok;
+            while(i < n){
+                a = t.indexOf("<", i);
+                if(a < 0){ out = out + t.substring(i); break; }
+                b = t.indexOf(">", a + 1);
+                if(b < 0){ out = out + t.substring(i); break; }
+                body = t.substring(a + 1, b);
+                if(body.charAt(0) === "/"){ body = body.substring(1); }
+                ok = (body.length > 0 && body.length <= 24);
+                for(k = 0; ok && k < body.length; k++){
+                    ch = body.charAt(k);
+                    if(!((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "/" || ch === " ")){ ok = false; }
+                }
+                if(!ok){ out = out + t.substring(i, a + 1); i = a + 1; continue; }
+                out = out + t.substring(i, a);
+                i = b + 1;
+            }
+            return out;
+        }
+        function mdInline(s){
+            var t = String(s === null || s === undefined ? "" : s);
+            t = mdLinkToText(t);
+            t = mdEscBrackets(t);
+            // 代码 → 粗体 → 斜体：顺序不能反，** 要先被吃掉，否则会当成两次斜体
+            t = mdWrapPairs(t, "`", "[lightgray]", "[]");
+            t = mdWrapPairs(t, "**", "[accent]", "[]");
+            t = mdWrapPairs(t, "__", "[accent]", "[]");
+            t = mdWrapPairs(t, "*", "[lightgray]", "[]");
+            t = mdWrapPairs(t, "_", "[lightgray]", "[]");
+            return mdUnescapeBrackets(t);
+        }
+        // 行首缩进（空格 / 制表符）的个数：标题、引用、列表都按 Markdown 的 ≤3 空格算
+        function mdLead(t){
+            var i = 0;
+            while(i < t.length && (t.charAt(i) === " " || t.charAt(i) === "\t")){ i++; }
+            return i;
+        }
+        function mdIsFence(ln){
+            var k = mdLead(ln);
+            return (k + 3 <= ln.length && ln.charAt(k) === "`" && ln.charAt(k + 1) === "`" && ln.charAt(k + 2) === "`");
+        }
+        function mdHeading(ln){
+            var k = mdLead(ln), n = 0;
+            if(k > 3){ return null; }
+            while(k + n < ln.length && ln.charAt(k + n) === "#"){ n++; }
+            if(n < 1 || n > 6){ return null; }
+            if(k + n < ln.length && ln.charAt(k + n) !== " "){ return null; }
+            return chatStrip(ln.substring(k + n));
+        }
+        function mdQuoteLine(ln){
+            var k = mdLead(ln), t;
+            if(k > 3 || ln.charAt(k) !== ">"){ return null; }
+            t = ln.substring(k + 1);
+            if(t.charAt(0) === " "){ t = t.substring(1); }
+            return chatStrip(t);
+        }
+        function mdBullet(ln){
+            var k = mdLead(ln), ch;
+            if(k >= ln.length){ return null; }
+            ch = ln.charAt(k);
+            if(ch !== "-" && ch !== "*" && ch !== "+"){ return null; }
+            if(k + 1 >= ln.length || ln.charAt(k + 1) !== " "){ return null; }
+            return { lead: ln.substring(0, k), text: chatStrip(ln.substring(k + 1)) };
+        }
+        function mdOrdered(ln){
+            var k = mdLead(ln), j = k, num = "";
+            while(j < ln.length && num.length < 3 && ln.charAt(j) >= "0" && ln.charAt(j) <= "9"){ num = num + ln.charAt(j); j++; }
+            if(num.length === 0 || j >= ln.length){ return null; }
+            if(ln.charAt(j) !== "." && ln.charAt(j) !== ")"){ return null; }
+            if(j + 1 >= ln.length || ln.charAt(j + 1) !== " "){ return null; }
+            return { lead: ln.substring(0, k), num: num, text: chatStrip(ln.substring(j + 1)) };
+        }
+        function mdToTags(text){
+            try{
+                var s = String(text === null || text === undefined ? "" : text);
+                s = s.split("\r\n").join("\n").split("\r").join("\n");
+                // 少量模型会夹 HTML（<br>、<b>），一律当噪声去掉
+                s = mdStripHtml(s);
+                var src = s.split("\n"), out = [], i, ln, hr, hd, qt, ul, ol, inCode = false;
+                for(i = 0; i < src.length; i++){
+                    ln = src[i];
+                    if(mdIsFence(ln)){ inCode = !inCode; continue; }
+                    if(inCode){
+                        // 代码块整体灰掉，里面的 markdown 一律不解释（宁可不好看，不能吃字符）
+                        out.push("[lightgray]  " + mdEscBrackets(ln));
+                        continue;
+                    }
+                    if(chatStrip(ln).length === 0){ out.push(""); continue; }
+                    // 分隔线 --- / *** / ___（不用正则，靠 split 全等判断）
+                    hr = chatStrip(ln);
+                    if(hr.length >= 3 && (hr.split("-").join("") === "" || hr.split("*").join("") === ""
+                                          || hr.split("_").join("") === "")){
+                        out.push("[gray]────────────");
+                        continue;
+                    }
+                    hd = mdHeading(ln);
+                    if(hd !== null){ out.push("[accent]" + mdInline(hd) + "[]"); continue; }
+                    qt = mdQuoteLine(ln);
+                    if(qt !== null){ out.push("[gray]│ " + mdInline(qt) + "[]"); continue; }
+                    ul = mdBullet(ln);
+                    if(ul !== null){ out.push(ul.lead + "• " + mdInline(ul.text)); continue; }
+                    ol = mdOrdered(ln);
+                    if(ol !== null){ out.push(ol.lead + ol.num + ". " + mdInline(ol.text)); continue; }
+                    out.push(mdInline(ln));
+                }
+                return out.join("\n");
+            }catch(e){
+                // 转换出问题就退回原文：宁可不好看，也不能让对话窗整段消失
+                try{ return String(text === null || text === undefined ? "" : text); }catch(e2){ return ""; }
+            }
+        }
         // 长文本：能 labelWrap 就折行，不能（无头/样式缺）就退回单行省略 —— 绝不抛。
         function chatWrap(dp, text, iw){
             try{ dp.labelWrap(String(text)).width(iw).left().row(); }
             catch(e){ dp.add(chatFlat(text)).width(iw).left().ellipsis(true).row(); }
         }
 
+        // ------------------------------------------------ 代码块与复制按钮（v0.23.1 ②）
+        // 用户 m05372 ②：「无法复制它给出的代码块，尝试增加一个复制按钮」。
+        // 原来整段回复都塞进一个 labelWrap，代码块只是普通文字 —— 游戏里的 Label 根本选不了。
+        // 这里把回复按围栏切成「文字段 / 代码段」，代码段单独渲染成带「复制」的头行 + 正文，
+        // 复制按钮直接写系统剪贴板。切分与渲染都绝不抛（无头 / 样式缺 / 剪贴板被占都只是降级）。
+        function chatSegments(content){
+            var out = [], src = "", i = 0, n = 0;
+            try{ src = String(content === null || content === undefined ? "" : content); }
+            catch(e0){ src = ""; }
+            n = src.length;
+            while(i < n){
+                var k = src.indexOf("```", i);
+                if(k < 0){ out.push({kind: "text", lang: "", text: src.substring(i)}); break; }
+                if(k > i){ out.push({kind: "text", lang: "", text: src.substring(i, k)}); }
+                var nl = src.indexOf("\n", k);
+                if(nl < 0){ out.push({kind: "code", lang: chatTrimCode(src.substring(k + 3)), text: ""}); break; }
+                var lang = chatTrimCode(src.substring(k + 3, nl));
+                var close = src.indexOf("```", nl + 1);
+                if(close < 0){
+                    // 模型漏写了收尾围栏：剩下的全当代码，宁可多给也不丢
+                    out.push({kind: "code", lang: lang, text: src.substring(nl + 1)}); break;
+                }
+                out.push({kind: "code", lang: lang, text: src.substring(nl + 1, close)});
+                i = close + 3;
+                if(src.charAt(i) === "\n"){ i++; }
+            }
+            return out;
+        }
+        function chatTrimCode(s){
+            var t = String(s === null || s === undefined ? "" : s);
+            try{ return t.trim(); }catch(e){ return t.split("\r").join("").split("\n").join("").split(" ").join(""); }
+        }
+        // 字面量的 '[' 在标签语言里要双写
+        function chatEsc(text){
+            try{ return String(text === null || text === undefined ? "" : text).split("[").join("[["); }
+            catch(e){ return ""; }
+        }
+        function chatCopyText(code){
+            var t = String(code === null || code === undefined ? "" : code);
+            try{
+                Core.app.setClipboardText(t);
+                hint("代码已复制（" + String(t.length) + " 字符）");
+                return true;
+            }catch(e){ hint("复制失败：" + String(e)); return false; }
+        }
+        // 代码块：头行「语言 + 复制按钮」+ 正文。头行用独立 Table，和工作区详情里的表格行同一个写法。
+        function chatCodeBlock(dp, code, lang, iw){
+            var body = String(code === null || code === undefined ? "" : code);
+            var name = chatTrimCode(lang);
+            if(name === ""){ name = "代码"; }
+            if(name.length > 16){ name = name.substring(0, 16); }
+            try{
+                var head = new Packages.arc.scene.ui.layout.Table();
+                head.left();
+                head.add("[" + name + "]").color(Pal.gray).fontScale(0.8)
+                    .width(Math.max(60, iw - 74)).ellipsis(true).left();
+                head.button("复制", function(){ chatCopyText(body); }).width(66).height(24).left();
+                dp.add(head).growX().left().row();
+            }catch(e1){ }
+            chatWrap(dp, chatEsc(body), iw);
+        }
+
+        // ------------------------------------------------ 模型请求的动作（v0.23.0 ①②）
+        // 用户 m04691：模型要能「写蓝图库」和「跑控制台命令」。这两件都会改玩家的存档/服务器，
+        // 所以侧车只把意图登记进 chat['intents']（它自己碰不到游戏），模组这边看到意图先弹一次确认，
+        // 玩家点「执行」才真的落地。一次最多认真前 8 条，去重键 = 会话 id#轮次#条数。
+        var CHAT_INTENT = {key: "", shown: 0};
+        function chatIntentList(chat){
+            var out = [], list = null, i, n;
+            try{ list = (chat === null || chat === undefined) ? null : chat.intents; }catch(e0){ list = null; }
+            n = chatArrLen(list);
+            for(i = 0; i < n && out.length < 8; i++){
+                var it = null;
+                try{ it = list[i]; }catch(e1){ it = null; }
+                if(it === null || it === undefined){ continue; }
+                var kind = String(it.kind === null || it.kind === undefined ? "" : it.kind);
+                if(kind === "bp"){
+                    out.push({kind: "bp",
+                              name: String(it.name === null || it.name === undefined ? "" : it.name),
+                              code: String(it.code === null || it.code === undefined ? "" : it.code),
+                              desc: String(it.desc === null || it.desc === undefined ? "" : it.desc)});
+                }else if(kind === "console"){
+                    out.push({kind: "console",
+                              cmd: String(it.cmd === null || it.cmd === undefined ? "" : it.cmd)});
+                }
+            }
+            return out;
+        }
+        function chatIntentLine(it){
+            if(it.kind === "bp"){
+                var nm = chatStrip(String(it.name));
+                if(nm === ""){ nm = "(未命名)"; }
+                return "· 写蓝图库「" + nm + "」（" + String(String(it.code).length) + " 字符的蓝图码）";
+            }
+            // v0.23.1 ①：控制台已经不是聊天命令了 —— F8 那个是 JS 控制台
+            var c = String(it.cmd);
+            var lines = (c === "") ? 0 : c.split("\n").length;
+            var prev = chatFlat(c);
+            if(prev.length > 60){ prev = prev.substring(0, 60) + "…"; }
+            return "· 控制台 JS（" + String(lines) + " 行）：" + prev;
+        }
+        function chatIntentText(list){
+            var a = [], i;
+            for(i = 0; i < list.length; i++){ a.push(chatIntentLine(list[i])); }
+            return "模型请求执行 " + String(list.length) + " 个动作：" + "\n" + a.join("\n")
+                   + "\n\n蓝图会写进蓝图库（可以再删）；控制台代码在游戏内那个 F8 JavaScript 控制台里执行，"
+                   + "能直接改存档，看清楚再点确认。";
+        }
+        function chatTakeIntents(chat){
+            var list = chatIntentList(chat);
+            if(list.length === 0){ return 0; }
+            var key = "", rounds = 0, cid = "";
+            try{
+                cid = String(chat.id === null || chat.id === undefined ? "" : chat.id);
+                rounds = Number(chat.rounds || 0);
+            }catch(ek){ }
+            key = cid + "#" + String(rounds) + "#" + String(list.length);
+            if(CHAT_INTENT.key === key){ return 0; }
+            CHAT_INTENT.key = key;
+            CHAT_INTENT.shown = list.length;
+            // 无头（Vars.ui 为 null）：只记账，不弹窗、不执行
+            if(Vars.ui === null || Vars.ui === undefined){ return -1; }
+            try{
+                Vars.ui.showConfirm("MAI · 执行动作", chatIntentText(list), function(){ chatRunIntents(list); });
+                return list.length;
+            }catch(e){
+                log("intent confirm failed: " + e);
+                return -1;
+            }
+        }
+        function chatRunBp(it){
+            var name = chatStrip(String(it.name || ""));
+            var code = chatStrip(String(it.code || ""));
+            var desc = chatStrip(String(it.desc || ""));
+            if(name === ""){ name = "MAI 蓝图"; }
+            if(name.length > 40){ name = name.substring(0, 40); }
+            if(code === ""){ return "· 蓝图「" + name + "」→ 跳过：蓝图码是空的"; }
+            var s = null;
+            try{ s = Packages.mindustry.game.Schematics.readBase64(code); }
+            catch(e){
+                var why = String(e);
+                if(why.length > 90){ why = why.substring(0, 90) + "…"; }
+                return "· 蓝图「" + name + "」→ 失败：不是有效的蓝图码（" + why + "）";
+            }
+            if(s === null || s === undefined){ return "· 蓝图「" + name + "」→ 失败：解析结果为空"; }
+            try{ s.tags.put("name", name); }catch(e2){ }
+            if(desc !== ""){ try{ s.tags.put("description", desc.substring(0, 200)); }catch(e3){ } }
+            try{
+                Vars.schematics.add(s);
+                try{ s.save(); }catch(e4){ }
+                return "· 蓝图「" + name + "」→ 已写进蓝图库（" + String(s.width) + "×" + String(s.height) + "）";
+            }catch(e5){
+                var why2 = String(e5);
+                if(why2.length > 90){ why2 = why2.substring(0, 90) + "…"; }
+                return "· 蓝图「" + name + "」→ 失败：" + why2;
+            }
+        }
+        function chatRunConsole(it){
+            var code = chatTrimCode(String(it.cmd === null || it.cmd === undefined ? "" : it.cmd));
+            if(code === ""){ return "· 控制台代码：空的，跳过"; }
+            // v0.23.1 ①：用户 m05372「我说的是 f8 调出的控制台」。那个控制台是 **JavaScript** 控制台：
+            // ConsoleFragment.java:193-209 把输入拼在 injectConsoleVariables() 后面丢给
+            // mods.getScripts().runConsole(...)。这里走同一条路，玩家看到的就和手敲一样。
+            // 真以 '/' 开头的仍然当服务器聊天命令处理（两件事，不混）。
+            if(code.charAt(0) === "/"){ return chatRunChatCommand(code); }
+            var pre = "", out = "";
+            try{
+                var cf = (Vars.ui === null || Vars.ui === undefined) ? null : Vars.ui.consolefrag;
+                if(cf !== null && cf !== undefined){ pre = String(cf.injectConsoleVariables()); }
+            }catch(e0){ pre = ""; }
+            try{
+                var res = Vars.mods.getScripts().runConsole(pre + code);
+                out = String(res === null || res === undefined ? "" : res);
+            }catch(e){
+                var why = String(e);
+                if(why.length > 200){ why = why.substring(0, 200) + "…"; }
+                return "· 控制台 JS → 出错：" + why;
+            }
+            var flat = chatFlat(out);
+            if(flat.length > 300){ flat = flat.substring(0, 300) + "…"; }
+            if(flat === ""){ return "· 控制台 JS → 执行完了（没有返回值）"; }
+            return "· 控制台 JS → " + flat;
+        }
+        // '/' 开头：服务器聊天命令（联机发给服务端、单机走本机命令处理器）
+        function chatRunChatCommand(raw){
+            var cmd = chatStrip(String(raw === null || raw === undefined ? "" : raw));
+            if(cmd.length > 0 && cmd.charAt(0) === "/"){ cmd = cmd.substring(1); }
+            if(cmd === ""){ return "· 聊天命令：空的，跳过"; }
+            var full = "/" + cmd;
+            try{
+                if(netActive() === true){
+                    Packages.mindustry.gen.Call.sendChatMessage(full);
+                    return "· 聊天命令 " + full + " → 已发给服务器";
+                }
+            }catch(e1){ }
+            try{
+                var ns = Vars.netServer;
+                if(ns === null || ns === undefined){ return "· 聊天命令 " + full + " → 没有可用的命令处理器"; }
+                ns.clientCommands.handleMessage(full, Vars.player);
+                return "· 聊天命令 " + full + " → 已在本机执行";
+            }catch(e2){
+                var why = String(e2);
+                if(why.length > 90){ why = why.substring(0, 90) + "…"; }
+                return "· 聊天命令 " + full + " → 失败：" + why;
+            }
+        }
+        function chatRunIntents(list){
+            var res = [], i;
+            for(i = 0; i < list.length; i++){
+                var it = list[i], one = "";
+                try{ one = (it.kind === "bp") ? chatRunBp(it) : chatRunConsole(it); }
+                catch(e){ one = "· 动作失败：" + String(e); }
+                res.push(one);
+            }
+            var text = res.join("\n");
+            try{ log("[intent] " + chatFlat(text)); }catch(e2){ }
+            try{
+                if(Vars.ui !== null && Vars.ui !== undefined){ Vars.ui.showText("MAI · 动作结果", text); }
+                else{ hint(chatFlat(text)); }
+            }catch(e3){ hint(chatFlat(text)); }
+            try{ chatRefreshAll(); }catch(e4){ }
+            return text;
+        }
+        // Shift 按住 = 换行（真机输入法的 Shift 也在 Core.input 里，见 TextArea.java 的写法）
+        function chatShiftDown(){
+            try{
+                var kc = Packages.arc.input.KeyCode, inp = Core.input;
+                return (inp.keyDown(kc.shiftLeft) || inp.keyDown(kc.shiftRight));
+            }catch(e){ return false; }
+        }
         // ------------------------------------------------ 共用外壳（v0.21.0 档1 / v0.21.1 合并入口）
         // 用户 m04199：把「工作区快照」并进对话窗；m04211「先做档1」；m04334「合并控制面板和MAI对话，
         // 合并之后要加个逻辑标志并染上主题色」。
         // 所以「控制面板」（= 工作区）与「MAI 对话」现在是同一个窗口的两种模式，统一叫「逻辑助手」，
         // 标题行最左是主题色小方块（逻辑标志），当前模式那一段是灰的、点不动。
         // 为什么要共用：v0.19.4 / v0.19.6 / v0.20.2 三次排版事故都是「同一段初始化抄了两份、只改了一份」。
-        var DUAL = { last: "chat" };
+        var DUAL = { last: "chat", dockRight: true };
         var LOGIC_NAME = "逻辑助手";
         function dualModes(){ return ["chat", "ws"]; }
         function dualModeCn(mode){ if(mode === "ws"){ return "工作区"; } return "对话"; }
@@ -5187,6 +6015,29 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             try{ d.closeOnBack(); }catch(e0d){ }
             dualChrome(d, mode);
             return d;
+        }
+        // v0.23.0（用户 m04691 ⑤「对话框贴右侧」）：对话窗和工作区窗都贴屏幕右边、竖直居中。
+        // Dialog.show() 内部会 centerWindow() 把窗口摆中间（Dialog.java:519 → :327），所以 show 之后自己
+        // setPosition，并在每帧的 update 钩子里维持（真机第一帧前 getWidth() 还是 0，那次先跳过）。
+        function dualDockRight(d){
+            if(DUAL.dockRight !== true){ return false; }
+            if(d === null || d === undefined){ return false; }
+            var sc = null, sw = 0, sh = 0, dw = 0, dh = 0;
+            try{ sc = d.getScene(); }catch(e0){ sc = null; }
+            if(sc === null || sc === undefined){ return false; }
+            try{ sw = Number(sc.getWidth()); sh = Number(sc.getHeight()); }catch(e1){ return false; }
+            try{ dw = Number(d.getWidth()); dh = Number(d.getHeight()); }catch(e2){ return false; }
+            if(!(sw > 0) || !(sh > 0) || !(dw > 0) || !(dh > 0)){ return false; }
+            var x = Math.round(sw - dw - 12), y = Math.round((sh - dh) / 2);
+            if(x < 0){ x = 0; }
+            if(y < 0){ y = 0; }
+            // 差不到 1px 就别动，免得每帧都触发 layout
+            if(Math.abs(Number(d.x) - x) <= 0.5 && Math.abs(Number(d.y) - y) <= 0.5){ return true; }
+            try{ d.setPosition(x, y); return true; }catch(e3){ return false; }
+        }
+        function dualDock(){
+            try{ if(CHAT_UI.open === true){ dualDockRight(CHAT_UI.d); } }catch(a){ }
+            try{ if(wsUI.open === true){ dualDockRight(wsUI.d); } }catch(b){ }
         }
         // v0.21.1（用户 m04334「合并控制面板和MAI对话」）：对外只剩一个入口，按上次用的模式打开。
         function openLogicAssistant(){
@@ -5247,16 +6098,32 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             var inRow = wsT();
             inRow.left();
             try{
-                tf = new Packages.arc.scene.ui.TextField();
-                tf.setMessageText("说点什么（纯文本；模型可以调用工具）");
+                // v0.23.0（用户 m04691 ⑤「回车发送、Shift+回车换行」）：多行输入必须用 TextArea
+                // —— 它 initialize() 里把 writeEnters 打开（TextArea.java:42），TextField 那条是关的，
+                // 回车根本进不到文本里。监听器在字符插入**之后**才被调用（TextField.java:1137），
+                // 所以能看见刚插进去的 '\n'：Shift 不在就把它抠掉再发送，Shift 按住就留着当换行。
+                tf = new Packages.arc.scene.ui.TextArea("");
+                tf.setMessageText("说点什么（回车发送，Shift+回车换行；模型可以调用工具）");
                 tf.setMaxLength(2000);
+                try{ tf.setPrefRows(2); }catch(ep){ }
                 tf.setTextFieldListener(function(field, c){
+                    var ch = (c === null || c === undefined) ? "" : String(c);
                     try{ CHAT_UI.text = String(field.getText()); }catch(e4){ CHAT_UI.text = ""; }
+                    if(ch !== "\n" && ch !== "\r"){ return; }
+                    if(chatShiftDown() === true){ return; }
+                    // 回车：先把刚插进去的换行从文本里去掉（发送失败时字还留在框里，不会丢）
+                    var t = String(CHAT_UI.text);
+                    if(t.length > 0 && (t.charAt(t.length - 1) === "\n" || t.charAt(t.length - 1) === "\r")){
+                        t = t.substring(0, t.length - 1);
+                    }
+                    CHAT_UI.text = t;
+                    try{ if(String(field.getText()) !== t){ field.setText(t); } }catch(e6){ }
+                    chatSend();
                 });
                 // 160 = 「发送」110 + padRight 6 + 外壳左右 pad 3+3 + 余量；cell 宽度用 availW-6（扣掉外壳 3+3），
-                // 这样输入行和上面两栏一样宽，不会把对话框顶宽。
-                inRow.add(tf).width(Math.max(220, Number(plan.availW) - 160)).height(34).padRight(6).left();
-                inRow.button("发送", function(){ chatSend(); }).width(110).height(34).ellipsis(true).left();
+                // 这样输入行和上面两栏一样宽，不会把对话框顶宽。高 56 = 两行，能看出换行。
+                inRow.add(tf).width(Math.max(220, Number(plan.availW) - 160)).height(56).padRight(6).left();
+                inRow.button("发送", function(){ chatSend(); }).width(110).height(56).ellipsis(true).left();
             }catch(e5){ log("chat input row failed: " + e5); }
             // v0.20.3：输入行与 body 行同处 cont 的唯一一条列（都 974），不会再产生第二列把窗口顶宽。
             d.cont.add(inRow).width(Math.max(200, Number(plan.availW) - 6)).left().row();
@@ -5289,6 +6156,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             });
             d.closeOnBack();
             d.show();
+            // v0.23.0 ⑤：show() 会把窗口摆中间，这里按「贴右」再摆一次（宽高还没算好时 dualDock 每帧补）。
+            dualDockRight(d);
             // 窗口要等第一帧 validate 之后才有真实宽高，交给 Trigger.draw 里的 chatGeomDump 打一次日志。
             CHAT_UI.needGeom = true;
             chatRefreshAll();
@@ -5570,6 +6439,88 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             catch(ew){ return []; }
         }
 
+        // ------------------------------------------------ 玩家 / 服务器快照（v0.23.0）
+        // 用户 m04691 ③：模型要能读玩家和这一局的状态。和 wsDigest 一样，每轮随 POST /chat 一起发，
+        // 侧车存成 chat['player'] / chat['server']，用 player_info / server_info 两个只读工具读。
+        // 无头（Vars.player / Vars.state 为 null）返回 null，请求里就不带这两个字段。
+        function playerDigest(){
+            try{
+                var p = Vars.player;
+                if(p === null || p === undefined){ return null; }
+                var o = {name: "", admin: false, x: 0, y: 0, team: "", unit: "", hp: 0, maxHp: 0, dead: false};
+                try{
+                    var nm = p.name;
+                    if(typeof nm === "function"){ nm = p.name(); }
+                    o.name = String(nm === null || nm === undefined ? "" : nm);
+                }catch(e1){ }
+                try{ o.admin = (p.admin === true); }catch(e2){ }
+                // 世界坐标 / 8 = 格子坐标（Vars.tilesize 在 v160 是 8，这里跟着 wsProc / 选框一致）
+                try{ o.x = Math.round(Number(p.x) / 8); o.y = Math.round(Number(p.y) / 8); }catch(e3){ }
+                try{
+                    var tm = p.team();
+                    if(tm !== null && tm !== undefined){ o.team = String(tm.name === null || tm.name === undefined ? tm : tm.name); }
+                }catch(e4){ }
+                var u = null;
+                try{ u = p.unit(); }catch(e5){ u = null; }
+                if(u !== null && u !== undefined){
+                    try{ o.unit = String(u.type === null || u.type === undefined ? "" : u.type.name); }catch(e6){ }
+                    try{ o.hp = Math.round(Number(u.health)); }catch(e7){ }
+                    try{ o.maxHp = Math.round(Number(u.maxHealth)); }catch(e8){ }
+                    if(!(o.maxHp > 0)){ try{ o.maxHp = Math.round(Number(u.type.health)); }catch(e9){ } }
+                    try{ o.dead = (u.dead === true || Number(u.health) <= 0); }catch(e10){ }
+                }
+                return o;
+            }catch(e){ return null; }
+        }
+        function serverDigest(){
+            try{
+                var st = Vars.state;
+                if(st === null || st === undefined){ return null; }
+                var o = {map: "", w: 0, h: 0, wave: 0, tps: 0, players: 0, enemies: 0, net: false, pvp: false, mode: ""};
+                try{
+                    var mp = st.map;
+                    if(mp !== null && mp !== undefined){
+                        try{ o.map = String(mp.name() === null ? "" : mp.name()); }catch(n1){ }
+                        o.w = Number(mp.width); o.h = Number(mp.height);
+                    }
+                }catch(e1){ }
+                if(o.map === ""){ try{ o.map = wsMapName(); }catch(n2){ } }
+                try{ o.wave = Number(st.wave); }catch(e2){ }
+                try{ o.tps = Number(st.serverTps); }catch(e3){ }
+                try{ o.enemies = Number(st.enemies); }catch(e4){ }
+                try{ o.players = Number(Packages.mindustry.gen.Groups.player.size()); }catch(e5){ }
+                try{ o.net = (netActive() === true); }catch(e6){ }
+                try{
+                    var rl = st.rules;
+                    if(rl !== null && rl !== undefined){
+                        o.pvp = (rl.pvp === true);
+                        o.mode = String(rl.mode === null || rl.mode === undefined ? "" : rl.mode.name());
+                    }
+                }catch(e7){ }
+                return o;
+            }catch(e){ return null; }
+        }
+        // v0.23.1 ①：把这台游戏里 F8 控制台能用的东西整理成一份清单，随每轮请求发给侧车。
+        // 侧车的 console_help 就靠它告诉模型「本局有哪些 api.* 函数」—— 之前模型只能瞎猜命令名。
+        function consoleDigest(){
+            try{
+                var o = {version: MOD_VERSION, f8: false,
+                         vars: ["unit", "player", "team", "core", "items", "build", "cursor", "cursorUnit"],
+                         api: []};
+                var keys = [], k;
+                for(k in api){
+                    try{ keys.push(String(k)); }catch(e1){ }
+                }
+                keys.sort();
+                if(keys.length > 90){ keys = keys.slice(0, 90); }
+                o.api = keys;
+                try{
+                    var cf = (Vars.ui === null || Vars.ui === undefined) ? null : Vars.ui.consolefrag;
+                    o.f8 = (cf !== null && cf !== undefined);
+                }catch(e2){ o.f8 = false; }
+                return o;
+            }catch(e){ return null; }
+        }
         function wsLastJobText(ws){
             var list = ws.jobs || [], i;
             for(i = list.length - 1; i >= 0; i--){
@@ -6893,6 +7844,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             d.hidden(function(){ wsUI.open = false; wsUI.ghosts = []; wsUI.needGeom = false; });
             d.closeOnBack();
             d.show();
+            dualDockRight(d);   // v0.23.0 ⑤：工作区窗也贴右（真机第一帧前宽高是 0，由 dualDock 每帧补）
             renderWorkspaces(listT, d);
             return "workspace dialog";
         }
@@ -7115,7 +8067,8 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                  + "    " + linkLine(res)
                  + (st.truncates ? "    ⚠ 超过 1000 条会被截断" : "")
                  + (st.linkKnown === false
-                    ? "\n（链接表未知：读不到 LogicDialog.executor，本次跳过链接槽判据）"
+                    ? ("\n（链接表未知：" + linkWhy + "，本次跳过链接槽判据）"
+                       + (logicDiag === "" ? "" : ("\n（自检：" + logicDiag + "）")))
                     : "");
         }
 
@@ -7270,6 +8223,58 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
             return res;
         }
 
+        // v0.24.0（用户 m06693「画工作区做无线超那个」结果不好）：选区快照只说明框里有什么，
+        // 而 ubind / ulocate / radar 看的是整张图 ——「从核心取料送给穹顶」的材料全在框外，
+        // 模型只能猜「做不到」。这里补三样全图事实：离选区最近的核心（带库存）、我方单位、地图规则。
+        // 无头环境 / 联机早期这些集合可能不存在，三层 try 兜底，宁可少给也不抛。
+        var GLOBAL_MAX_CORES = 4;
+        function globalFacts(x1, y1, x2, y2){
+            var out = {cores: [], units: {total: 0, types: {}}, rules: {}};
+            var cx = (Number(x1) + Number(x2)) / 2, cy = (Number(y1) + Number(y2)) / 2;
+            if(!(cx === cx)){ cx = 0; }
+            if(!(cy === cy)){ cy = 0; }
+            var myTeam = null;
+            try{
+                var pl = localPlayer();
+                if(pl !== null && pl !== undefined){ myTeam = String(pl.team().name); }
+            }catch(eM){ myTeam = null; }
+            var itemsSeq = null;
+            try{ itemsSeq = Vars.content.items(); }catch(eI){ itemsSeq = null; }
+            try{
+                var found = [];
+                var put = function(g){
+                    try{
+                        var nm = String(g.block.name);
+                        if(nm.indexOf("core") !== 0){ return; }
+                        var stk = stockOf(g.items, itemsSeq);
+                        found.push({x: Number(g.tile.x), y: Number(g.tile.y), block: nm, items: stk.v,
+                                    d: Math.abs(Number(g.tile.x) - cx) + Math.abs(Number(g.tile.y) - cy)});
+                    }catch(eC){ }
+                };
+                var builds = Packages.mindustry.gen.Groups.build;
+                if(builds !== null && builds !== undefined && typeof builds.each === "function"){ builds.each(put); }
+                found.sort(function(a, b){ return a.d - b.d; });
+                for(var i = 0; i < found.length && i < GLOBAL_MAX_CORES; i++){
+                    out.cores.push({x: found[i].x, y: found[i].y, block: found[i].block, items: found[i].items});
+                }
+            }catch(eB){ }
+            try{
+                var units = Packages.mindustry.gen.Groups.unit;
+                var add = function(u){
+                    try{
+                        if(u === null || u === undefined){ return; }
+                        if(myTeam !== null && String(u.team.name) !== myTeam){ return; }
+                        var tn = String(u.type.name);
+                        out.units.total += 1;
+                        out.units.types[tn] = (out.units.types[tn] || 0) + 1;
+                    }catch(eU){ }
+                };
+                if(units !== null && units !== undefined && typeof units.each === "function"){ units.each(add); }
+            }catch(eT){ }
+            try{ out.rules.logicUnitControl = (Vars.state.rules.logicUnitControl === true); }
+            catch(eR){ out.rules.logicUnitControl = null; }
+            return out;
+        }
         function regionSnapshot(x1, y1, x2, y2){
             var W = Vars.world;
             var mapName = "?";
@@ -7353,7 +8358,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     grid: grid, processors: procs,
                     blocks: blocks, items: items, liquids: liquids, stores: stores,
                     units: {total: us.total, types: us.types, teams: us.teams},
-                    enemies: enemies};
+                    enemies: enemies, globals: globalFacts(x1, y1, x2, y2)};
         }
 
         // Last non-empty line of a diagnostic, trimmed: the user needs one line
@@ -8590,6 +9595,219 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
         };
 
 
+        // v0.23.0：对话 agent 五项（markdown→标签 / 玩家·服务器快照 / 意图队列 / 贴右停靠）的自检口。
+        // 只跑纯函数：真机才有的 Vars.ui / Vars.player / Vars.schematics 都走 null 分支。
+        api.maiChatActionsProbe = function(){
+            var notes = [], counts = "";
+            try{
+                // ---- ① markdown → 标签
+                var md = mdToTags("# 标题" + "\n" + "**粗** 和 *斜* 和 `代码`" + "\n- 甲" + "\n1. 一"
+                                  + "\n> 引用" + "\n" + "```" + "\nset n 1" + "\n" + "```" + "\n[a](http://x/y)");
+                if(md.indexOf("[accent]标题[]") < 0){ notes.push("md-h1"); }
+                if(md.indexOf("[accent]粗[]") < 0){ notes.push("md-bold"); }
+                if(md.indexOf("[lightgray]斜[]") < 0){ notes.push("md-italic"); }
+                if(md.indexOf("[lightgray]代码[]") < 0){ notes.push("md-code"); }
+                if(md.indexOf("• 甲") < 0){ notes.push("md-list"); }
+                if(md.indexOf("1. 一") < 0){ notes.push("md-ol"); }
+                if(md.indexOf("[gray]│ 引用[]") < 0){ notes.push("md-quote"); }
+                if(md.indexOf("[lightgray]  set n 1") < 0){ notes.push("md-fence"); }
+                if(md.indexOf("a (http://x/y)") < 0){ notes.push("md-link"); }
+                // 字面量方括号：只把 '[' 双写（arc 的转义就是这么写的），自己生成的标签不能被改
+                var esc = mdToTags("a [b] c");
+                if(esc !== "a [[b] c"){ notes.push("md-escape:" + esc); }
+                if(esc.indexOf("\u0001") >= 0){ notes.push("md-placeholder-left"); }
+                if(mdToTags("纯文本 abc") !== "纯文本 abc"){ notes.push("md-plain"); }
+                if(mdToTags(null) !== ""){ notes.push("md-null"); }
+                // ---- ② 意图队列
+                var fake = {id: "c1", rounds: 3, intents: [
+                    {kind: "bp", name: "甲", code: "bXNjaABxxxx", desc: "说明"},
+                    {kind: "console", cmd: "pause on"},
+                    {kind: "nope"}
+                ]};
+                var list = chatIntentList(fake);
+                if(list.length !== 2){ notes.push("intent-count:" + String(list.length)); }
+                if(list.length === 2){
+                    if(list[0].kind !== "bp" || list[0].name !== "甲"){ notes.push("intent-bp"); }
+                    if(list[1].kind !== "console" || list[1].cmd !== "pause on"){ notes.push("intent-console"); }
+                }
+                var itxt = chatIntentText(list);
+                if(itxt.indexOf("写蓝图库「甲」") < 0){ notes.push("intent-text-bp"); }
+                if(itxt.indexOf("pause on") < 0){ notes.push("intent-text-cmd"); }
+                if(itxt.indexOf("控制台 JS") < 0){ notes.push("intent-text-js"); }
+                if(chatIntentList(null).length !== 0){ notes.push("intent-null"); }
+                // 无 Vars.ui：只记账不弹窗（返回 -1 表示没弹），同一个 id#rounds#count 只记一次
+                var took = chatTakeIntents(fake);
+                var took2 = chatTakeIntents(fake);
+                if(took2 !== 0){ notes.push("intent-dedup:" + String(took2)); }
+                // 非法蓝图码必须回一句人话而不是抛
+                var bp = chatRunBp({kind: "bp", name: "坏", code: "not-a-blueprint"});
+                if(typeof bp !== "string" || bp.indexOf("坏") < 0){ notes.push("bp-guard"); }
+                // ---- ③ 玩家 / 服务器快照：无头要么 null、要么对象，绝不许抛
+                var pd = playerDigest(), sd = serverDigest();
+                if(pd !== null && typeof pd !== "object"){ notes.push("player-digest"); }
+                if(sd !== null && typeof sd !== "object"){ notes.push("server-digest"); }
+                // ---- ④ 贴右停靠：没有窗口时必须安静地什么都不做
+                if(DUAL.dockRight !== true){ notes.push("dock-flag"); }
+                if(dualDockRight(null) !== false){ notes.push("dock-null"); }
+                dualDock();
+                counts = "md=" + String(md.split("\n").length)
+                       + " esc=" + esc
+                       + " intents=" + String(list.length) + " took=" + String(took)
+                       + " player=" + String(pd === null ? "null" : "obj")
+                       + " server=" + String(sd === null ? "null" : "obj")
+                       + " dock=" + String(DUAL.dockRight);
+            }catch(e){
+                notes.push("throw:" + e);
+            }
+            return notes.length === 0 ? ("ok " + counts) : ("bad " + notes.join(","));
+        };
+        // v0.23.1 自检：代码块切段 / 转义 / 控制台清单 / 控制台执行分流
+        api.maiChatCopyProbe = function(){
+            var notes = [], counts = "";
+            try{
+                var t1 = "a\n```mlog\nx = 1\ny = 2\n```\nb";
+                var s1 = chatSegments(t1);
+                if(s1.length !== 3){ notes.push("segs=" + String(s1.length)); }
+                if(s1.length === 3){
+                    if(s1[0].kind !== "text"){ notes.push("k0=" + String(s1[0].kind)); }
+                    if(s1[1].kind !== "code"){ notes.push("k1=" + String(s1[1].kind)); }
+                    if(s1[1].lang !== "mlog"){ notes.push("lang=" + String(s1[1].lang)); }
+                    if(s1[1].text !== "x = 1\ny = 2\n"){ notes.push("code=" + chatFlat(s1[1].text)); }
+                    if(s1[2].kind !== "text"){ notes.push("k2=" + String(s1[2].kind)); }
+                }
+                var s2 = chatSegments("```\nno lang\n```");
+                if(s2.length !== 1 || s2[0].kind !== "code" || s2[0].lang !== ""){ notes.push("segs2=" + String(s2.length)); }
+                var s3 = chatSegments("```mlog\nunclosed = 1");
+                if(s3.length !== 1 || s3[0].kind !== "code" || s3[0].text !== "unclosed = 1"){ notes.push("segs3"); }
+                if(chatSegments("").length !== 0){ notes.push("empty"); }
+                if(chatEsc("a[b]c") !== "a[[b]c"){ notes.push("esc=" + chatEsc("a[b]c")); }
+                if(chatTrimCode("  x  ") !== "x"){ notes.push("trim"); }
+                var cd = consoleDigest();
+                if(cd === null){ notes.push("console=null"); }
+                else if(Number(cd.api.length) < 5){ notes.push("api=" + String(cd.api.length)); }
+                var il = chatIntentLine({kind: "console", cmd: "line1\nline2"});
+                if(String(il).indexOf("控制台 JS（2 行）") < 0){ notes.push("iline=" + String(il)); }
+                var rc = String(chatRunConsole({kind: "console", cmd: "1 + 1"}));
+                if(rc.indexOf("控制台 JS") < 0){ notes.push("runconsole=" + rc); }
+                var rk = String(chatRunConsole({kind: "console", cmd: "/pause on"}));
+                if(rk.indexOf("聊天命令") < 0){ notes.push("runchat=" + rk); }
+                counts = "segs=3 lang=mlog esc=" + chatEsc("a[b]c")
+                         + " api=" + String(cd === null ? 0 : Number(cd.api.length))
+                         + " f8=" + String(cd === null ? false : cd.f8);
+            }catch(e){
+                notes.push("throw:" + e);
+            }
+            return notes.length === 0 ? ("ok " + counts) : ("bad " + notes.join(","));
+        };
+        // v0.23.2：审查栏说「读不到处理器」时的一键诊断 —— 在 F8 控制台里敲
+        // maiReviewDiag()，把返回的这一串发给开发者就能定位是「编辑器没绑处理器」
+        // 还是「绑了但链接表读不出来」，以及 MindustryX 那套替换后的类名/字段名。
+        api.maiReviewDiag = function(){
+            try{ return reviewDiagText(); }catch(e){ return "diag failed: " + e; }
+        };
+        api.maiReviewDiagProbe = function(){
+            var notes = [], d = "";
+            try{
+                d = String(reviewDiagText());
+                if(d.indexOf("ui=") !== 0){ notes.push("diag=" + chatFlat(d)); }
+                if(d.indexOf("links=") < 0){ notes.push("nolinks"); }
+                if(linkWhy === "" || linkWhy === null){ notes.push("nowhy"); }
+            }catch(e){ notes.push("throw:" + e); }
+            return notes.length === 0 ? ("ok " + d) : ("bad " + notes.join(","));
+        };
+
+        // v0.23.3：审查栏改成「本地快检 + 侧车全量」两套之后的纯函数自检。
+        // 只断言不依赖界面/侧车的东西：空白判定、计数、行文、来源判定、诊断串。
+        api.maiReview2Probe = function(){
+            var notes = [], counts = "";
+            try{
+                if(reviewBlank("") !== true){ notes.push("blank1"); }
+                if(reviewBlank(" \r\n\t") !== true){ notes.push("blank2"); }
+                if(reviewBlank("x") !== false){ notes.push("blank3"); }
+                var c = reviewCountList([{sev: "ERR"}, {sev: "WARN"}, {sev: "INFO"}, {sev: "WARN"}]);
+                if(c.err !== 1 || c.warn !== 2 || c.info !== 1 || c.total !== 4){
+                    notes.push("cnt=" + c.err + "/" + c.warn + "/" + c.info + "/" + c.total);
+                }
+                if(reviewCount(null).total !== 0){ notes.push("cntnull"); }
+                var ls = reviewLinesFor([{line: 3, sev: "ERR", rid: "jump-range", code: "jump-range", msg: "boom"}]);
+                if(ls.length !== 1){ notes.push("lines=" + String(ls.length)); }
+                else if(String(ls[0]).indexOf("L3 ERR") !== 0){ notes.push("linetext=" + String(ls[0])); }
+                if(reviewFullFor("nope") !== null){ notes.push("fullfor"); }
+                var src = reviewCodeSrc();
+                if(src === null || src.src === undefined){ notes.push("src"); }
+                var d = String(reviewDiagText());
+                if(d.indexOf(" src=") < 0 || d.indexOf(" stmts=") < 0 || d.indexOf(" full=") < 0){
+                    notes.push("diag=" + chatFlat(d));
+                }
+                paintReviewBar();
+                counts = "blank=3 cnt=" + c.err + "/" + c.warn + "/" + c.info + "/" + c.total
+                       + " lines=1 src=" + String(src === null || src.src === undefined ? "null" : src.src);
+            }catch(e){
+                notes.push("throw:" + e);
+            }
+            return notes.length === 0 ? ("ok " + counts) : ("bad " + notes.join(","));
+        };
+
+        // v0.23.5 自检：箭头的数据源（本地 + 全量合并）、按行取最坏级别、栏里的 L# 行号。
+        api.maiArrow2Probe = function(){
+            var notes = [], out = "";
+            try{
+                var loc = [{line: 3, sev: "WARN", rid: "R1", msg: "w"}];
+                var ful = [{line: 3, sev: "ERR", rid: "R2", msg: "e"}, {line: 7, sev: "INFO", rid: "R3", msg: "i"}];
+                var feed = reviewArrowFindings(loc, ful);
+                if(feed.findings.length !== 3){ notes.push("feed=" + feed.findings.length); }
+                if(reviewArrowFindings(null, null).findings.length !== 0){ notes.push("feednull"); }
+                var ll = reviewLineList(loc, ful);
+                if(ll.length !== 2){ notes.push("lines=" + ll.length); }
+                else{
+                    if(ll[0].line !== 3 || ll[0].sev !== "ERR"){ notes.push("worst=" + ll[0].line + ll[0].sev); }
+                    if(ll[1].line !== 7){ notes.push("order=" + ll[1].line); }
+                }
+                if(reviewLineList(null, undefined).length !== 0){ notes.push("linesnull"); }
+                if(ARROW !== 22){ notes.push("size=" + ARROW); }
+                if(syncArrows(null, null, null) !== 0){ notes.push("nocanvas"); }
+                if(arrowStale(null, {}) !== false){ notes.push("stale-null"); }
+                var fakeA = {id: 1}, fakeB = {id: 2};
+                if(arrowStale(fakeA, fakeA) !== false){ notes.push("stale-same"); }
+                if(arrowStale(fakeA, fakeB) !== true){ notes.push("stale-diff"); }
+                if(arrowStale(fakeA, null) !== false){ notes.push("stale-cur-null"); }
+                out = "lines=2 worst=ERR size=" + ARROW + " stale=1";
+            }catch(e){ notes.push("throw:" + e); }
+            return notes.length === 0 ? ("ok " + out) : ("bad " + notes.join(","));
+        };
+
+        // v0.24.0 自检：全图事实段 + blocked 卡片文案（只跑纯函数，无头也能过）。
+        api.maiTaskFactsProbe = function(){
+            var bad = [];
+            function chk(cond, why){ if(cond !== true){ bad.push(why); } }
+            var gf = null;
+            try{ gf = globalFacts(0, 0, 10, 10); }catch(e0){ bad.push("globalFacts threw"); }
+            chk(gf !== null && gf !== undefined, "globalFacts null");
+            if(gf !== null && gf !== undefined){
+                chk(gf.cores !== null && gf.cores !== undefined, "no cores");
+                chk(gf.units !== null && gf.units !== undefined, "no units");
+                chk(gf.rules !== null && gf.rules !== undefined, "no rules");
+            }
+            chk(stateCn("blocked") === "做不了", "stateCn blocked");
+            chk(JOB_TERMINAL.blocked === 1, "blocked not terminal");
+            var d1 = jobChatText({state: "done", statements: 8, bytes_len: 1234, findings: []});
+            chk(d1.status === "Done", "done status");
+            chk(String(d1.info).indexOf("1234 字节") >= 0, "done info without bytes");
+            var d2 = jobChatText({state: "done", statements: 2, bytes_len: 10, needs_links: ["core"], findings: []});
+            chk(String(d2.info).indexOf("需要接线 core") >= 0, "done info without needs_links");
+            var d3 = jobChatText({state: "blocked", explanation: "地图上没有星辉",
+                                  blocked: {reason: "地图上没有星辉", need: ["flare"]}});
+            chk(d3.status === "Blocked", "blocked status");
+            chk(String(d3.info).indexOf("地图上没有星辉") >= 0, "blocked info without reason");
+            chk(String(d3.info).indexOf("要 flare") >= 0, "blocked info without need");
+            var d4 = jobChatText({state: "rejected", findings: [{sev: "ERR", msg: "x"}]});
+            chk(String(d4.info).indexOf("静态检查有 ERR") >= 0, "rejected info");
+            var d5 = jobChatText({state: "failed", explanation: "侧车没应答"});
+            chk(d5.status === "Failed", "failed status");
+            if(bad.length > 0){ return "bad " + bad.join("; "); }
+            return "ok cores=" + gf.cores.length + " units=" + gf.units.total + " blocked=1 bytes=1234 need=1"
+                 + " states=" + d1.status + "/" + d3.status + "/" + d4.status + "/" + d5.status;
+        };
         // 挂到脚本作用域（控制台里能直接敲），并读回自检
         // v0.14.4（用户 2026-11-01）：「sidcar应该随游戏启动而启动」——不再等 F3 才拉；
         // 这里先试一次，ClientLoadEvent（进游戏）再补一次，两次都幂等。
@@ -8634,6 +9852,7 @@ var KEY_LIST    = ["f2"];      // F2：全图处理器清单（v0.7.0；剩下�
                     jobButtonsClick(); // v0.14.2：框右下角的「查看 / 取消」两个按钮
                     blueprintTick(); // v0.16.1：蓝图页入口、「详细」页续聊、蓝图对话轮询
                     chatTick();     // v0.20.0：自由对话这一轮还没答完就 900ms 轮询一次
+                    dualDock();     // v0.23.0 ⑤：对话框贴右 → 每帧校一次位置（版本/分辨率的保险）
                     // 「设置 → Mlog辅助」这一栏只在 Vars.ui 建好之后能注册。脚本加载时
                     // UI 往往还没建（真机日志里是在 ClientLoadEvent 前），所以这里补一次
                     // 有界重试：每 60 帧试一次、最多 600 次（≈10 s @60fps），成功即停。

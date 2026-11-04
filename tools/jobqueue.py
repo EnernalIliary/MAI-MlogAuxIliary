@@ -124,8 +124,8 @@ def _replace(src, dst):
     os.replace(src, dst)
 
 
-STATES = ('queued', 'running', 'done', 'rejected', 'failed', 'cancelled')
-TERMINAL = ('done', 'rejected', 'failed', 'cancelled')
+STATES = ('queued', 'running', 'done', 'blocked', 'rejected', 'failed', 'cancelled')
+TERMINAL = ('done', 'blocked', 'rejected', 'failed', 'cancelled')
 
 #: analyzer WARNs that a machine write must not accept (see the module docstring)
 FATAL_RIDS = ('link-name-not-bound',)
@@ -298,7 +298,8 @@ def normalize(body):
             'links': links, 'origin': origin, 'ipt': ipt, 'workspace': ws,
             'batch': batch,
             'attempts': 0, 'findings': [], 'code': '', 'explanation': '',
-            'assumptions': [], 'template': None, 'params': {}, 'bytes_b64': ''}
+            'assumptions': [], 'template': None, 'params': {}, 'bytes_b64': '',
+            'bytes_len': 0, 'needs_links': []}
 
 
 def gate(code, links, ipt=2):
@@ -323,6 +324,37 @@ def gate(code, links, ipt=2):
         res['ok'] = False
     res['fatal'] = fatal
     return res
+
+
+#: v0.24.0: words that mean the sentence is about units/items moving around.
+_UNIT_WORDS = ('单位', '星辉', '飞行', '运输', '搬运', '运货', '供给', '供料', '补给',
+               '取料', '装料', '卸料', '送料', '喂料', 'unit', 'flare', 'supply',
+               'transport', 'deliver', 'carry', 'haul', 'refill', 'mine', 'ore')
+_UNIT_FUNCS = ('ubind', 'ucontrol', 'itemtake', 'itemdrop', 'ulocate')
+
+
+def coverage_findings(desc, code):
+    """WARN when the sentence is about units/items but the program never touches them.
+
+    The analyzer only sees the program, so a job that answered 'carry items from the
+    core into the dome' with a program that merely read the dome's stock passed every
+    static check: 0 ERR, 0 WARN, and the player still got something that does not do
+    what was asked.  Only the pair (sentence, program) can catch that.
+    """
+    text = str(desc or '').lower()
+    if not text:
+        return []
+    hits = [w for w in _UNIT_WORDS if w in text]
+    if not hits:
+        return []
+    for line in str(code or '').splitlines():
+        parts = line.strip().split(' ')
+        if parts and parts[0].lower() in _UNIT_FUNCS:
+            return []
+    return [{'sev': 'WARN', 'rid': 'task-needs-unit-control', 'line': 0,
+             'msg': ('the task is about units/items (%s) but the program never uses '
+                     'ubind/ucontrol/itemTake/itemDrop/ulocate -- it probably does not '
+                     'do what was asked' % ', '.join(hits[:3]))}]
 
 
 class Store:
@@ -703,6 +735,15 @@ class Queue:
                                                           job['attempts']))
                     return
                 continue
+            blk = out.get('blocked')
+            if isinstance(blk, dict) and str(blk.get('reason') or '').strip() \
+                    and not (isinstance(out.get('code'), str) and out['code'].strip()):
+                # v0.24.0: 'this cannot be done here' is an answer, not a failure -- the
+                # mod asks the player about it instead of writing a program nobody wanted.
+                self._set(jid, state='blocked', blocked=dict(blk), findings=[],
+                          explanation=str(blk.get('reason') or ''),
+                          finished=int(time.time() * 1000))
+                return
             res = self._materialize(job, out, jid)
             self._set(jid, findings=res['findings'], explanation=res.get('explanation') or '',
                       assumptions=res.get('assumptions') or [],
@@ -712,6 +753,8 @@ class Queue:
                 self._set(jid, state='done', code=res['code'],
                           sig=res.get('sig') or '',
                           bytes_b64=res.get('bytes_b64') or '',
+                          bytes_len=res.get('bytes_len') or 0,
+                          needs_links=list(res.get('needs_links') or []),
                           statements=res.get('statements') or 0,
                           finished=int(time.time() * 1000))
                 return
@@ -752,18 +795,25 @@ class Queue:
                 have = L._link_names(links)
                 missing = [str(n) for n in (out.get('needs_links') or []) if str(n) not in have]
                 if missing:
-                    bad = {'sev': 'ERR', 'rid': 'link-name-not-bound', 'line': 0,
-                           'fatal': True,
-                           'msg': 'the reply needs link(s) this processor does not have: '
-                                  + ', '.join(missing)}
-                    res['findings'].append(bad)
-                    res['fatal'].append(bad)
-                    res['errors'] += 1
-                    res['ok'] = False
+                    # v0.24.0: asking for a block this processor is not wired to is a
+                    # request to the player, not a refusal.  Refusing it left the model
+                    # no legal way to say 'I need a core' and it quietly degraded into a
+                    # program that passed the gate and did nothing (the unit-transport
+                    # job of 2026-11-03 did exactly that).  The code still has to pass
+                    # the link check on its own.
+                    note = {'sev': 'WARN', 'rid': 'needs-unwired-link', 'line': 0,
+                            'msg': 'the reply asks for block(s) this processor is not wired'
+                                   ' to: ' + ', '.join(missing)
+                                   + ' (wire them and ask again) -- this program was'
+                                     ' accepted without them'}
+                    res['findings'].append(note)
+                    res['needs_links'] = missing
+            res['findings'].extend(coverage_findings(job.get('desc'), code))
             payload = L.msch.build_logic_data(code, L._relative_links(links or [], job.get('origin')))
             res.update({'code': code,
                         'sig': sig,
                         'bytes_b64': base64.b64encode(payload).decode('ascii'),
+                        'bytes_len': len(payload),
                         'explanation': out.get('explanation') or '',
                         'assumptions': out.get('assumptions') or []})
             return res
@@ -792,6 +842,12 @@ class Queue:
         cres['assumptions'] = out.get('assumptions') or []
         cres['template'] = tid
         cres['params'] = out.get('params') or {}
+        cres['findings'].extend(coverage_findings(job.get('desc'), cres.get('code') or ''))
+        if cres.get('bytes_b64') and not cres.get('bytes_len'):
+            try:
+                cres['bytes_len'] = len(base64.b64decode(cres['bytes_b64']))
+            except (TypeError, ValueError):
+                cres['bytes_len'] = 0
         return cres
 
 

@@ -2,6 +2,9 @@
   "bool-param-constantly-zero": [
     "bool-param-zero.mlog"
   ],
+  "constant-null-guard": [
+    "const-null-guard.mlog"
+  ],
   "numeric-jump": [
     "const-null-guard.mlog",
     "counter-op.mlog",
@@ -14,9 +17,6 @@
     "reactor-guard-slow.mlog",
     "reactor-guard-unknown.mlog",
     "virus-logic-clean.mlog"
-  ],
-  "constant-null-guard": [
-    "const-null-guard.mlog"
   ],
   "unreachable-statement": [
     "counter-op.mlog",
@@ -113,6 +113,10 @@
   "sensor-not-a-property": [
     "sensor-not-property.mlog"
   ],
+  "slot-not-in-enum": [
+    "slot-enum.mlog",
+    "under-arity-radar.mlog"
+  ],
   "spin-deadlock": [
     "spin.mlog"
   ],
@@ -136,15 +140,11 @@
   "ulocate-outxy-discarded": [
     "ulocate-outxy.mlog"
   ],
-  "virus-logic": [
-    "virus-logic.mlog"
-  ],
-  "slot-not-in-enum": [
-    "slot-enum.mlog",
-    "under-arity-radar.mlog"
-  ],
   "under-arity": [
     "under-arity-control.mlog",
     "under-arity-radar.mlog"
+  ],
+  "virus-logic": [
+    "virus-logic.mlog"
   ]
 }

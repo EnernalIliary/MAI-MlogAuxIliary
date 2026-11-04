@@ -527,7 +527,7 @@ FAKE = {
 }
 
 JLINKS = [{'name': 'container1', 'x': 1, 'y': 2}, {'name': 'message1', 'x': 3, 'y': 4}]
-JTERMINAL = ('done', 'rejected', 'failed', 'cancelled')
+JTERMINAL = ('done', 'blocked', 'rejected', 'failed', 'cancelled')
 
 
 def wait_job(srv, jid, want=JTERMINAL, timeout=60):
@@ -957,18 +957,68 @@ def test_provider():
              'the repair attempt was not told what was wrong')
         checks += 1
 
-        # 6. needs_links that the processor does not have is a refusal by itself
-        prov4 = MP.ScriptedProvider([{'code': 'set n 0\nend',
-                                     'needs_links': ['container9']}] * 3)
+        # 6. v0.24.0（m06693）：asking for an unwired link is NOT a refusal any more --
+        #    the player wiring it is the normal way out, so the job is accepted with a WARN.
+        prov4 = MP.ScriptedProvider([{'code': 'set n 0',
+                                     'needs_links': ['container9']}])
         q4 = jobqueue.Queue(jobqueue.Store(os.path.join(tmp, 'q4')), provider=prov4)
         j4, _ = q4.enqueue({'desc': 'scripted needs', 'links': LINKS})
         q4.drain()
         got4 = q4.get(j4['id'])
-        need(got4['state'] == 'rejected' and got4['code'] == '',
-             'a reply asking for a link it does not own was accepted: %r' % (got4,))
-        need(any('container9' in f.get('msg', '') for f in got4['findings']),
-             'the needs_links refusal is not explained: %r' % (got4['findings'],))
+        need(got4['state'] == 'done' and got4['code'].strip() != '',
+             'a reply asking for an unwired link was refused: %r' % (got4['state'],))
+        need(got4.get('needs_links') == ['container9'],
+             'the accepted reply dropped the links it asked for: %r' % (got4.get('needs_links'),))
+        need(any(f.get('rid') == 'needs-unwired-link' and f['sev'] == 'WARN'
+                 for f in got4['findings']),
+             'the unwired link was not reported as a warning: %r' % (got4['findings'],))
         checks += 1
+
+        # 6b. v0.24.0: a blocked reply is a first-class answer, not a failure
+        prov5 = MP.ScriptedProvider([{'blocked': {'reason': 'the map has no flare',
+                                                  'need': ['flare'],
+                                                  'instead': 'wire a dome'}}])
+        q5 = jobqueue.Queue(jobqueue.Store(os.path.join(tmp, 'qb')), provider=prov5)
+        j5, _ = q5.enqueue({'desc': 'scripted blocked', 'links': LINKS})
+        q5.drain()
+        got5 = q5.get(j5['id'])
+        need(got5['state'] == 'blocked' and got5['code'] == '',
+             'a blocked reply did not become a blocked job: %r' % (got5['state'],))
+        need((got5.get('blocked') or {}).get('reason') == 'the map has no flare'
+             and (got5.get('blocked') or {}).get('need') == ['flare'],
+             'the blocked job lost its reason/need: %r' % (got5.get('blocked'),))
+        checks += 1
+
+        # 6c. v0.24.0: the prompt must carry the map-wide facts and the blocked way out
+        p6 = MP.build_prompt({'desc': 'supply the dome with a flare', 'links': LINKS, 'ipt': 2,
+                              'snapshot': {'globals': {
+                                  'cores': [{'x': 1, 'y': 2, 'block': 'core-shard',
+                                             'items': {'copper': 300}}],
+                                  'units': {'total': 2, 'types': {'flare': 2}},
+                                  'rules': {'logicUnitControl': True}}}})
+        need('cores on the map' in p6 and 'core-shard' in p6,
+             'the prompt lost the map-wide core list')
+        need('your units on the map' in p6 and 'flare x2' in p6,
+             'the prompt lost the map-wide unit list')
+        need('logicUnitControl=True' in p6,
+             'the prompt lost the map rules')
+        need('A blocked reply is answered by the player' in p6,
+             'the prompt no longer offers the blocked way out')
+        need(len(MP.EXAMPLES) >= 11,
+             'the worked-example library shrank to %d' % len(MP.EXAMPLES))
+        checks += 1
+
+        # 6d. v0.24.0: a unit/item task answered without a single unit instruction is flagged
+        cov = jobqueue.coverage_findings('control a flare and supply the dome from the core',
+                                        'sensor n dome1 @copper' + chr(10) + 'end')
+        need(len(cov) == 1 and cov[0]['rid'] == 'task-needs-unit-control'
+             and cov[0]['sev'] == 'WARN',
+             'the unit-task coverage check did not fire: %r' % (cov,))
+        need(jobqueue.coverage_findings('turn the conveyor off',
+                                        'control enabled conveyor1 false') == [],
+             'a plain block task was flagged as a unit task')
+        checks += 1
+
 
         # 7. the llm provider is opt-in: no endpoint and no replay is a usage error
         r = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT / 'tools' / 'logicd.py'),
@@ -1515,15 +1565,21 @@ class _ChatStub:
     a prompt that already carries a tool result gets the final sentence. That also
     makes it usable for the continuation check, where the same endpoint must answer
     a second turn of the same chat.
+
+    v0.23.0 adds `calls`: a list of (name, arguments) pairs, so one turn can make
+    several tool calls (the intent queue only shows its 4-item cap that way). The
+    n-th call is whatever the prompt already carries n tool results for; once the
+    list is used up the final sentence goes out.
     """
 
-    def __init__(self, tool=None, args=None, reply=None):
+    def __init__(self, tool=None, args=None, reply=None, calls=None):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         self.posts = []
         self.delay = 0.6          # long enough that the next POST sees state=running
         self.tool = tool or 'mlog_check'
         self.args = args if args is not None else '{"code":"jump 0 always"}'
         self.reply = reply or '检查完了：没有问题。'
+        self.calls = [list(one) for one in calls] if calls else None
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -1541,7 +1597,22 @@ class _ChatStub:
                 if outer.delay:
                     time.sleep(outer.delay)
                 messages = body.get('messages') or []
-                if any(m.get('role') == 'tool' for m in messages):
+                # how many tool results this turn already collected: only the ones
+                # after the last user line, so the counter also works on turn two
+                done = 0
+                for m in reversed(messages):
+                    if m.get('role') == 'user':
+                        break
+                    if m.get('role') == 'tool':
+                        done += 1
+                if outer.calls is not None and done < len(outer.calls):
+                    name, cargs = outer.calls[done]
+                    message = {'role': 'assistant', 'content': '',
+                               'tool_calls': [{'id': 'call_%d' % done, 'type': 'function',
+                                               'function': {'name': name,
+                                                            'arguments': cargs}}]}
+                elif outer.calls is not None or any(m.get('role') == 'tool'
+                                                    for m in messages):
                     message = {'role': 'assistant', 'content': outer.reply}
                 else:
                     message = {'role': 'assistant', 'content': '',
@@ -1749,7 +1820,257 @@ def test_chats():
         finally:
             ws_stub.close()
 
-        # 9. g) delete is final; a missing id is 400, an unknown one 404
+        # 9. v0.23.0：玩家/服务器快照只读；蓝图与控制台命令只「登记意图」，等玩家确认。
+        #    每轮最多 4 条意图，code 20000 / command 300 字符，超了要截断并说清楚。
+        it_stub = _ChatStub(calls=[
+            ('player_info', '{}'),
+            ('server_info', '{}'),
+            ('bp_add', json.dumps({'name': '补料线', 'code': 'b64PAYLOAD',
+                                   'desc': '按铜量补料'}, ensure_ascii=False)),
+            ('console_run', json.dumps({'command': 'status'}, ensure_ascii=False)),
+            ('bp_add', json.dumps({'name': '补料三', 'code': 'b64X', 'desc': ''},
+                                  ensure_ascii=False)),
+        ], reply='登记好了：你在窗口里点确认才会生效。')
+        try:
+            code, doc = srv.post('/llm', {'url': it_stub.chat_url, 'model': 'stub'})
+            need(code == 200, 'pointing the sidecar at the intent stub answered %r' % (code,))
+            code, doc = srv.post('/chat', {
+                'text': '把补料线写进蓝图库，再跑个 status',
+                'player': {'name': '玩家A', 'uuid': 'u-1', 'x': 12, 'y': 34, 'hp': 100,
+                           'team': 'sharded', 'items': {'copper': 12}},
+                'server': {'map': '区域', 'wave': 7, 'players': 2, 'tps': 59.5,
+                           'mode': 'survival'},
+            })
+            need(code == 200 and doc.get('state') == 'running',
+                 'POST /chat with player/server answered %r %r' % (code, doc))
+            icid = doc.get('id')
+            chat = wait_idle(icid)
+            need(not chat.get('error'), 'the intent run ended badly: %r' % (chat.get('error'),))
+            rows = [m for m in chat.get('messages') or [] if m.get('role') == 'tool']
+            names = [str(m.get('name')) for m in rows]
+            bodies = [str(m.get('content') or '') for m in rows]
+            need(names == ['player_info', 'server_info', 'bp_add', 'console_run', 'bp_add'],
+                 'the intent tools were not called in order: %r' % (names,))
+
+            # a) 快照读得回来（只读），GET /chat 里也留着
+            need('玩家A' in bodies[0] and 'u-1' in bodies[0] and 'sharded' in bodies[0],
+                 'player_info did not read the player snapshot: %r' % (bodies[0][:200],))
+            need('区域' in bodies[1] and 'wave' in bodies[1] and '59.5' in bodies[1],
+                 'server_info did not read the server snapshot: %r' % (bodies[1][:200],))
+            need((chat.get('player') or {}).get('name') == '玩家A'
+                 and (chat.get('server') or {}).get('wave') == 7,
+                 'GET /chat does not keep the player/server snapshots: %r / %r'
+                 % (chat.get('player'), chat.get('server')))
+            need('bp_add' in json.dumps(it_stub.posts[0].get('tools') or [],
+                                        ensure_ascii=False),
+                 'the v0.23.0 tools were not offered to the model')
+            checks += 1
+
+            # b) 意图落进 chat['intents']，字段跟模组侧钉死的一致
+            intents = chat.get('intents')
+            need(isinstance(intents, list) and len(intents) == 3,
+                 'the intent queue did not collect the three intents: %r' % (intents,))
+            first = intents[0] if intents else {}
+            need(first.get('kind') == 'bp' and first.get('name') == '补料线'
+                 and first.get('code') == 'b64PAYLOAD' and first.get('desc') == '按铜量补料',
+                 'the bp intent is not the agreed shape: %r' % (first,))
+            second = intents[1] if len(intents) > 1 else {}
+            need(second.get('kind') == 'console' and second.get('cmd') == 'status',
+                 'the console intent is not the agreed shape: %r' % (second,))
+            need('已登记' in bodies[2] and '补料线' in bodies[2] and '1 行代码' in bodies[2],
+                 'bp_add did not report name and line count: %r' % (bodies[2][:200],))
+            need('已登记' in bodies[3] and 'status' in bodies[3],
+                 'console_run did not echo the command: %r' % (bodies[3][:200],))
+            checks += 1
+
+            # c) 每轮 4 条封顶：下一轮连登记 5 条，第 5 条被丢掉并说清楚
+            cap_stub = _ChatStub(calls=[
+                ('bp_add', json.dumps({'name': '蓝图%d' % i, 'code': 'b64_%d' % i,
+                                       'desc': ''}, ensure_ascii=False))
+                for i in range(5)
+            ], reply='四条够了，第五条等下一轮。')
+            try:
+                code, doc = srv.post('/llm', {'url': cap_stub.chat_url, 'model': 'stub'})
+                need(code == 200, 'pointing at the cap stub answered %r' % (code,))
+                code, doc = srv.post('/chat', {'id': icid, 'text': '把五条蓝图都登记了'})
+                need(code == 200, 'the cap turn was refused: %r %r' % (code, doc))
+                chat = wait_idle(icid)
+                need(not chat.get('error'),
+                     'the cap run ended badly: %r' % (chat.get('error'),))
+                intents = chat.get('intents') or []
+                need(len(intents) == 4 and [i.get('name') for i in intents]
+                     == ['蓝图0', '蓝图1', '蓝图2', '蓝图3'],
+                     'the intent queue did not stop at four: %r' % (intents,))
+                bodies = [str(m.get('content') or '') for m in chat.get('messages') or []
+                          if m.get('role') == 'tool'][-5:]
+                need('4 条' in bodies[4],
+                     'the fifth intent was not refused with the cap: %r' % (bodies[4][:200],))
+                logged = (chat.get('last') or {}).get('tools') or []
+                need(len(logged) == 5 and logged[4].get('ok') is False,
+                     'last.tools does not show the refused call: %r' % (logged,))
+                checks += 1
+            finally:
+                cap_stub.close()
+
+            # d) 列表窗口只报条数和布尔，不搬原始快照
+            code, doc = srv.get('/chats?limit=50')
+            brief = [c for c in doc.get('chats') or [] if c.get('id') == icid]
+            need(len(brief) == 1, 'the intent chat is missing from GET /chats: %r' % (doc,))
+            b = brief[0]
+            need(b.get('intents') == 4 and b.get('has_player') is True
+                 and b.get('has_server') is True,
+                 'the brief does not summarise intents/snapshots: %r' % (b,))
+            need('player' not in b and 'server' not in b,
+                 'the brief carries the raw snapshots: %r' % (b,))
+            checks += 1
+
+            # e) v0.23.1：控制台是一段 JS（可多行），超 2000 字符被截断并说清楚
+            long_js = 'var a = 1;\n' * 200          # 2200 字符、200 行
+            big_stub = _ChatStub(calls=[
+                ('bp_add', json.dumps({'name': '超大蓝图', 'code': 'b' * 20050,
+                                       'desc': 'd'}, ensure_ascii=False)),
+                ('console_run', json.dumps({'command': long_js}, ensure_ascii=False)),
+            ], reply='截断的那种也登记了。')
+            try:
+                code, doc = srv.post('/llm', {'url': big_stub.chat_url, 'model': 'stub'})
+                need(code == 200, 'pointing at the truncation stub answered %r' % (code,))
+                code, doc = srv.post('/chat', {'id': icid, 'text': '再登记两条超长的'})
+                need(code == 200, 'the truncation turn was refused: %r %r' % (code, doc))
+                chat = wait_idle(icid)
+                need(not chat.get('error'),
+                     'the truncation run ended badly: %r' % (chat.get('error'),))
+                rows = [m for m in chat.get('messages') or []
+                        if m.get('role') == 'tool'][-2:]
+                bodies = [str(m.get('content') or '') for m in rows]
+                intents = chat.get('intents') or []
+                need(len(intents) == 2,
+                     'the truncation turn registered %r intents' % (len(intents),))
+                need(len(intents[0].get('code') or '') == 20000
+                     and len(intents[1].get('cmd') or '') == 2000,
+                     'the oversized intent was not cut: code=%d cmd=%d'
+                     % (len(intents[0].get('code') or ''),
+                        len(intents[1].get('cmd') or '')))
+                need('\n' in (intents[1].get('cmd') or '')
+                     and intents[1].get('cmd') == long_js[:2000],
+                     'the console code did not keep its multi-line body: %r'
+                     % (intents[1].get('cmd')[:60],))
+                need('截断' in bodies[0] and '截断' in bodies[1],
+                     'truncation was not said out loud: %r / %r'
+                     % (bodies[0][-80:], bodies[1][-80:]))
+                checks += 1
+            finally:
+                big_stub.close()
+
+            # f) 下一轮 start 把意图队列清零；这轮没给快照就回人话，不抛
+            none_stub = _ChatStub(calls=[('player_info', '{}'), ('server_info', '{}')],
+                                  reply='这轮没有玩家和服务器数据。')
+            try:
+                code, doc = srv.post('/llm', {'url': none_stub.chat_url, 'model': 'stub'})
+                need(code == 200, 'pointing at the empty-snapshot stub answered %r' % (code,))
+                code, doc = srv.post('/chat', {'id': icid, 'text': '这轮有玩家数据吗',
+                                               'player': None, 'server': None})
+                need(code == 200,
+                     'the empty-snapshot turn was refused: %r %r' % (code, doc))
+                chat = wait_idle(icid)
+                need(not chat.get('error'),
+                     'the empty-snapshot run ended badly: %r' % (chat.get('error'),))
+                rows = [m for m in chat.get('messages') or []
+                        if m.get('role') == 'tool'][-2:]
+                bodies = [str(m.get('content') or '') for m in rows]
+                need('没有提供' in bodies[0] and '没有提供' in bodies[1],
+                     'a missing snapshot did not get a plain answer: %r / %r'
+                     % (bodies[0][:120], bodies[1][:120]))
+                need(chat.get('intents') == [],
+                     'the intent queue was not reset on the next turn: %r'
+                     % (chat.get('intents'),))
+                need((chat.get('player') or {}) == {} and (chat.get('server') or {}) == {},
+                     'a null snapshot was kept as data: %r / %r'
+                     % (chat.get('player'), chat.get('server')))
+                code, doc = srv.get('/chats?limit=50')
+                brief = [c for c in doc.get('chats') or [] if c.get('id') == icid]
+                need(len(brief) == 1 and brief[0].get('has_player') is False
+                     and brief[0].get('has_server') is False,
+                     'the brief still reports snapshots for a turn that sent none: %r'
+                     % (brief,))
+                checks += 1
+            finally:
+                none_stub.close()
+
+            # g) v0.23.1：F8 控制台是 JavaScript 控制台 —— console_help 有清单列 api.*，
+            #    没清单就直说「没收到」，绝不编 api.xxx
+            help_stub = _ChatStub(calls=[('console_help', '{}')], reply='F8 是 JS 控制台。')
+            try:
+                code, doc = srv.post('/llm', {'url': help_stub.chat_url, 'model': 'stub'})
+                need(code == 200, 'pointing at the console_help stub answered %r' % (code,))
+                code, doc = srv.post('/chat', {
+                    'text': 'F8 控制台里能干什么',
+                    'console': {'version': 'v160.7', 'vars': ['unit', 'core'],
+                                'api': ['give', 'spawnUnit', 'fastForward']},
+                })
+                need(code == 200, 'the console_help turn was refused: %r %r' % (code, doc))
+                hcid = doc.get('id')
+                chat = wait_idle(hcid)
+                need(not chat.get('error'),
+                     'the console_help run ended badly: %r' % (chat.get('error'),))
+                rows = [m for m in chat.get('messages') or [] if m.get('role') == 'tool']
+                body = str((rows[0] if rows else {}).get('content') or '')
+                need('F8' in body and 'JavaScript' in body and 'cursorUnit' in body
+                     and 'Vars.world' in body,
+                     'console_help does not explain the F8 JS console: %r' % (body[:200],))
+                need('api.give' in body and 'api.spawnUnit' in body and 'v160.7' in body,
+                     'console_help does not list the mod api names: %r' % (body[:200],))
+                need((chat.get('console') or {}).get('api')
+                     == ['give', 'spawnUnit', 'fastForward'],
+                     'GET /chat does not keep the console catalogue: %r'
+                     % (chat.get('console'),))
+                need(chat.get('intents') == [],
+                     'console_help must not register an intent: %r' % (chat.get('intents'),))
+                first = help_stub.posts[0] if help_stub.posts else {}
+                prompt = [m for m in first.get('messages') or []
+                          if m.get('role') == 'system']
+                need(any('F8' in str(m.get('content') or '') for m in prompt),
+                     'the system prompt does not mention the F8 console')
+                need('console_help' in json.dumps(first.get('tools') or [],
+                                                  ensure_ascii=False),
+                     'console_help was not offered to the model')
+                checks += 1
+
+                # 下一轮没给清单（console:null）就必须说「没收到」
+                bare_stub = _ChatStub(calls=[('console_help', '{}')],
+                                      reply='那别乱调。')
+                try:
+                    code, doc = srv.post('/llm', {'url': bare_stub.chat_url, 'model': 'stub'})
+                    need(code == 200, 'pointing at the bare console stub answered %r' % (code,))
+                    code, doc = srv.post('/chat', {'id': hcid, 'text': '那还能用啥',
+                                                   'console': None})
+                    need(code == 200, 'the bare console turn was refused: %r %r' % (code, doc))
+                    chat = wait_idle(hcid)
+                    rows = [m for m in chat.get('messages') or []
+                            if m.get('role') == 'tool']
+                    body = str((rows[-1] if rows else {}).get('content') or '')
+                    need('没收到' in body and 'api.' in body,
+                         'console_help without a catalogue must say so: %r'
+                         % (body[:200],))
+                    code, doc = srv.get('/chats?limit=50')
+                    brief = [c for c in doc.get('chats') or [] if c.get('id') == hcid]
+                    need(len(brief) == 1 and brief[0].get('has_console') is False,
+                         'the brief still reports a console catalogue: %r' % (brief,))
+                    checks += 1
+                finally:
+                    bare_stub.close()
+                code, doc = srv.delete('/chat?id=' + hcid)
+                need(code == 200 and doc.get('deleted') is True,
+                     'deleting the console chat: %r %r' % (code, doc))
+            finally:
+                help_stub.close()
+
+            code, doc = srv.delete('/chat?id=' + icid)
+            need(code == 200 and doc.get('deleted') is True,
+                 'deleting the intent chat: %r %r' % (code, doc))
+        finally:
+            it_stub.close()
+
+        # 10. g) delete is final; a missing id is 400, an unknown one 404
         code, doc = srv.delete('/chat?id=' + cid)
         need(code == 200 and doc.get('deleted') is True, 'DELETE /chat: %r %r' % (code, doc))
         code, doc = srv.get('/chat?id=' + cid)
